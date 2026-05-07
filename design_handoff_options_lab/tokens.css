@@ -1,0 +1,34 @@
+/* Liquid Glass design tokens — shared across all 3 directions */
+
+:root {
+  /* Type stack — Apple system fonts with web fallbacks */
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter Display", "Inter", system-ui, sans-serif;
+  --font-text: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  /* Diverging P&L palette (oklch — colorblind-friendlier than red/green) */
+  --pnl-up:    oklch(0.78 0.14 75);   /* warm amber */
+  --pnl-up-2:  oklch(0.86 0.10 80);
+  --pnl-down:  oklch(0.62 0.12 220);  /* cool teal-blue */
+  --pnl-down-2:oklch(0.74 0.09 215);
+  --pnl-zero:  oklch(0.92 0.005 250);
+
+  /* Status accent (single brand accent, used sparingly) */
+  --accent:    oklch(0.66 0.16 250); /* serene blue */
+}
+
+/* Tabular figures for any number column */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "cv11" 1;
+}
+.mono { font-family: var(--font-mono); }
+
+/* Subtle striped placeholder — for missing imagery */
+.placeholder-stripe {
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(120,120,135,0.06) 0 8px,
+    rgba(120,120,135,0.12) 8px 16px
+  );
+}
