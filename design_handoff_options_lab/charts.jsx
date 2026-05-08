@@ -375,4 +375,144 @@ function DataQualityPill({ quality }) {
   );
 }
 
-Object.assign(window, { ThetaDecay, IVSmile, POPGauge, ScenarioTimeline, GreeksProfile, PnLDistribution, OIProfile, DataQualityPill });
+// ─────────────────────────────────────────────────────────────────────────────
+// P&L Attribution — first-order decomposition of current P&L vs. a baseline
+// (default baseline: spot=21850, iv=24%) into spot / IV / theta-per-day buckets.
+//
+//   spot impact ≈ Δ * (currentSpot - baseSpot)        (× 50 NTD/pt)
+//   iv impact   ≈ V * (currentIV - baseIV)            (V is per-vol-pt, × 50)
+//   theta /day  ≈ Θ                                   (Θ is per-day, × 50)
+//
+// Renders 3 horizontal diverging bars centered on a 0-line; red = profit, teal = loss.
+function PnLAttribution({ legs, spot, iv, dte, theme = 'dark', height = 150, width = 304, baseSpot = 21850, baseIv = 24, ntdMult = 50 }) {
+  const W = width, H = height, pad = 14;
+  const pg = useMemoM(() => window.portfolioGreeks
+    ? window.portfolioGreeks(legs, spot, iv, dte)
+    : { delta: 0, gamma: 0, theta: 0, vega: 0 }, [legs, spot, iv, dte]);
+  const dSpot = spot - baseSpot;
+  const dIv   = iv   - baseIv;
+  const items = [
+    { key: 'spot',  label: 'Spot Δ',   sub: `${baseSpot.toLocaleString()} → ${spot.toLocaleString()} (${dSpot >= 0 ? '+' : ''}${dSpot})`, value: pg.delta * dSpot * ntdMult },
+    { key: 'iv',    label: 'IV Δ',     sub: `${baseIv}% → ${iv}% (${dIv >= 0 ? '+' : ''}${dIv.toFixed(1)})`, value: pg.vega * dIv * ntdMult },
+    { key: 'theta', label: 'Θ /day',   sub: 'time decay if held 1 day',                                       value: pg.theta * ntdMult },
+  ];
+  const maxAbs = Math.max(...items.map((it) => Math.abs(it.value)), 1);
+  const upColor = '#ef5350', downColor = '#26a69a';
+  const txt = theme === 'dark' ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.5)';
+  const axis = theme === 'dark' ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.10)';
+  const rowH = (H - pad * 2) / items.length;
+  const cx = W / 2;
+  const halfW = (W / 2) - pad;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} style={{ display: 'block' }}>
+      {/* zero line */}
+      <line x1={cx} x2={cx} y1={pad/2} y2={H - pad/2} stroke={axis} strokeDasharray="2 3" />
+      {items.map((it, i) => {
+        const yMid = pad + rowH * i + rowH / 2;
+        const barH = Math.max(8, rowH * 0.35);
+        const w = (Math.abs(it.value) / maxAbs) * halfW;
+        const x = it.value >= 0 ? cx : cx - w;
+        const color = it.value >= 0 ? upColor : downColor;
+        return (
+          <g key={it.key}>
+            {/* bar */}
+            <rect x={x} y={yMid - barH/2} width={Math.max(0, w)} height={barH} fill={color} fillOpacity="0.55" rx="3" />
+            {/* label (left) */}
+            <text x={pad} y={yMid - 4} fontSize="11" fontWeight="600" fill={theme === 'dark' ? '#e8eaef' : '#1d1d22'} fontFamily="ui-monospace, SF Mono, monospace">{it.label}</text>
+            <text x={pad} y={yMid + 9} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace">{it.sub}</text>
+            {/* value (right) */}
+            <text x={W - pad} y={yMid + 4} fontSize="12" fontWeight="700" textAnchor="end" fill={color} fontFamily="ui-monospace, SF Mono, monospace">
+              {it.value >= 0 ? '+' : ''}NT${Math.round(it.value).toLocaleString()}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Max Pain — for each strike K (a hypothetical settlement price), compute total
+// in-the-money payout to all option holders weighted by current OI:
+//
+//   pain(K) = Σ_i [ OI_call(K_i) * max(K - K_i, 0)  +  OI_put(K_i) * max(K_i - K, 0) ]
+//
+// The strike K* that minimises pain(K) = "max pain price" — the level where
+// option WRITERS lose the least, i.e. where market makers theoretically want
+// settlement to land. Classic TXO settlement-day indicator.
+function MaxPain({ spot, contract = 'monthly', theme = 'dark', height = 160, width = 304, ntdMult = 50 }) {
+  const rows = useMemoM(() => (window.genChain ? window.genChain({ spot, contract }) : []), [spot, contract]);
+  const pains = useMemoM(() => rows.map((rk) => {
+    let p = 0;
+    for (const ri of rows) {
+      if (rk.strike > ri.strike) p += ri.call.oi * (rk.strike - ri.strike);
+      if (rk.strike < ri.strike) p += ri.put.oi  * (ri.strike - rk.strike);
+    }
+    return { strike: rk.strike, pain: p, atm: rk.atm };
+  }), [rows]);
+  if (pains.length === 0) return null;
+  const minIdx = pains.reduce((bi, p, i, a) => p.pain < a[bi].pain ? i : bi, 0);
+  const maxPainStrike = pains[minIdx].strike;
+  const W = width, H = height, pad = 16;
+  const maxP = Math.max(...pains.map((p) => p.pain), 1);
+  const barW = Math.max(2, (W - pad * 2) / pains.length - 2);
+  const xat = (i) => pad + (i + 0.5) * ((W - pad * 2) / pains.length);
+  const axis = theme === 'dark' ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.10)';
+  const txt = theme === 'dark' ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.5)';
+  const barColor = theme === 'dark' ? '#5fa3d4' : '#2a5e8c';
+  const minColor = '#f0c068'; // gold for max pain strike
+  const minPainNTD = pains[minIdx].pain * ntdMult;
+  const distance = maxPainStrike - spot;
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6, fontSize: 10, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
+        <span><span style={{ opacity: 0.55 }}>max pain </span><span style={{ color: minColor, fontWeight: 700, fontSize: 12 }}>{maxPainStrike}</span></span>
+        <span><span style={{ opacity: 0.55 }}>vs spot </span><span style={{ color: distance >= 0 ? '#ef5350' : '#26a69a', fontWeight: 600 }}>{distance >= 0 ? '+' : ''}{distance}</span></span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} style={{ display: 'block' }}>
+        {/* baseline */}
+        <line x1={pad} x2={W - pad} y1={H - pad} y2={H - pad} stroke={axis} />
+        {/* spot line */}
+        {(() => {
+          const spotIdx = pains.findIndex((p) => p.strike >= spot);
+          if (spotIdx < 0) return null;
+          const sx = xat(spotIdx);
+          return (
+            <g>
+              <line x1={sx} x2={sx} y1={pad/2} y2={H - pad} stroke={txt} strokeDasharray="3 3" strokeOpacity="0.7" />
+              <text x={sx} y={pad - 2} fontSize="9" fill={txt} textAnchor="middle" fontFamily="ui-monospace, SF Mono, monospace">spot</text>
+            </g>
+          );
+        })()}
+        {/* bars */}
+        {pains.map((p, i) => {
+          const h = (p.pain / maxP) * (H - pad * 2);
+          const x = xat(i) - barW / 2;
+          const isMin = i === minIdx;
+          return (
+            <g key={p.strike}>
+              <rect
+                x={x} y={H - pad - h}
+                width={barW} height={Math.max(h, 0.5)}
+                fill={isMin ? minColor : barColor}
+                fillOpacity={isMin ? 0.85 : 0.55}
+                rx="1.5"
+              />
+              {isMin && (
+                <text x={xat(i)} y={Math.max(pad + 8, H - pad - h - 4)} fontSize="9" fill={minColor} textAnchor="middle" fontWeight="700" fontFamily="ui-monospace, SF Mono, monospace">↓</text>
+              )}
+            </g>
+          );
+        })}
+        {/* x-axis labels: low / atm / high */}
+        <text x={pad} y={H - 3} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace">{pains[0].strike}</text>
+        <text x={W - pad} y={H - 3} fontSize="9" fill={txt} textAnchor="end" fontFamily="ui-monospace, SF Mono, monospace">{pains[pains.length - 1].strike}</text>
+      </svg>
+      <div style={{ marginTop: 4, fontSize: 9, opacity: 0.45, fontFamily: 'ui-monospace, SF Mono, monospace', textAlign: 'right' }}>
+        min pain = NT${Math.round(minPainNTD).toLocaleString()}
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { ThetaDecay, IVSmile, POPGauge, ScenarioTimeline, GreeksProfile, PnLDistribution, OIProfile, DataQualityPill, PnLAttribution, MaxPain });
