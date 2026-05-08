@@ -169,6 +169,148 @@ function legPayoff(leg, S) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Black-Scholes math: standard normal PDF & CDF, per-leg Greeks, portfolio aggregator.
+// Used by GreeksProfile chart and PnLDistribution chart.
+function normalPdf(x) {
+  return Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
+}
+// Abramowitz & Stegun approximation, max error ≈ 1.5e-7.
+function normalCdf(x) {
+  const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741;
+  const a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
+  const sign = x < 0 ? -1 : 1;
+  const ax = Math.abs(x) / Math.SQRT2;
+  const t = 1 / (1 + p * ax);
+  const y = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-ax * ax);
+  return 0.5 * (1 + sign * y);
+}
+
+// Per-leg BS Greeks at spot S, IV (percent), DTE (days), risk-free r (decimal).
+// Returns { delta, gamma, theta, vega } scaled to per-day theta and per-1-vol-pt vega.
+function legGreeks(leg, S, ivPct, dte, r = 0.015) {
+  const { type, side, strike: K, qty } = leg;
+  const T = Math.max(dte / 365, 1e-6);
+  const sigma = Math.max(ivPct / 100, 1e-4);
+  const sigmaRT = sigma * Math.sqrt(T);
+  const d1 = (Math.log(S / K) + (r + sigma * sigma / 2) * T) / sigmaRT;
+  const d2 = d1 - sigmaRT;
+  const sign = side === 'long' ? 1 : -1;
+  const nd1 = normalPdf(d1);
+  let delta, theta;
+  if (type === 'call') {
+    delta = normalCdf(d1);
+    theta = (-S * nd1 * sigma) / (2 * Math.sqrt(T)) - r * K * Math.exp(-r * T) * normalCdf(d2);
+  } else {
+    delta = normalCdf(d1) - 1;
+    theta = (-S * nd1 * sigma) / (2 * Math.sqrt(T)) + r * K * Math.exp(-r * T) * normalCdf(-d2);
+  }
+  const gamma = nd1 / (S * sigmaRT);
+  const vega = S * nd1 * Math.sqrt(T);
+  return {
+    delta: sign * qty * delta,
+    gamma: sign * qty * gamma,
+    theta: sign * qty * theta / 365,   // per day
+    vega:  sign * qty * vega / 100,    // per 1 vol pt
+  };
+}
+
+// Portfolio-level Greeks: sum of per-leg Greeks at given spot/IV/DTE.
+function portfolioGreeks(legs, S, ivPct, dte, r = 0.015) {
+  const acc = { delta: 0, gamma: 0, theta: 0, vega: 0 };
+  for (const l of legs) {
+    const g = legGreeks(l, S, ivPct, dte, r);
+    acc.delta += g.delta; acc.gamma += g.gamma; acc.theta += g.theta; acc.vega += g.vega;
+  }
+  return acc;
+}
+
+// Lognormal P&L distribution at expiry: integrate over standard normal grid.
+// Returns { buckets: [{ pnl, weight }], pop, expectedPnl, p10, p90 }.
+function pnlDistribution(legs, spot, ivPct, dte, opts = {}) {
+  const N = opts.N || 200;          // sample points along z grid
+  const zMax = opts.zMax || 3.5;    // ±zMax std devs
+  const sigma = (ivPct / 100) * Math.sqrt(Math.max(dte, 0.5) / 365);
+  // Lognormal: S_T = spot * exp(sigma * z - sigma^2/2). Drift assumed 0 (martingale under Q).
+  const samples = [];
+  let totalW = 0;
+  for (let i = 0; i < N; i++) {
+    const z = -zMax + (2 * zMax * i) / (N - 1);
+    const ST = spot * Math.exp(sigma * z - sigma * sigma / 2);
+    const pnl = legs.reduce((a, l) => a + legPayoff(l, ST), 0);
+    const w = normalPdf(z);
+    samples.push({ z, ST, pnl, w });
+    totalW += w;
+  }
+  // normalize weights
+  for (const s of samples) s.w /= totalW;
+  // Bucket P&L into histogram bins
+  const pnls = samples.map((s) => s.pnl);
+  const lo = Math.min(...pnls), hi = Math.max(...pnls);
+  const span = Math.max(hi - lo, 1);
+  const nBins = opts.bins || 30;
+  const buckets = Array.from({ length: nBins }, (_, i) => ({
+    pnl: lo + ((i + 0.5) / nBins) * span,
+    pnlLo: lo + (i / nBins) * span,
+    pnlHi: lo + ((i + 1) / nBins) * span,
+    weight: 0,
+  }));
+  for (const s of samples) {
+    let bi = Math.floor(((s.pnl - lo) / span) * nBins);
+    if (bi >= nBins) bi = nBins - 1;
+    if (bi < 0) bi = 0;
+    buckets[bi].weight += s.w;
+  }
+  // Stats
+  let pop = 0, expected = 0;
+  for (const s of samples) {
+    expected += s.pnl * s.w;
+    if (s.pnl >= 0) pop += s.w;
+  }
+  // Sorted samples for percentiles
+  const sorted = samples.slice().sort((a, b) => a.pnl - b.pnl);
+  function pctile(q) {
+    let cum = 0;
+    for (const s of sorted) { cum += s.w; if (cum >= q) return s.pnl; }
+    return sorted[sorted.length - 1].pnl;
+  }
+  return { buckets, pop, expectedPnl: expected, p10: pctile(0.1), p90: pctile(0.9), lo, hi };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Liquidity / data quality scoring.
+// Given chain rows (from genChain) and the user's legs, returns:
+//   { level: 'good' | 'warn' | 'bad', score, badLegs: [strike,...] }
+// "Bad" criteria: no matching strike in chain, OR bid-ask spread / mid > 0.30, OR OI < 50.
+function legLiquidity(leg, rows) {
+  const r = rows.find((rr) => rr.strike === leg.strike);
+  if (!r) return { level: 'bad', reason: 'strike not listed' };
+  const side = leg.type === 'call' ? r.call : r.put;
+  const mid = (side.bid + side.ask) / 2;
+  if (mid <= 0) return { level: 'bad', reason: 'no quote' };
+  const spread = (side.ask - side.bid) / mid;
+  if (side.oi < 50 || spread > 0.30) return { level: 'warn', reason: 'thin / wide spread' };
+  return { level: 'good', reason: 'ok' };
+}
+function dataQuality(legs, rows) {
+  if (!legs || legs.length === 0 || !rows || rows.length === 0) {
+    return { level: 'good', label: 'no legs', bad: 0, warn: 0, total: 0 };
+  }
+  let bad = 0, warn = 0;
+  const badLegs = [];
+  for (const l of legs) {
+    const q = legLiquidity(l, rows);
+    if (q.level === 'bad') { bad++; badLegs.push(l.strike); }
+    else if (q.level === 'warn') warn++;
+  }
+  const total = legs.length;
+  let level = 'good';
+  let label = 'all liquid';
+  if (bad / total >= 0.5) { level = 'bad'; label = 'mostly illiquid'; }
+  else if (bad > 0 || warn / total >= 0.5) { level = 'warn'; label = 'some thin legs'; }
+  return { level, label, bad, warn, total, badLegs };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Cross-section: P&L vs spot at fixed DTE
 function CrossSection({ theme = 'light', height = 110, width = 320, dte = 30 }) {
   const W = width, H = height, pad = 12;
@@ -361,4 +503,9 @@ function Surface3DMount({ theme = 'dark', height = 360, scheme = 'diverging', de
   return <div ref={ref} style={{ width: '100%', height, borderRadius: 14, overflow: 'hidden', position: 'relative' }} />;
 }
 
-Object.assign(window, { Glass, PayoffChart, CrossSection, Slider, LegEditor, NumField, GreekChip, Surface3DMount, STRATEGIES, DEFAULT_LEGS, legPayoff });
+Object.assign(window, {
+  Glass, PayoffChart, CrossSection, Slider, LegEditor, NumField, GreekChip, Surface3DMount,
+  STRATEGIES, DEFAULT_LEGS,
+  legPayoff, normalPdf, normalCdf, legGreeks, portfolioGreeks, pnlDistribution,
+  legLiquidity, dataQuality,
+});

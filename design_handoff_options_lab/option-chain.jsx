@@ -125,3 +125,4 @@ function OptionChain({ spot, contract = 'monthly', onAddLeg, theme = 'dark' }) {
 }
 
 window.OptionChain = OptionChain;
+window.genChain = genChain;
