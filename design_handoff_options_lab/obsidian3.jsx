@@ -190,6 +190,14 @@ function Obsidian3() {
     return m * 50;
   }, [legs, spot]);
 
+  // Live Greeks for the current portfolio (replaces hardcoded chips).
+  const portfolioG = uM(() => portfolioGreeks(legs, spot, iv, dte), [legs, spot, iv, dte]);
+  // Real POP from lognormal P&L distribution (replaces hardcoded 0.68).
+  const popValue = uM(() => pnlDistribution(legs, spot, iv, dte).pop, [legs, spot, iv, dte]);
+  // Data quality of legs against current chain.
+  const chainRows = uM(() => (window.genChain ? window.genChain({ spot, contract: expiry.type }) : []), [spot, expiry.type]);
+  const quality = uM(() => dataQuality(legs, chainRows), [legs, chainRows]);
+
   // Add leg from chain
   function addLegFromChain(leg) {
     setLegs((prev) => [...prev, leg]);
@@ -255,6 +263,7 @@ function Obsidian3() {
           maxProfit={maxProfit} maxLoss={maxLoss}
           hover={hover} setHover={setHover}
           accent={accent} D={D} t={t}
+          portfolioG={portfolioG} popValue={popValue} quality={quality}
         />
       )}
       {workspace === 'chain' && (
@@ -263,6 +272,7 @@ function Obsidian3() {
           onAddLeg={addLegFromChain}
           legs={legs} setLegs={setLegs}
           D={D}
+          quality={quality}
         />
       )}
       {workspace === 'iv' && (
@@ -302,7 +312,7 @@ function Obsidian3() {
 }
 
 // ───────────────────────────────────────────────── CALCULATOR WORKSPACE
-function CalcWorkspace({ legs, setLegs, spot, setSpot, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, hover, setHover, accent, D, t }) {
+function CalcWorkspace({ legs, setLegs, spot, setSpot, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
   const hoverInfo = uM(() => {
     if (!hover) return null;
     const spotAt = (spot * (1 + hover.xn * 0.18)).toFixed(0);
@@ -409,7 +419,7 @@ function CalcWorkspace({ legs, setLegs, spot, setSpot, iv, setIv, dte, sliceFrac
             </div>
             <div style={{ width: 110 }}>
               <div style={{ fontSize: 10, letterSpacing: 0.8, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600, textAlign: 'center' }}>POP</div>
-              <POPGauge theme="dark" size={110} value={0.68} />
+              <POPGauge theme="dark" size={110} value={popValue} />
             </div>
           </div>
         </Glass2>
@@ -419,6 +429,8 @@ function CalcWorkspace({ legs, setLegs, spot, setSpot, iv, setIv, dte, sliceFrac
           {[
             { id: 'payoff', label: 'Payoff' },
             { id: 'cross', label: 'P&L' },
+            { id: 'greeks', label: 'Greeks' },
+            { id: 'dist', label: 'Dist' },
             { id: 'theta', label: 'Theta' },
             { id: 'iv', label: 'IV' },
           ].map((tab) => (
@@ -453,6 +465,18 @@ function CalcWorkspace({ legs, setLegs, spot, setSpot, iv, setIv, dte, sliceFrac
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{dte}d</span>}>P&L vs spot</Eyebrow>
             <CrossSection theme="dark" dte={dte} height={140} width={304} />
           </>)}
+          {view === 'greeks' && (<>
+            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{dte}d · IV {iv}%</span>}>
+              Greeks <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· Δ Γ Θ V vs spot</span>
+            </Eyebrow>
+            <GreeksProfile legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={140} width={304} />
+          </>)}
+          {view === 'dist' && (<>
+            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>at expiry</span>}>
+              P&L distribution <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· lognormal</span>
+            </Eyebrow>
+            <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={140} width={304} />
+          </>)}
           {view === 'theta' && (<>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>θ decay</span>}>Time decay</Eyebrow>
             <ThetaDecay theme="dark" dte={dte} height={140} width={304} />
@@ -465,12 +489,12 @@ function CalcWorkspace({ legs, setLegs, spot, setSpot, iv, setIv, dte, sliceFrac
         </Glass2>
 
         <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow>Greeks</Eyebrow>
+          <Eyebrow right={<DataQualityPill quality={quality} />}>Greeks</Eyebrow>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <GreekChip label="Delta · Δ" value="+0.42" theme="dark" emphasis="up" />
-            <GreekChip label="Gamma · Γ" value="0.018" theme="dark" />
-            <GreekChip label="Theta · Θ" value="−0.12" theme="dark" emphasis="down" />
-            <GreekChip label="Vega · V" value="+0.35" theme="dark" />
+            <GreekChip label="Delta · Δ" value={(portfolioG.delta >= 0 ? '+' : '') + portfolioG.delta.toFixed(2)} theme="dark" emphasis={portfolioG.delta >= 0 ? 'up' : 'down'} />
+            <GreekChip label="Gamma · Γ" value={portfolioG.gamma.toFixed(4)} theme="dark" />
+            <GreekChip label="Theta · Θ" value={(portfolioG.theta >= 0 ? '+' : '') + portfolioG.theta.toFixed(2)} theme="dark" emphasis={portfolioG.theta >= 0 ? 'up' : 'down'} />
+            <GreekChip label="Vega · V" value={(portfolioG.vega >= 0 ? '+' : '') + portfolioG.vega.toFixed(2)} theme="dark" emphasis={portfolioG.vega >= 0 ? 'up' : 'down'} />
           </div>
         </Glass2>
       </div>
@@ -511,7 +535,7 @@ function CalcWorkspace({ legs, setLegs, spot, setSpot, iv, setIv, dte, sliceFrac
 }
 
 // ───────────────────────────────────────────────── CHAIN WORKSPACE
-function ChainWorkspace({ spot, expiry, onAddLeg, legs, setLegs, D }) {
+function ChainWorkspace({ spot, expiry, onAddLeg, legs, setLegs, D, quality }) {
   return (
     <div style={{ position: 'absolute', top: 110, left: 24, right: 24, bottom: 24, zIndex: 5, display: 'flex', gap: D.gap }}>
       <div style={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
@@ -522,7 +546,7 @@ function ChainWorkspace({ spot, expiry, onAddLeg, legs, setLegs, D }) {
           <OptionChain spot={spot} contract={expiry.type} onAddLeg={onAddLeg} theme="dark" />
         </Glass2>
       </div>
-      <div style={{ width: 320, display: 'flex', flexDirection: 'column', gap: D.gap }}>
+      <div style={{ width: 320, display: 'flex', flexDirection: 'column', gap: D.gap, maxHeight: '100%', overflow: 'auto', paddingBottom: 4 }}>
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow right={
             <button style={miniBtn} onClick={() => setLegs([])}>clear</button>
@@ -534,13 +558,17 @@ function ChainWorkspace({ spot, expiry, onAddLeg, legs, setLegs, D }) {
           )}
         </Glass2>
         <Glass2 tone="raised" padding={D.panelPad}>
-          <Eyebrow>Net premium</Eyebrow>
+          <Eyebrow right={<DataQualityPill quality={quality} />}>Net premium</Eyebrow>
           <div className="tnum" style={{ fontSize: 28, fontWeight: 600, fontFamily: 'ui-monospace, SF Mono, monospace', letterSpacing: -0.4 }}>
             NT${Math.round(legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0) * 50).toLocaleString()}
           </div>
           <div style={{ fontSize: 11, opacity: 0.55, marginTop: 6 }}>
             {legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0) >= 0 ? 'credit received' : 'debit paid'}
           </div>
+        </Glass2>
+        <Glass2 tone="panel" padding={D.panelPad}>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>}>OI profile</Eyebrow>
+          <OIProfile spot={spot} contract={expiry.type} theme="dark" maxRows={11} />
         </Glass2>
       </div>
     </div>

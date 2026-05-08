@@ -125,4 +125,254 @@ function ScenarioTimeline({ theme = 'dark', items, current }) {
   );
 }
 
-Object.assign(window, { ThetaDecay, IVSmile, POPGauge, ScenarioTimeline });
+// ─────────────────────────────────────────────────────────────────────────────
+// Greeks Profile — overlays Δ/Γ/Θ/V curves vs. spot.
+// Each greek normalized to its own max-abs in range so all 4 fit one chart;
+// absolute values at current spot shown in side legend.
+function GreeksProfile({ legs, spot, iv = 24, dte = 17, theme = 'dark', height = 160, width = 304 }) {
+  const W = width, H = height, pad = 18;
+  const N = 60;
+  const rangePct = 0.08;
+
+  const series = useMemoM(() => {
+    const xs = [];
+    const dArr = [], gArr = [], tArr = [], vArr = [];
+    const lo = spot * (1 - rangePct), hi = spot * (1 + rangePct);
+    for (let i = 0; i <= N; i++) {
+      const S = lo + (i / N) * (hi - lo);
+      xs.push(S);
+      const g = window.portfolioGreeks(legs, S, iv, dte);
+      dArr.push(g.delta); gArr.push(g.gamma); tArr.push(g.theta); vArr.push(g.vega);
+    }
+    return { xs, delta: dArr, gamma: gArr, theta: tArr, vega: vArr };
+  }, [legs, spot, iv, dte]);
+
+  const colors = {
+    delta: '#ef5350',  // red
+    gamma: '#a78bfa',  // purple
+    theta: '#26a69a',  // teal
+    vega:  '#f0c068',  // gold
+  };
+  const axis = theme === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.10)';
+  const txt = theme === 'dark' ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.50)';
+
+  const x = (i) => pad + (i / N) * (W - pad * 2);
+  function pathFor(arr) {
+    const m = Math.max(...arr.map(Math.abs), 1e-9);
+    const y = (v) => H / 2 - (v / m) * (H / 2 - pad);
+    return arr.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  }
+
+  const spotIdx = Math.round(N / 2);
+  const valAt = (arr) => arr[spotIdx];
+
+  // Format helpers
+  const fmt = {
+    delta: (v) => (v >= 0 ? '+' : '') + v.toFixed(2),
+    gamma: (v) => v.toFixed(4),
+    theta: (v) => (v >= 0 ? '+' : '') + v.toFixed(2),
+    vega:  (v) => (v >= 0 ? '+' : '') + v.toFixed(2),
+  };
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} style={{ display: 'block' }}>
+        {/* zero axis */}
+        <line x1={pad} x2={W - pad} y1={H / 2} y2={H / 2} stroke={axis} strokeDasharray="2 3" />
+        {/* spot vertical */}
+        <line x1={x(spotIdx)} x2={x(spotIdx)} y1={pad / 2} y2={H - pad / 2} stroke={txt} strokeWidth="1" strokeDasharray="3 3" strokeOpacity="0.6" />
+        {/* curves */}
+        <path d={pathFor(series.delta)} fill="none" stroke={colors.delta} strokeWidth="1.8" strokeOpacity="0.95" />
+        <path d={pathFor(series.gamma)} fill="none" stroke={colors.gamma} strokeWidth="1.8" strokeOpacity="0.95" />
+        <path d={pathFor(series.theta)} fill="none" stroke={colors.theta} strokeWidth="1.8" strokeOpacity="0.95" />
+        <path d={pathFor(series.vega)}  fill="none" stroke={colors.vega}  strokeWidth="1.8" strokeOpacity="0.95" />
+        {/* axis labels */}
+        <text x={pad} y={H - 4} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace">{Math.round(series.xs[0])}</text>
+        <text x={W - pad} y={H - 4} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace" textAnchor="end">{Math.round(series.xs[N])}</text>
+        <text x={x(spotIdx)} y={H - 4} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace" textAnchor="middle">spot</text>
+      </svg>
+      {/* current-spot legend */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 6, marginTop: 8 }}>
+        {[
+          { k: 'delta', label: 'Δ', val: fmt.delta(valAt(series.delta)) },
+          { k: 'gamma', label: 'Γ', val: fmt.gamma(valAt(series.gamma)) },
+          { k: 'theta', label: 'Θ', val: fmt.theta(valAt(series.theta)) },
+          { k: 'vega',  label: 'V', val: fmt.vega(valAt(series.vega)) },
+        ].map((it) => (
+          <div key={it.k} style={{
+            padding: '5px 7px', borderRadius: 6,
+            background: 'rgba(255,255,255,0.04)',
+            border: `1px solid ${colors[it.k]}33`,
+          }}>
+            <div style={{ fontSize: 9, opacity: 0.65, fontWeight: 600, color: colors[it.k] }}>{it.label}</div>
+            <div className="tnum" style={{ fontSize: 12, fontFamily: 'ui-monospace, SF Mono, monospace', fontWeight: 600 }}>{it.val}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// P&L Distribution Histogram — lognormal expected-P&L distribution at expiry.
+// Profit buckets red, loss buckets teal. Vertical zero line. Stats row above.
+function PnLDistribution({ legs, spot, iv = 24, dte = 17, theme = 'dark', height = 160, width = 304, ntdMult = 50 }) {
+  const W = width, H = height, pad = 14;
+  const dist = useMemoM(() => window.pnlDistribution(legs, spot, iv, dte), [legs, spot, iv, dte]);
+  const buckets = dist.buckets;
+  const maxW = Math.max(...buckets.map((b) => b.weight), 1e-9);
+  const lo = dist.lo, hi = dist.hi;
+  const span = Math.max(hi - lo, 1);
+  const xat = (pnl) => pad + ((pnl - lo) / span) * (W - pad * 2);
+  const upColor = '#ef5350';
+  const downColor = '#26a69a';
+  const axis = theme === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.10)';
+  const txt = theme === 'dark' ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.50)';
+  const barW = (W - pad * 2) / buckets.length - 1;
+  const popPct = Math.round(dist.pop * 100);
+  const ePnlNTD = Math.round(dist.expectedPnl * ntdMult);
+  const p10NTD = Math.round(dist.p10 * ntdMult);
+  const p90NTD = Math.round(dist.p90 * ntdMult);
+
+  return (
+    <div>
+      {/* stats row */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, fontSize: 10, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
+        <span><span style={{ opacity: 0.55 }}>POP </span><span style={{ color: '#f0c068', fontWeight: 700 }}>{popPct}%</span></span>
+        <span><span style={{ opacity: 0.55 }}>E[P&L] </span><span style={{ color: ePnlNTD >= 0 ? upColor : downColor, fontWeight: 600 }}>{ePnlNTD >= 0 ? '+' : ''}NT${ePnlNTD.toLocaleString()}</span></span>
+        <span><span style={{ opacity: 0.55 }}>P10 </span><span style={{ color: downColor, fontWeight: 600 }}>NT${p10NTD.toLocaleString()}</span></span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} style={{ display: 'block' }}>
+        {/* baseline */}
+        <line x1={pad} x2={W - pad} y1={H - pad} y2={H - pad} stroke={axis} />
+        {/* zero P&L vertical line */}
+        {lo <= 0 && hi >= 0 && (
+          <line x1={xat(0)} x2={xat(0)} y1={pad / 2} y2={H - pad} stroke={txt} strokeDasharray="3 3" strokeOpacity="0.55" />
+        )}
+        {/* bars */}
+        {buckets.map((b, i) => {
+          const h = (b.weight / maxW) * (H - pad * 2);
+          const xLeft = xat(b.pnlLo) + 0.5;
+          const w = Math.max(0.5, xat(b.pnlHi) - xat(b.pnlLo) - 1);
+          const isProfit = b.pnl >= 0;
+          return (
+            <rect key={i}
+              x={xLeft} y={H - pad - h}
+              width={w} height={Math.max(h, 0.5)}
+              fill={isProfit ? upColor : downColor}
+              fillOpacity={isProfit ? 0.55 : 0.55}
+            />
+          );
+        })}
+        {/* p10/p90 ticks */}
+        <line x1={xat(dist.p10)} x2={xat(dist.p10)} y1={H - pad - 4} y2={H - pad + 2} stroke={txt} strokeWidth="1.2" />
+        <line x1={xat(dist.p90)} x2={xat(dist.p90)} y1={H - pad - 4} y2={H - pad + 2} stroke={txt} strokeWidth="1.2" />
+        {/* end labels */}
+        <text x={pad} y={H - 2} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace">NT${Math.round(lo * ntdMult).toLocaleString()}</text>
+        <text x={W - pad} y={H - 2} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace" textAnchor="end">NT${Math.round(hi * ntdMult).toLocaleString()}</text>
+      </svg>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OI Profile — mirrored horizontal bars: Call OI (left, red) vs Put OI (right, teal).
+// Reads chain rows from window.genChain(spot, contract). ATM row highlighted.
+function OIProfile({ spot, contract = 'monthly', theme = 'dark', height, maxRows = 13 }) {
+  const rows = useMemoM(() => {
+    if (!window.genChain) return [];
+    return window.genChain({ spot, contract });
+  }, [spot, contract]);
+  // Center on ATM, take ±maxRows/2
+  const center = rows.findIndex((r) => r.atm);
+  const half = Math.floor(maxRows / 2);
+  const visible = center >= 0
+    ? rows.slice(Math.max(0, center - half), Math.min(rows.length, center + half + 1))
+    : rows.slice(0, maxRows);
+  const maxOI = Math.max(...visible.flatMap((r) => [r.call.oi, r.put.oi]), 1);
+  const upColor = '#ef5350', downColor = '#26a69a';
+  const txt = theme === 'dark' ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.50)';
+  const rowH = 16;
+
+  return (
+    <div style={{ width: '100%' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 9, opacity: 0.55, marginBottom: 6, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase' }}>
+        <span style={{ color: upColor }}>Call OI</span>
+        <span>Strike</span>
+        <span style={{ color: downColor }}>Put OI</span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {visible.map((r) => {
+          const cw = (r.call.oi / maxOI) * 100;
+          const pw = (r.put.oi  / maxOI) * 100;
+          return (
+            <div key={r.strike} style={{
+              display: 'grid', gridTemplateColumns: '1fr 56px 1fr', alignItems: 'center', gap: 6,
+              height: rowH, position: 'relative',
+              padding: r.atm ? '2px 0' : 0,
+              borderRadius: r.atm ? 4 : 0,
+              background: r.atm ? 'rgba(240,192,104,0.08)' : 'transparent',
+              border: r.atm ? '1px solid rgba(240,192,104,0.25)' : '1px solid transparent',
+            }} title={`Strike ${r.strike} · Call OI ${r.call.oi.toLocaleString()} · Put OI ${r.put.oi.toLocaleString()}`}>
+              {/* Call bar — grows to the LEFT */}
+              <div style={{ height: 8, position: 'relative' }}>
+                <div style={{
+                  position: 'absolute', right: 0, top: 0, bottom: 0,
+                  width: `${cw}%`,
+                  background: `linear-gradient(270deg, ${upColor}cc, ${upColor}55)`,
+                  borderRadius: '4px 0 0 4px',
+                }} />
+              </div>
+              {/* Strike label */}
+              <div style={{
+                fontSize: 11, fontFamily: 'ui-monospace, SF Mono, monospace',
+                fontWeight: r.atm ? 700 : 500, textAlign: 'center',
+                color: r.atm ? '#f7d394' : '#e8eaef',
+                fontVariantNumeric: 'tabular-nums',
+              }}>{r.strike}</div>
+              {/* Put bar — grows to the RIGHT */}
+              <div style={{ height: 8, position: 'relative' }}>
+                <div style={{
+                  position: 'absolute', left: 0, top: 0, bottom: 0,
+                  width: `${pw}%`,
+                  background: `linear-gradient(90deg, ${downColor}cc, ${downColor}55)`,
+                  borderRadius: '0 4px 4px 0',
+                }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ marginTop: 6, fontSize: 9, opacity: 0.45, fontFamily: 'ui-monospace, SF Mono, monospace', textAlign: 'right' }}>
+        max OI in view: {maxOI.toLocaleString()}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Data quality indicator pill (🟢 / 🟡 / 🔴)
+function DataQualityPill({ quality }) {
+  if (!quality) return null;
+  const dotColor = quality.level === 'good' ? '#4dd0c8' : quality.level === 'warn' ? '#f0c068' : '#ef5350';
+  const ringBg   = quality.level === 'good' ? 'rgba(77,208,200,0.10)' : quality.level === 'warn' ? 'rgba(240,192,104,0.10)' : 'rgba(239,83,80,0.10)';
+  const border   = quality.level === 'good' ? 'rgba(77,208,200,0.30)' : quality.level === 'warn' ? 'rgba(240,192,104,0.35)' : 'rgba(239,83,80,0.35)';
+  const fmtLabel = quality.total === 0 ? '—' :
+    `${quality.total - quality.bad - quality.warn}/${quality.total} liquid${quality.bad ? ` · ${quality.bad} bad` : ''}${quality.warn ? ` · ${quality.warn} thin` : ''}`;
+  return (
+    <div style={{
+      display: 'inline-flex', alignItems: 'center', gap: 6,
+      padding: '4px 9px', borderRadius: 999,
+      background: ringBg, border: `1px solid ${border}`,
+      fontSize: 10, fontFamily: 'ui-monospace, SF Mono, monospace',
+    }} title={quality.label}>
+      <span style={{
+        width: 7, height: 7, borderRadius: 4, background: dotColor,
+        boxShadow: `0 0 6px ${dotColor}`,
+      }} />
+      <span style={{ opacity: 0.8 }}>{fmtLabel}</span>
+    </div>
+  );
+}
+
+Object.assign(window, { ThetaDecay, IVSmile, POPGauge, ScenarioTimeline, GreeksProfile, PnLDistribution, OIProfile, DataQualityPill });
