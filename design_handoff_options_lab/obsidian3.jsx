@@ -451,21 +451,22 @@ function CalcWorkspace({ legs, setLegs, spot, setSpot, iv, setIv, dte, sliceFrac
         </Glass2>
 
         {/* analysis tabs */}
-        <Glass2 tone="chip" padding={4} style={{ display: 'flex', gap: 2 }}>
+        <Glass2 tone="chip" padding={4} style={{ display: 'flex', gap: 2, overflowX: 'auto', scrollbarWidth: 'none' }}>
           {[
             { id: 'payoff', label: 'Payoff' },
             { id: 'cross', label: 'P&L' },
             { id: 'greeks', label: 'Greeks' },
             { id: 'dist', label: 'Dist' },
+            { id: 'attr', label: 'Attr' },
             { id: 'theta', label: 'Theta' },
             { id: 'iv', label: 'IV' },
           ].map((tab) => (
             <button key={tab.id} onClick={() => setView(tab.id)} style={{
-              flex: 1, fontSize: 11, fontWeight: 600, padding: '7px 6px', borderRadius: 999,
+              flex: '1 0 auto', minWidth: 56, fontSize: 11, fontWeight: 600, padding: '7px 10px', borderRadius: 999,
               border: 'none', cursor: 'pointer', transition: 'all .18s',
               background: view === tab.id ? 'rgba(255,255,255,0.10)' : 'transparent',
               color: view === tab.id ? '#fff' : 'rgba(255,255,255,0.55)',
-              fontFamily: 'inherit',
+              fontFamily: 'inherit', whiteSpace: 'nowrap',
             }}>{tab.label}</button>
           ))}
         </Glass2>
@@ -502,6 +503,12 @@ function CalcWorkspace({ legs, setLegs, spot, setSpot, iv, setIv, dte, sliceFrac
               P&L distribution <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· lognormal</span>
             </Eyebrow>
             <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={140} width={304} />
+          </>)}
+          {view === 'attr' && (<>
+            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>vs baseline</span>}>
+              P&L attribution <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· why up / down</span>
+            </Eyebrow>
+            <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={150} width={304} />
           </>)}
           {view === 'theta' && (<>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>θ decay</span>}>Time decay</Eyebrow>
@@ -595,6 +602,10 @@ function ChainWorkspace({ spot, expiry, onAddLeg, legs, setLegs, D, quality }) {
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>}>OI profile</Eyebrow>
           <OIProfile spot={spot} contract={expiry.type} theme="dark" maxRows={11} />
+        </Glass2>
+        <Glass2 tone="panel" padding={D.panelPad}>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>結算指標</span>}>Max pain</Eyebrow>
+          <MaxPain spot={spot} contract={expiry.type} theme="dark" height={150} width={280} />
         </Glass2>
       </div>
     </div>
@@ -1027,6 +1038,7 @@ function MobileCalc({
           { id: 'payoff', label: 'Payoff' },
           { id: 'greeks', label: 'Greeks' },
           { id: 'dist', label: 'Dist' },
+          { id: 'attr', label: 'Attr' },
           { id: 'theta', label: 'Theta' },
           { id: 'iv', label: 'IV' },
         ].map((tab) => (
@@ -1064,6 +1076,10 @@ function MobileCalc({
         {view === 'dist' && (<>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>at expiry</span>}>P&L distribution</Eyebrow>
           <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={150} width={chartW} />
+        </>)}
+        {view === 'attr' && (<>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>vs baseline</span>}>P&L attribution</Eyebrow>
+          <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={155} width={chartW} />
         </>)}
         {view === 'theta' && (<>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>θ decay</span>}>Time decay</Eyebrow>
@@ -1192,6 +1208,12 @@ function MobileChain({ isFold, chartW, spot, expiry, legs, setLegs, addLegFromCh
       <Glass2 tone="panel" padding={12}>
         <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label}</span>}>OI profile</Eyebrow>
         <OIProfile spot={spot} contract={expiry.type} theme="dark" maxRows={9} />
+      </Glass2>
+
+      {/* Max Pain */}
+      <Glass2 tone="panel" padding={12}>
+        <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>結算指標</span>}>Max pain</Eyebrow>
+        <MaxPain spot={spot} contract={expiry.type} theme="dark" height={150} width={chartW} />
       </Glass2>
 
       {/* Current legs */}
