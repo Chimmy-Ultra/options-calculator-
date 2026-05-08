@@ -958,7 +958,10 @@ function MobileApp({
         )}
       </div>
 
-      {/* Sticky bottom slider rail */}
+      {/* Sticky bottom slider rail.
+          Calc page: Spot + IV (both affect P&L / Greeks / distribution).
+          Chain page: only Spot — IV doesn't move the displayed quotes, so showing
+          it would be a red herring. */}
       <div style={{
         position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 20,
         padding: '10px 12px 14px',
@@ -967,9 +970,11 @@ function MobileApp({
         WebkitBackdropFilter: 'blur(12px)',
         borderTop: '1px solid rgba(255,255,255,0.06)',
       }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: workspace === 'calc' ? '1fr 1fr' : '1fr', gap: 16 }}>
           <Slider label="Spot" value={spot} min={20000} max={23500} step={10} onChange={setSpot} format={(v) => v.toLocaleString()} theme="dark" />
-          <Slider label="IV" value={iv} min={5} max={80} step={0.5} suffix="%" onChange={setIv} theme="dark" />
+          {workspace === 'calc' && (
+            <Slider label="IV" value={iv} min={5} max={80} step={0.5} suffix="%" onChange={setIv} theme="dark" />
+          )}
         </div>
       </div>
     </div>
