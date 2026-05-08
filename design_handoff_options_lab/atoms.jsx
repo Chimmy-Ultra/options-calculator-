@@ -78,13 +78,38 @@ function Glass({ variant = 'light', radius = 18, padding = 20, style, children, 
 // ─────────────────────────────────────────────────────────────────────────────
 // 2D payoff at expiry (SVG) — with probability cone overlay and time-slice
 function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, iv = 28, dte = 30, showCone = false, sliceFrac = 1, rangePct = 0.08, showKeyNumbers = false }) {
-  // rangePct = ±% around spot. Default 8% (much tighter than old 30%).
+  // Auto-fit X range around the legs' strikes + spot, with a margin. Falls back to
+  // spot ± rangePct when there are no legs. The previous fixed rangePct made narrow
+  // strategies (e.g. 200pt-wide bull-call) look flat because the elbow sat in 10%
+  // of the chart while the rest was just capped max-profit / max-loss plateaus.
   const xs = useMemo(() => {
+    let lo, hi;
+    if (legs && legs.length > 0) {
+      const strikes = legs.map((l) => l.strike);
+      const strikeLo = Math.min.apply(null, [...strikes, spot]);
+      const strikeHi = Math.max.apply(null, [...strikes, spot]);
+      const spread = strikeHi - strikeLo;
+      // Wider margin for narrow strategies (so they don't fill 100% of chart)
+      // tighter margin (relative) for wide strategies (iron condor, etc.).
+      const margin = Math.max(spread * 0.40, spot * 0.012);
+      lo = strikeLo - margin;
+      hi = strikeHi + margin;
+      // Ensure the probability cone (±1.5σ) is mostly visible if shown, otherwise
+      // user loses spatial context for the strategy vs. likely spot path.
+      if (showCone) {
+        const sigma = (iv / 100) * Math.sqrt(Math.max(dte, 0.5) / 365);
+        const sigSpread = spot * sigma * 1.5;
+        lo = Math.min(lo, spot - sigSpread);
+        hi = Math.max(hi, spot + sigSpread);
+      }
+    } else {
+      lo = spot * (1 - rangePct);
+      hi = spot * (1 + rangePct);
+    }
     const arr = [];
-    const lo = spot * (1 - rangePct), hi = spot * (1 + rangePct);
     for (let i = 0; i <= 80; i++) arr.push(lo + (i / 80) * (hi - lo));
     return arr;
-  }, [spot, rangePct]);
+  }, [legs, spot, iv, dte, showCone, rangePct]);
   // payoff at slice: lerp between zero P&L (now, no time decay) and full intrinsic at expiry
   const ys = xs.map((s) => legs.reduce((acc, l) => acc + legPayoff(l, s), 0) * sliceFrac);
   const maxY = Math.max(...ys.map(Math.abs), 1);
