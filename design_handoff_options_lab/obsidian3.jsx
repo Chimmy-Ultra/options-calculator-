@@ -1089,10 +1089,43 @@ function MobileCalc({
       {/* Legs editor */}
       <Glass2 tone="panel" padding={12}>
         <Eyebrow right={
-          <button style={miniBtn} onClick={() => setLegs([...legs, { side: 'long', type: 'call', strike: spot + 100, premium: 30, qty: 1 }])}>+ leg</button>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <button style={miniBtn} onClick={() => setLegs([...legs, { side: 'long', type: 'call', strike: spot + 100, premium: 30, qty: 1 }])}>+ leg</button>
+            {legs.length > 0 && <button style={miniBtn} onClick={() => setLegs([])}>clear</button>}
+          </div>
         }>Legs · {legs.length}</Eyebrow>
+
+        {/* Strategy preset chips — tap to load strategy template */}
+        <div style={{
+          display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 8, marginBottom: 8,
+          WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none',
+          borderBottom: '1px solid rgba(255,255,255,0.06)',
+        }}>
+          {STRATEGY_LIBRARY.map((s) => {
+            const c = { bullish: '#ef5350', bearish: '#26a69a', neutral: '#a78bfa', volatile: '#f0c068' }[s.bias];
+            return (
+              <button key={s.id}
+                onClick={() => setLegs(s.build(Math.round(spot / 50) * 50))}
+                style={{
+                  flexShrink: 0,
+                  padding: '5px 9px', borderRadius: 999,
+                  border: `1px solid ${c}55`,
+                  background: `${c}14`,
+                  color: '#e8eaef', fontFamily: 'inherit',
+                  fontSize: 10, fontWeight: 600, cursor: 'pointer',
+                  display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap',
+                }}>
+                <span style={{ width: 5, height: 5, borderRadius: 3, background: c }} />
+                {s.name}
+              </button>
+            );
+          })}
+        </div>
+
         {legs.length === 0 ? (
-          <div style={{ padding: '16px 0', textAlign: 'center', fontSize: 11, opacity: 0.5 }}>No legs yet · go to Chain</div>
+          <div style={{ padding: '16px 0', textAlign: 'center', fontSize: 11, opacity: 0.5 }}>
+            No legs yet · pick a strategy above or go to Chain
+          </div>
         ) : (
           <LegEditor legs={legs} onChange={setLegs} theme="dark" />
         )}

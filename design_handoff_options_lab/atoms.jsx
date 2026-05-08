@@ -413,21 +413,24 @@ function LegEditor({ legs, onChange, theme = 'light' }) {
     const next = legs.map((l, k) => (k === i ? { ...l, ...patch } : l));
     onChange(next);
   }
+  function remove(i) {
+    onChange(legs.filter((_, k) => k !== i));
+  }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '52px 52px 1fr 1fr 36px', gap: 8, fontSize: 10, letterSpacing: 0.6, textTransform: 'uppercase', color: headerColor, padding: '0 4px' }}>
-        <span>Side</span><span>Type</span><span>Strike</span><span>Premium</span><span style={{ textAlign: 'right' }}>Qty</span>
+      <div style={{ display: 'grid', gridTemplateColumns: '54px 46px 1fr 1fr 32px 24px', gap: 6, fontSize: 10, letterSpacing: 0.6, textTransform: 'uppercase', color: headerColor, padding: '0 4px' }}>
+        <span>Side</span><span>Type</span><span>Strike</span><span>Premium</span><span style={{ textAlign: 'right' }}>Qty</span><span></span>
       </div>
       {legs.map((leg, i) => (
         <div key={i} style={{
-          display: 'grid', gridTemplateColumns: '52px 52px 1fr 1fr 36px', gap: 8,
-          padding: '8px 8px', borderRadius: 10, background: rowBg, border: `1px solid ${rowBorder}`, alignItems: 'center'
+          display: 'grid', gridTemplateColumns: '54px 46px 1fr 1fr 32px 24px', gap: 6,
+          padding: '8px 6px 8px 8px', borderRadius: 10, background: rowBg, border: `1px solid ${rowBorder}`, alignItems: 'center'
         }}>
           <button
             onClick={() => update(i, { side: leg.side === 'long' ? 'short' : 'long' })}
             style={{
               fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase',
-              padding: '4px 6px', borderRadius: 6, border: 'none', cursor: 'pointer',
+              padding: '4px 4px', borderRadius: 6, border: 'none', cursor: 'pointer',
               background: leg.side === 'long'
                 ? (dark ? 'rgba(240,192,104,0.20)' : 'rgba(217,154,44,0.15)')
                 : (dark ? 'rgba(95,163,212,0.20)' : 'rgba(58,127,184,0.15)'),
@@ -440,13 +443,27 @@ function LegEditor({ legs, onChange, theme = 'light' }) {
             onClick={() => update(i, { type: leg.type === 'call' ? 'put' : 'call' })}
             style={{
               fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase',
-              padding: '4px 6px', borderRadius: 6, border: `1px solid ${rowBorder}`, cursor: 'pointer',
+              padding: '4px 4px', borderRadius: 6, border: `1px solid ${rowBorder}`, cursor: 'pointer',
               background: 'transparent', color: dark ? '#e8eaef' : '#1d1d22',
             }}
           >{leg.type}</button>
           <NumField value={leg.strike} step={1} onChange={(v) => update(i, { strike: v })} dark={dark} />
           <NumField value={leg.premium} step={0.05} onChange={(v) => update(i, { premium: v })} dark={dark} />
           <NumField value={leg.qty} step={1} onChange={(v) => update(i, { qty: v })} dark={dark} align="right" />
+          <button
+            onClick={() => remove(i)}
+            aria-label="remove leg"
+            title="remove leg"
+            style={{
+              width: 22, height: 22, borderRadius: 11, padding: 0,
+              border: `1px solid ${rowBorder}`,
+              background: 'transparent',
+              color: dark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.55)',
+              cursor: 'pointer',
+              fontSize: 13, lineHeight: 1, fontFamily: 'inherit',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >×</button>
         </div>
       ))}
     </div>
