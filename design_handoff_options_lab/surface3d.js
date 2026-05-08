@@ -318,6 +318,38 @@
       applyCamera();
     }, { passive: false });
 
+    // Touch: 2-finger pinch-to-zoom (1-finger drag is handled by pointermove above).
+    let pinchStartDist = 0;
+    let pinchStartCamDist = 0;
+    let pinching = false;
+    function touchDist(t0, t1) {
+      const dx = t0.clientX - t1.clientX;
+      const dy = t0.clientY - t1.clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+    dom.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 2) {
+        pinching = true;
+        dragging = false;
+        pinchStartDist = touchDist(e.touches[0], e.touches[1]);
+        pinchStartCamDist = orbit.dist;
+        e.preventDefault();
+      }
+    }, { passive: false });
+    dom.addEventListener('touchmove', (e) => {
+      if (pinching && e.touches.length === 2) {
+        const d = touchDist(e.touches[0], e.touches[1]);
+        const ratio = pinchStartDist > 0 ? pinchStartDist / d : 1;
+        orbit.dist = Math.max(2.0, Math.min(7, pinchStartCamDist * ratio));
+        applyCamera();
+        e.preventDefault();
+      }
+    }, { passive: false });
+    dom.addEventListener('touchend', (e) => {
+      if (e.touches.length < 2) pinching = false;
+    });
+    dom.addEventListener('touchcancel', () => { pinching = false; });
+
     // Auto-rotate when idle
     let rafId = 0, last = performance.now(), idleTime = 0;
     function tick(now) {

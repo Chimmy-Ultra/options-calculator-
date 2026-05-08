@@ -2,11 +2,24 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=1440" />
-<title>Options Lab · Obsidian</title>
+<!-- Responsive: mobile uses device width; desktop layout activates ≥1024px via JS. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Options Lab · TXO 選擇權計算機</title>
 <link rel="stylesheet" href="tokens.css" />
+<!-- PWA manifest + theme colors -->
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="theme-color" content="#11151f" />
+<meta name="color-scheme" content="dark" />
+<!-- iOS web app -->
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Options Lab" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+<link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
 <style>
   html, body { margin: 0; padding: 0; background: #0a0d14; font-family: var(--font-display); min-height: 100vh; }
+  body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
   * { box-sizing: border-box; }
   input[type="number"]::-webkit-outer-spin-button,
   input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
@@ -18,6 +31,13 @@
   button:focus-visible, select:focus-visible, input:focus-visible {
     outline: 2px solid oklch(0.66 0.16 250);
     outline-offset: 2px;
+  }
+  /* Use safe-area insets on phones with notches / dynamic islands */
+  @supports (padding: max(0px)) {
+    body {
+      padding-left: env(safe-area-inset-left);
+      padding-right: env(safe-area-inset-right);
+    }
   }
 </style>
 </head>
@@ -39,6 +59,17 @@
 
 <script type="text/babel">
 ReactDOM.createRoot(document.getElementById('root')).render(<Obsidian3 />);
+</script>
+
+<!-- PWA: register service worker for offline support + installability -->
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('service-worker.js').catch((err) => {
+      console.warn('SW registration failed:', err);
+    });
+  });
+}
 </script>
 </body>
 </html>

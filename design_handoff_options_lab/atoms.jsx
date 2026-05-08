@@ -4,6 +4,40 @@
 const { useState, useEffect, useRef, useMemo } = React;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Viewport detection — phone / foldable-inner / desktop.
+// Returns { width, height, layout } where layout is 'phone' | 'fold' | 'desk'.
+// 'phone' < 640  (cover screen of a foldable, or a normal phone in portrait)
+// 'fold'  640-1023  (foldable inner, tablet, narrow desktop)
+// 'desk'  ≥ 1024 (full desktop)
+function useViewport() {
+  const [vp, setVp] = useState(() => {
+    if (typeof window === 'undefined') return { width: 1440, height: 900, layout: 'desk' };
+    return classify(window.innerWidth, window.innerHeight);
+  });
+  useEffect(() => {
+    let raf = 0;
+    function onResize() {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => setVp(classify(window.innerWidth, window.innerHeight)));
+    }
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+    };
+  }, []);
+  return vp;
+}
+function classify(w, h) {
+  let layout = 'desk';
+  if (w < 640) layout = 'phone';
+  else if (w < 1024) layout = 'fold';
+  return { width: w, height: h, layout };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Glass primitive — variants: 'light' | 'dark' | 'paper'
 function Glass({ variant = 'light', radius = 18, padding = 20, style, children, className = '', ...rest }) {
   const base = {
@@ -508,4 +542,5 @@ Object.assign(window, {
   STRATEGIES, DEFAULT_LEGS,
   legPayoff, normalPdf, normalCdf, legGreeks, portfolioGreeks, pnlDistribution,
   legLiquidity, dataQuality,
+  useViewport,
 });
