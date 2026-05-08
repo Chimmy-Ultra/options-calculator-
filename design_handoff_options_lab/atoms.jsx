@@ -94,14 +94,9 @@ function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, i
       const margin = Math.max(spread * 0.40, spot * 0.012);
       lo = strikeLo - margin;
       hi = strikeHi + margin;
-      // Ensure the probability cone (±1.5σ) is mostly visible if shown, otherwise
-      // user loses spatial context for the strategy vs. likely spot path.
-      if (showCone) {
-        const sigma = (iv / 100) * Math.sqrt(Math.max(dte, 0.5) / 365);
-        const sigSpread = spot * sigma * 1.5;
-        lo = Math.min(lo, spot - sigSpread);
-        hi = Math.max(hi, spot + sigSpread);
-      }
+      // We do NOT extend the X range to fit the probability cone — that would defeat
+      // the strike-tight fit on narrow strategies. The cone rects are clamped to the
+      // chart bounds in the render below, so they show the visible portion only.
     } else {
       lo = spot * (1 - rangePct);
       hi = spot * (1 + rangePct);
@@ -160,12 +155,20 @@ function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, i
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} style={{ display: 'block' }}>
-      {showCone && (
-        <g>
-          <rect x={xat(twoSigDown)} y={pad/2} width={Math.max(0, xat(twoSigUp) - xat(twoSigDown))} height={H - pad} fill={coneColor} fillOpacity="0.5" />
-          <rect x={xat(oneSigDown)} y={pad/2} width={Math.max(0, xat(oneSigUp) - xat(oneSigDown))} height={H - pad} fill={coneColor} />
-        </g>
-      )}
+      {showCone && (() => {
+        // Clamp cone rect to chart bounds. Without this, when σ extends beyond
+        // the auto-fit range, xat() produces negative x or x > W, and the rect
+        // either renders far off-screen (huge width) or distorts layout.
+        const clampX = (s) => Math.max(pad, Math.min(W - pad, xat(s)));
+        const x2lo = clampX(twoSigDown), x2hi = clampX(twoSigUp);
+        const x1lo = clampX(oneSigDown), x1hi = clampX(oneSigUp);
+        return (
+          <g>
+            <rect x={x2lo} y={pad/2} width={Math.max(0, x2hi - x2lo)} height={H - pad} fill={coneColor} fillOpacity="0.5" />
+            <rect x={x1lo} y={pad/2} width={Math.max(0, x1hi - x1lo)} height={H - pad} fill={coneColor} />
+          </g>
+        );
+      })()}
       <line x1={pad} x2={W - pad} y1={H / 2} y2={H / 2} stroke={axisColor} strokeWidth="1" strokeDasharray="2 3" />
       {segments.map((seg, k) => {
         if (seg.pts.length < 2) return null;
