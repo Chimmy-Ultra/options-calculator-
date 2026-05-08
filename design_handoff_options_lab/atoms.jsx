@@ -4,6 +4,40 @@
 const { useState, useEffect, useRef, useMemo } = React;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Viewport detection — phone / foldable-inner / desktop.
+// Returns { width, height, layout } where layout is 'phone' | 'fold' | 'desk'.
+// 'phone' < 640  (cover screen of a foldable, or a normal phone in portrait)
+// 'fold'  640-1023  (foldable inner, tablet, narrow desktop)
+// 'desk'  ≥ 1024 (full desktop)
+function useViewport() {
+  const [vp, setVp] = useState(() => {
+    if (typeof window === 'undefined') return { width: 1440, height: 900, layout: 'desk' };
+    return classify(window.innerWidth, window.innerHeight);
+  });
+  useEffect(() => {
+    let raf = 0;
+    function onResize() {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => setVp(classify(window.innerWidth, window.innerHeight)));
+    }
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+    };
+  }, []);
+  return vp;
+}
+function classify(w, h) {
+  let layout = 'desk';
+  if (w < 640) layout = 'phone';
+  else if (w < 1024) layout = 'fold';
+  return { width: w, height: h, layout };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Glass primitive — variants: 'light' | 'dark' | 'paper'
 function Glass({ variant = 'light', radius = 18, padding = 20, style, children, className = '', ...rest }) {
   const base = {
@@ -44,13 +78,33 @@ function Glass({ variant = 'light', radius = 18, padding = 20, style, children, 
 // ─────────────────────────────────────────────────────────────────────────────
 // 2D payoff at expiry (SVG) — with probability cone overlay and time-slice
 function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, iv = 28, dte = 30, showCone = false, sliceFrac = 1, rangePct = 0.08, showKeyNumbers = false }) {
-  // rangePct = ±% around spot. Default 8% (much tighter than old 30%).
+  // Auto-fit X range around the legs' strikes + spot, with a margin. Falls back to
+  // spot ± rangePct when there are no legs. The previous fixed rangePct made narrow
+  // strategies (e.g. 200pt-wide bull-call) look flat because the elbow sat in 10%
+  // of the chart while the rest was just capped max-profit / max-loss plateaus.
   const xs = useMemo(() => {
+    let lo, hi;
+    if (legs && legs.length > 0) {
+      const strikes = legs.map((l) => l.strike);
+      const strikeLo = Math.min.apply(null, [...strikes, spot]);
+      const strikeHi = Math.max.apply(null, [...strikes, spot]);
+      const spread = strikeHi - strikeLo;
+      // Wider margin for narrow strategies (so they don't fill 100% of chart)
+      // tighter margin (relative) for wide strategies (iron condor, etc.).
+      const margin = Math.max(spread * 0.40, spot * 0.012);
+      lo = strikeLo - margin;
+      hi = strikeHi + margin;
+      // We do NOT extend the X range to fit the probability cone — that would defeat
+      // the strike-tight fit on narrow strategies. The cone rects are clamped to the
+      // chart bounds in the render below, so they show the visible portion only.
+    } else {
+      lo = spot * (1 - rangePct);
+      hi = spot * (1 + rangePct);
+    }
     const arr = [];
-    const lo = spot * (1 - rangePct), hi = spot * (1 + rangePct);
     for (let i = 0; i <= 80; i++) arr.push(lo + (i / 80) * (hi - lo));
     return arr;
-  }, [spot, rangePct]);
+  }, [legs, spot, iv, dte, showCone, rangePct]);
   // payoff at slice: lerp between zero P&L (now, no time decay) and full intrinsic at expiry
   const ys = xs.map((s) => legs.reduce((acc, l) => acc + legPayoff(l, s), 0) * sliceFrac);
   const maxY = Math.max(...ys.map(Math.abs), 1);
@@ -101,12 +155,20 @@ function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, i
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} style={{ display: 'block' }}>
-      {showCone && (
-        <g>
-          <rect x={xat(twoSigDown)} y={pad/2} width={Math.max(0, xat(twoSigUp) - xat(twoSigDown))} height={H - pad} fill={coneColor} fillOpacity="0.5" />
-          <rect x={xat(oneSigDown)} y={pad/2} width={Math.max(0, xat(oneSigUp) - xat(oneSigDown))} height={H - pad} fill={coneColor} />
-        </g>
-      )}
+      {showCone && (() => {
+        // Clamp cone rect to chart bounds. Without this, when σ extends beyond
+        // the auto-fit range, xat() produces negative x or x > W, and the rect
+        // either renders far off-screen (huge width) or distorts layout.
+        const clampX = (s) => Math.max(pad, Math.min(W - pad, xat(s)));
+        const x2lo = clampX(twoSigDown), x2hi = clampX(twoSigUp);
+        const x1lo = clampX(oneSigDown), x1hi = clampX(oneSigUp);
+        return (
+          <g>
+            <rect x={x2lo} y={pad/2} width={Math.max(0, x2hi - x2lo)} height={H - pad} fill={coneColor} fillOpacity="0.5" />
+            <rect x={x1lo} y={pad/2} width={Math.max(0, x1hi - x1lo)} height={H - pad} fill={coneColor} />
+          </g>
+        );
+      })()}
       <line x1={pad} x2={W - pad} y1={H / 2} y2={H / 2} stroke={axisColor} strokeWidth="1" strokeDasharray="2 3" />
       {segments.map((seg, k) => {
         if (seg.pts.length < 2) return null;
@@ -379,21 +441,24 @@ function LegEditor({ legs, onChange, theme = 'light' }) {
     const next = legs.map((l, k) => (k === i ? { ...l, ...patch } : l));
     onChange(next);
   }
+  function remove(i) {
+    onChange(legs.filter((_, k) => k !== i));
+  }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '52px 52px 1fr 1fr 36px', gap: 8, fontSize: 10, letterSpacing: 0.6, textTransform: 'uppercase', color: headerColor, padding: '0 4px' }}>
-        <span>Side</span><span>Type</span><span>Strike</span><span>Premium</span><span style={{ textAlign: 'right' }}>Qty</span>
+      <div style={{ display: 'grid', gridTemplateColumns: '54px 46px 1fr 1fr 32px 24px', gap: 6, fontSize: 10, letterSpacing: 0.6, textTransform: 'uppercase', color: headerColor, padding: '0 4px' }}>
+        <span>Side</span><span>Type</span><span>Strike</span><span>Premium</span><span style={{ textAlign: 'right' }}>Qty</span><span></span>
       </div>
       {legs.map((leg, i) => (
         <div key={i} style={{
-          display: 'grid', gridTemplateColumns: '52px 52px 1fr 1fr 36px', gap: 8,
-          padding: '8px 8px', borderRadius: 10, background: rowBg, border: `1px solid ${rowBorder}`, alignItems: 'center'
+          display: 'grid', gridTemplateColumns: '54px 46px 1fr 1fr 32px 24px', gap: 6,
+          padding: '8px 6px 8px 8px', borderRadius: 10, background: rowBg, border: `1px solid ${rowBorder}`, alignItems: 'center'
         }}>
           <button
             onClick={() => update(i, { side: leg.side === 'long' ? 'short' : 'long' })}
             style={{
               fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase',
-              padding: '4px 6px', borderRadius: 6, border: 'none', cursor: 'pointer',
+              padding: '4px 4px', borderRadius: 6, border: 'none', cursor: 'pointer',
               background: leg.side === 'long'
                 ? (dark ? 'rgba(240,192,104,0.20)' : 'rgba(217,154,44,0.15)')
                 : (dark ? 'rgba(95,163,212,0.20)' : 'rgba(58,127,184,0.15)'),
@@ -406,13 +471,27 @@ function LegEditor({ legs, onChange, theme = 'light' }) {
             onClick={() => update(i, { type: leg.type === 'call' ? 'put' : 'call' })}
             style={{
               fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase',
-              padding: '4px 6px', borderRadius: 6, border: `1px solid ${rowBorder}`, cursor: 'pointer',
+              padding: '4px 4px', borderRadius: 6, border: `1px solid ${rowBorder}`, cursor: 'pointer',
               background: 'transparent', color: dark ? '#e8eaef' : '#1d1d22',
             }}
           >{leg.type}</button>
           <NumField value={leg.strike} step={1} onChange={(v) => update(i, { strike: v })} dark={dark} />
           <NumField value={leg.premium} step={0.05} onChange={(v) => update(i, { premium: v })} dark={dark} />
           <NumField value={leg.qty} step={1} onChange={(v) => update(i, { qty: v })} dark={dark} align="right" />
+          <button
+            onClick={() => remove(i)}
+            aria-label="remove leg"
+            title="remove leg"
+            style={{
+              width: 22, height: 22, borderRadius: 11, padding: 0,
+              border: `1px solid ${rowBorder}`,
+              background: 'transparent',
+              color: dark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.55)',
+              cursor: 'pointer',
+              fontSize: 13, lineHeight: 1, fontFamily: 'inherit',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >×</button>
         </div>
       ))}
     </div>
@@ -508,4 +587,5 @@ Object.assign(window, {
   STRATEGIES, DEFAULT_LEGS,
   legPayoff, normalPdf, normalCdf, legGreeks, portfolioGreeks, pnlDistribution,
   legLiquidity, dataQuality,
+  useViewport,
 });

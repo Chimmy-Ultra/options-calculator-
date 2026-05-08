@@ -263,6 +263,13 @@
     let dragging = false, lx = 0, ly = 0, didDrag = false;
     const dom = renderer.domElement;
     dom.style.cursor = 'grab';
+    // Block browser-level pan/zoom on this canvas so our pointer events fully control
+    // rotate (1-finger) and pinch-zoom (2-finger). Without this, mobile Chrome will
+    // try to scroll the page during a drag, which feels broken.
+    dom.style.touchAction = 'none';
+    // Detect touch-primary devices to disable auto-rotate (it fights with user gestures
+    // on phones where they pause to read the chart).
+    const isTouch = !!(window.matchMedia && !window.matchMedia('(hover: hover)').matches);
     const ray = new THREE.Raycaster();
     const mouseN = new THREE.Vector2();
 
@@ -289,8 +296,10 @@
       if (dragging) {
         const dx = e.clientX - lx, dy = e.clientY - ly;
         if (Math.abs(dx) + Math.abs(dy) > 2) didDrag = true;
-        orbit.az -= dx * 0.005;
-        orbit.el = Math.max(0.05, Math.min(Math.PI/2 - 0.05, orbit.el + dy * 0.005));
+        // Touch needs ~2.4× more rotation per pixel than mouse — fingers travel further per gesture.
+        const factor = e.pointerType === 'touch' ? 0.012 : 0.005;
+        orbit.az -= dx * factor;
+        orbit.el = Math.max(0.05, Math.min(Math.PI/2 - 0.05, orbit.el + dy * factor));
         lx = e.clientX; ly = e.clientY;
         applyCamera();
         ringMat.opacity = 0;
@@ -318,13 +327,45 @@
       applyCamera();
     }, { passive: false });
 
-    // Auto-rotate when idle
+    // Touch: 2-finger pinch-to-zoom (1-finger drag is handled by pointermove above).
+    let pinchStartDist = 0;
+    let pinchStartCamDist = 0;
+    let pinching = false;
+    function touchDist(t0, t1) {
+      const dx = t0.clientX - t1.clientX;
+      const dy = t0.clientY - t1.clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+    dom.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 2) {
+        pinching = true;
+        dragging = false;
+        pinchStartDist = touchDist(e.touches[0], e.touches[1]);
+        pinchStartCamDist = orbit.dist;
+        e.preventDefault();
+      }
+    }, { passive: false });
+    dom.addEventListener('touchmove', (e) => {
+      if (pinching && e.touches.length === 2) {
+        const d = touchDist(e.touches[0], e.touches[1]);
+        const ratio = pinchStartDist > 0 ? pinchStartDist / d : 1;
+        orbit.dist = Math.max(2.0, Math.min(7, pinchStartCamDist * ratio));
+        applyCamera();
+        e.preventDefault();
+      }
+    }, { passive: false });
+    dom.addEventListener('touchend', (e) => {
+      if (e.touches.length < 2) pinching = false;
+    });
+    dom.addEventListener('touchcancel', () => { pinching = false; });
+
+    // Auto-rotate when idle (desktop only; on touch devices it fights with user gestures).
     let rafId = 0, last = performance.now(), idleTime = 0;
     function tick(now) {
       const dt = (now - last) / 1000; last = now;
-      if (!dragging) {
+      if (!dragging && !pinching) {
         idleTime += dt;
-        if (idleTime > 1.5) orbit.az += dt * 0.04;
+        if (!isTouch && idleTime > 1.5) orbit.az += dt * 0.04;
         applyCamera();
       } else {
         idleTime = 0;

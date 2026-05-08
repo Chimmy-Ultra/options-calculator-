@@ -175,6 +175,12 @@ function Obsidian3() {
   const dte = expiry.dte;
   const D = DENSITY[t.density] || DENSITY.comfortable;
   const accent = `oklch(0.66 0.16 ${t.accentHue})`;
+  const vp = useViewport();
+  // On phone/fold, only Calculator + Chain workspaces are shown.
+  // If the user previously chose iv/compare on a desktop, snap back to calc.
+  uE(() => {
+    if (vp.layout !== 'desk' && (workspace === 'iv' || workspace === 'compare')) setWorkspace('calc');
+  }, [vp.layout]);
 
   // P&L numbers (×50 NTD per point)
   const pnlPts = uM(() => legs.reduce((acc, l) => acc + legPayoff(l, spot), 0) * sliceFrac, [legs, spot, sliceFrac]);
@@ -201,6 +207,26 @@ function Obsidian3() {
   // Add leg from chain
   function addLegFromChain(leg) {
     setLegs((prev) => [...prev, leg]);
+  }
+
+  // ── Mobile / foldable layout — completely different shell.
+  if (vp.layout !== 'desk') {
+    return (
+      <MobileApp
+        vp={vp}
+        workspace={workspace} setWorkspace={setWorkspace}
+        expiryId={expiryId} setExpiryId={setExpiryId} expiry={expiry}
+        legs={legs} setLegs={setLegs} addLegFromChain={addLegFromChain}
+        spot={spot} setSpot={setSpot}
+        iv={iv} setIv={setIv}
+        dte={dte}
+        view={view} setView={setView}
+        sliceFrac={sliceFrac} setSliceFrac={setSliceFrac}
+        pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss}
+        portfolioG={portfolioG} popValue={popValue} quality={quality}
+        accent={accent} t={t} setTweak={setTweak}
+      />
+    );
   }
 
   return (
@@ -815,6 +841,425 @@ const miniBtn = {
   fontSize: 10, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase',
   padding: '4px 8px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.10)',
   background: 'rgba(255,255,255,0.04)', color: '#e8eaef', cursor: 'pointer', whiteSpace: 'nowrap',
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// MOBILE / FOLDABLE LAYOUT
+// ═════════════════════════════════════════════════════════════════════════════
+function MobileApp({
+  vp, workspace, setWorkspace,
+  expiryId, setExpiryId, expiry,
+  legs, setLegs, addLegFromChain,
+  spot, setSpot, iv, setIv, dte,
+  view, setView, sliceFrac, setSliceFrac,
+  pnlPts, pnlNTD, maxProfit, maxLoss,
+  portfolioG, popValue, quality,
+  accent, t, setTweak,
+}) {
+  const isFold = vp.layout === 'fold';
+  const chartW = Math.max(280, Math.min(vp.width - 48, isFold ? 560 : 400));
+  return (
+    <div style={{
+      width: '100%', minHeight: '100vh', position: 'relative',
+      fontFamily: 'var(--font-display)', color: '#e8eaef',
+      background: `
+        radial-gradient(ellipse 90% 50% at 50% 0%, ${t.showAuroraBlobs ? `oklch(0.32 0.10 ${t.accentHue}) 0%` : 'transparent 0%'}, transparent 55%),
+        linear-gradient(180deg, #0a0d14 0%, #11151f 100%)
+      `,
+      paddingBottom: 130, // room for sticky bottom rail
+    }}>
+      {/* Top bar */}
+      <div style={{
+        position: 'sticky', top: 0, zIndex: 10,
+        padding: '10px 12px 8px',
+        background: 'linear-gradient(180deg, rgba(10,13,20,0.92), rgba(10,13,20,0.55) 80%, transparent)',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <Glass2 tone="chip" radius={999} padding="6px 10px" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+            <div style={{ width: 16, height: 16, borderRadius: 4, background: `linear-gradient(135deg, oklch(0.78 0.14 75), ${accent})` }} />
+            <span style={{ fontSize: 11, fontWeight: 600 }}>Options Lab</span>
+          </Glass2>
+          <Glass2 tone="chip" radius={999} padding="6px 10px" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span className="mono" style={{ fontSize: 9, opacity: 0.6 }}>TXO</span>
+            <span className="tnum" style={{ fontSize: 12, fontWeight: 600 }}>{spot.toLocaleString()}</span>
+            <span style={{ fontSize: 9, color: '#f0c068' }}>{dte}d</span>
+          </Glass2>
+        </div>
+
+        {/* Workspace toggle (mobile = only Calc + Chain) */}
+        <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+          {[{ id: 'calc', label: 'Calculator' }, { id: 'chain', label: 'Chain' }].map((it) => {
+            const active = workspace === it.id;
+            return (
+              <button key={it.id} onClick={() => setWorkspace(it.id)} style={{
+                flex: 1, padding: '8px 10px', borderRadius: 10, border: 'none',
+                fontSize: 12, fontWeight: 700, letterSpacing: 0.2,
+                background: active ? `linear-gradient(150deg, ${accent}, oklch(0.55 0.18 240))` : 'rgba(255,255,255,0.05)',
+                color: active ? '#fff' : 'rgba(255,255,255,0.65)',
+                boxShadow: active ? '0 4px 12px -4px rgba(0,0,0,0.6)' : 'none',
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}>{it.label}</button>
+            );
+          })}
+        </div>
+
+        {/* Expiry strip — horizontal scroll on phone */}
+        <div style={{
+          display: 'flex', gap: 6, marginTop: 8, overflowX: 'auto', paddingBottom: 2,
+          scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch',
+        }}>
+          {TXO_EXPIRIES.map((e) => {
+            const active = e.id === expiryId;
+            const isMonthly = e.type === 'monthly';
+            return (
+              <button key={e.id} onClick={() => setExpiryId(e.id)} style={{
+                flexShrink: 0,
+                padding: '5px 10px', borderRadius: 8, border: '1px solid',
+                borderColor: active ? (isMonthly ? '#f0c068' : 'rgba(255,255,255,0.18)') : 'rgba(255,255,255,0.08)',
+                background: active ? (isMonthly ? 'rgba(240,192,104,0.16)' : 'rgba(255,255,255,0.10)') : 'rgba(255,255,255,0.02)',
+                color: active ? (isMonthly ? '#f7d394' : '#fff') : 'rgba(255,255,255,0.55)',
+                fontFamily: 'inherit', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap',
+                position: 'relative',
+              }}>
+                <span>{e.label}</span>
+                <span style={{ fontSize: 9, opacity: 0.7, fontFamily: 'ui-monospace, SF Mono, monospace' }}>{e.date}</span>
+                {isMonthly && <span style={{ width: 4, height: 4, borderRadius: 2, background: '#f0c068' }} />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Body */}
+      <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {workspace === 'calc' ? (
+          <MobileCalc
+            isFold={isFold} chartW={chartW}
+            legs={legs} setLegs={setLegs}
+            spot={spot} setSpot={setSpot}
+            iv={iv} setIv={setIv} dte={dte}
+            view={view} setView={setView}
+            sliceFrac={sliceFrac} setSliceFrac={setSliceFrac}
+            pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss}
+            portfolioG={portfolioG} popValue={popValue} quality={quality}
+            accent={accent} t={t}
+          />
+        ) : (
+          <MobileChain
+            isFold={isFold} chartW={chartW}
+            spot={spot} expiry={expiry}
+            legs={legs} setLegs={setLegs}
+            addLegFromChain={addLegFromChain}
+            quality={quality}
+          />
+        )}
+      </div>
+
+      {/* Sticky bottom slider rail.
+          Calc page: Spot + IV (both affect P&L / Greeks / distribution).
+          Chain page: only Spot — IV doesn't move the displayed quotes, so showing
+          it would be a red herring. */}
+      <div style={{
+        position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 20,
+        padding: '10px 12px 14px',
+        background: 'linear-gradient(0deg, rgba(10,13,20,0.95) 0%, rgba(10,13,20,0.85) 70%, transparent 100%)',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
+        borderTop: '1px solid rgba(255,255,255,0.06)',
+      }}>
+        <div style={{ display: 'grid', gridTemplateColumns: workspace === 'calc' ? '1fr 1fr' : '1fr', gap: 16 }}>
+          <Slider label="Spot" value={spot} min={20000} max={23500} step={10} onChange={setSpot} format={(v) => v.toLocaleString()} theme="dark" />
+          {workspace === 'calc' && (
+            <Slider label="IV" value={iv} min={5} max={80} step={0.5} suffix="%" onChange={setIv} theme="dark" />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MobileCalc({
+  isFold, chartW,
+  legs, setLegs, spot, setSpot, iv, setIv, dte,
+  view, setView, sliceFrac, setSliceFrac,
+  pnlPts, pnlNTD, maxProfit, maxLoss,
+  portfolioG, popValue, quality,
+  accent, t,
+}) {
+  return (
+    <>
+      {/* P&L now card */}
+      <Glass2 tone="raised" padding={14}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <Eyebrow right={<DataQualityPill quality={quality} />}>P&L now</Eyebrow>
+            <div className="tnum" style={{
+              fontSize: 26, fontWeight: 700, letterSpacing: -0.4,
+              color: pnlNTD >= 0 ? 'oklch(0.84 0.14 75)' : 'oklch(0.74 0.12 220)',
+              fontFamily: 'ui-monospace, SF Mono, monospace', lineHeight: 1.05,
+            }}>
+              {pnlNTD >= 0 ? '+' : ''}NT${Math.abs(Math.round(pnlNTD)).toLocaleString()}
+            </div>
+            <div className="tnum" style={{ fontSize: 10, opacity: 0.55, marginTop: 4 }}>
+              Max <span style={{ color: '#f0c068' }}>+NT${Math.round(maxProfit).toLocaleString()}</span>
+              <span style={{ opacity: 0.4 }}> · </span>
+              Min <span style={{ color: '#5fa3d4' }}>NT${Math.round(maxLoss).toLocaleString()}</span>
+            </div>
+          </div>
+          <div style={{ width: 84, flexShrink: 0 }}>
+            <div style={{ fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600, textAlign: 'center', marginBottom: 2 }}>POP</div>
+            <POPGauge theme="dark" size={84} value={popValue} />
+          </div>
+        </div>
+      </Glass2>
+
+      {/* 3D surface — small but present */}
+      <Glass2 tone="panel" padding={6} style={{ position: 'relative', height: isFold ? 320 : 220 }}>
+        <Surface3DMount theme="dark" height="100%" scheme={t.scheme} />
+      </Glass2>
+
+      {/* Chart tabs */}
+      <Glass2 tone="chip" padding={3} style={{ display: 'flex', gap: 2, overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}>
+        {[
+          { id: 'payoff', label: 'Payoff' },
+          { id: 'greeks', label: 'Greeks' },
+          { id: 'dist', label: 'Dist' },
+          { id: 'theta', label: 'Theta' },
+          { id: 'iv', label: 'IV' },
+        ].map((tab) => (
+          <button key={tab.id} onClick={() => setView(tab.id)} style={{
+            flex: '1 0 auto', minWidth: 64,
+            fontSize: 11, fontWeight: 600, padding: '7px 10px', borderRadius: 999,
+            border: 'none', cursor: 'pointer',
+            background: view === tab.id ? 'rgba(255,255,255,0.10)' : 'transparent',
+            color: view === tab.id ? '#fff' : 'rgba(255,255,255,0.55)',
+            fontFamily: 'inherit', whiteSpace: 'nowrap',
+          }}>{tab.label}</button>
+        ))}
+      </Glass2>
+
+      <Glass2 tone="panel" padding={14}>
+        {view === 'payoff' && (<>
+          <Eyebrow right={
+            <span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>
+              {sliceFrac >= 0.99 ? 'expiry' : sliceFrac <= 0.01 ? 'now' : `${(sliceFrac * 100).toFixed(0)}%`}
+            </span>
+          }>Payoff</Eyebrow>
+          <PayoffChart legs={legs} spot={spot} theme="dark" height={150} width={chartW} iv={iv} dte={dte} showCone={t.showProbCone} sliceFrac={sliceFrac} rangePct={0.08} showKeyNumbers={true} />
+          <div style={{ marginTop: 10 }}>
+            <input type="range" min="0" max="1" step="0.01" value={sliceFrac} onChange={(e) => setSliceFrac(parseFloat(e.target.value))}
+              style={{ width: '100%', accentColor: accent }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, opacity: 0.5, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
+              <span>now</span><span>expiry</span>
+            </div>
+          </div>
+        </>)}
+        {view === 'greeks' && (<>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{dte}d</span>}>Greeks vs spot</Eyebrow>
+          <GreeksProfile legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={150} width={chartW} />
+        </>)}
+        {view === 'dist' && (<>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>at expiry</span>}>P&L distribution</Eyebrow>
+          <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={150} width={chartW} />
+        </>)}
+        {view === 'theta' && (<>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>θ decay</span>}>Time decay</Eyebrow>
+          <ThetaDecay theme="dark" dte={dte} height={150} width={chartW} />
+        </>)}
+        {view === 'iv' && (<>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{iv}% ATM</span>}>IV smile</Eyebrow>
+          <IVSmile theme="dark" iv={iv} height={150} width={chartW} />
+        </>)}
+      </Glass2>
+
+      {/* Greeks chips */}
+      <Glass2 tone="panel" padding={12}>
+        <Eyebrow>Greeks at current spot</Eyebrow>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 6 }}>
+          <GreekChip label="Δ" value={(portfolioG.delta >= 0 ? '+' : '') + portfolioG.delta.toFixed(2)} theme="dark" emphasis={portfolioG.delta >= 0 ? 'up' : 'down'} />
+          <GreekChip label="Γ" value={portfolioG.gamma.toFixed(4)} theme="dark" />
+          <GreekChip label="Θ" value={(portfolioG.theta >= 0 ? '+' : '') + portfolioG.theta.toFixed(2)} theme="dark" emphasis={portfolioG.theta >= 0 ? 'up' : 'down'} />
+          <GreekChip label="V" value={(portfolioG.vega >= 0 ? '+' : '') + portfolioG.vega.toFixed(2)} theme="dark" emphasis={portfolioG.vega >= 0 ? 'up' : 'down'} />
+        </div>
+      </Glass2>
+
+      {/* Legs editor */}
+      <Glass2 tone="panel" padding={12}>
+        <Eyebrow right={
+          <div style={{ display: 'flex', gap: 4 }}>
+            <button style={miniBtn} onClick={() => setLegs([...legs, { side: 'long', type: 'call', strike: spot + 100, premium: 30, qty: 1 }])}>+ leg</button>
+            {legs.length > 0 && <button style={miniBtn} onClick={() => setLegs([])}>clear</button>}
+          </div>
+        }>Legs · {legs.length}</Eyebrow>
+
+        {/* Strategy preset chips — tap to load strategy template */}
+        <div style={{
+          display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 8, marginBottom: 8,
+          WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none',
+          borderBottom: '1px solid rgba(255,255,255,0.06)',
+        }}>
+          {STRATEGY_LIBRARY.map((s) => {
+            const c = { bullish: '#ef5350', bearish: '#26a69a', neutral: '#a78bfa', volatile: '#f0c068' }[s.bias];
+            return (
+              <button key={s.id}
+                onClick={() => setLegs(s.build(Math.round(spot / 50) * 50))}
+                style={{
+                  flexShrink: 0,
+                  padding: '5px 9px', borderRadius: 999,
+                  border: `1px solid ${c}55`,
+                  background: `${c}14`,
+                  color: '#e8eaef', fontFamily: 'inherit',
+                  fontSize: 10, fontWeight: 600, cursor: 'pointer',
+                  display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap',
+                }}>
+                <span style={{ width: 5, height: 5, borderRadius: 3, background: c }} />
+                {s.name}
+              </button>
+            );
+          })}
+        </div>
+
+        {legs.length === 0 ? (
+          <div style={{ padding: '16px 0', textAlign: 'center', fontSize: 11, opacity: 0.5 }}>
+            No legs yet · pick a strategy above or go to Chain
+          </div>
+        ) : (
+          <LegEditor legs={legs} onChange={setLegs} theme="dark" />
+        )}
+      </Glass2>
+
+      {/* Stress test */}
+      <Glass2 tone="panel" padding={12}>
+        <Eyebrow>Stress test</Eyebrow>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+          {[
+            { label: '−5% & IV+30%', spot: -5, iv: 30 },
+            { label: '+3% & IV−10%', spot: 3, iv: -10 },
+            { label: '−10% crash',   spot: -10, iv: 50 },
+            { label: 'Reset',        spot: 0, iv: 0, reset: true },
+          ].map((s, i) => (
+            <button key={i} onClick={() => {
+              if (s.reset) { setSpot(TXO_SPOT); setIv(24); return; }
+              setSpot(Math.round(TXO_SPOT * (1 + s.spot / 100)));
+              setIv(Math.max(5, 24 + s.iv));
+            }} style={{
+              padding: '10px 6px', borderRadius: 8, fontSize: 11, fontWeight: 600,
+              border: '1px solid rgba(255,255,255,0.10)', cursor: 'pointer',
+              background: 'rgba(255,255,255,0.03)', color: '#e8eaef', fontFamily: 'inherit',
+            }}>{s.label}</button>
+          ))}
+        </div>
+      </Glass2>
+    </>
+  );
+}
+
+function MobileChain({ isFold, chartW, spot, expiry, legs, setLegs, addLegFromChain, quality }) {
+  return (
+    <>
+      {/* Net premium card */}
+      <Glass2 tone="raised" padding={12}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <Eyebrow right={<DataQualityPill quality={quality} />}>Net premium</Eyebrow>
+            <div className="tnum" style={{ fontSize: 22, fontWeight: 700, fontFamily: 'ui-monospace, SF Mono, monospace', letterSpacing: -0.3 }}>
+              NT${Math.round(legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0) * 50).toLocaleString()}
+            </div>
+            <div style={{ fontSize: 10, opacity: 0.55, marginTop: 3 }}>
+              {legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0) >= 0 ? 'credit received' : 'debit paid'}
+              <span style={{ opacity: 0.4 }}> · </span>
+              {legs.length} leg{legs.length === 1 ? '' : 's'}
+            </div>
+          </div>
+          {legs.length > 0 && (
+            <button style={miniBtn} onClick={() => setLegs([])}>clear</button>
+          )}
+        </div>
+      </Glass2>
+
+      {/* Option chain (compact: hides OI/Vol on phone, only IV + BID/ASK + Strike) */}
+      <Glass2 tone="panel" padding={10} style={{ overflow: 'auto' }}>
+        <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>}>
+          Option chain
+        </Eyebrow>
+        <MobileChainTable spot={spot} contract={expiry.type} onAddLeg={addLegFromChain} />
+      </Glass2>
+
+      {/* OI Profile */}
+      <Glass2 tone="panel" padding={12}>
+        <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label}</span>}>OI profile</Eyebrow>
+        <OIProfile spot={spot} contract={expiry.type} theme="dark" maxRows={9} />
+      </Glass2>
+
+      {/* Current legs */}
+      {legs.length > 0 && (
+        <Glass2 tone="panel" padding={12}>
+          <Eyebrow>Current legs</Eyebrow>
+          <LegEditor legs={legs} onChange={setLegs} theme="dark" />
+        </Glass2>
+      )}
+    </>
+  );
+}
+
+// Compact chain table for phone — drops OI/Vol columns, keeps IV / BID-ASK / Strike.
+function MobileChainTable({ spot, contract, onAddLeg }) {
+  const rows = uM(() => (window.genChain ? window.genChain({ spot, contract }) : []), [spot, contract]);
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr 70px 1fr 1fr',
+      fontFamily: 'ui-monospace, SF Mono, monospace',
+      fontSize: 11, fontVariantNumeric: 'tabular-nums',
+      borderRadius: 8, overflow: 'hidden',
+      border: '1px solid rgba(255,255,255,0.06)',
+    }}>
+      {/* header */}
+      <div style={hCell}>IV</div>
+      <div style={hCell}>BID/ASK</div>
+      <div style={{ ...hCell, textAlign: 'center' }}>STRIKE</div>
+      <div style={{ ...hCell, textAlign: 'left' }}>BID/ASK</div>
+      <div style={{ ...hCell, textAlign: 'left' }}>IV</div>
+      {rows.map((r) => {
+        const callBg = r.itmCall ? 'rgba(239,83,80,0.08)' : 'transparent';
+        const putBg  = r.itmPut  ? 'rgba(38,166,154,0.08)' : 'transparent';
+        return (
+          <React.Fragment key={r.strike}>
+            <div onClick={() => onAddLeg({ side: 'long', type: 'call', strike: r.strike, premium: parseFloat(r.call.last.toFixed(2)), qty: 1 })}
+              style={{ ...cCell, background: callBg, color: 'rgba(255,255,255,0.6)' }}>{r.call.iv.toFixed(0)}%</div>
+            <div onClick={() => onAddLeg({ side: 'long', type: 'call', strike: r.strike, premium: parseFloat(r.call.last.toFixed(2)), qty: 1 })}
+              style={{ ...cCell, background: callBg, color: '#ef5350', fontWeight: 600 }}>{r.call.bid.toFixed(0)}/{r.call.ask.toFixed(0)}</div>
+            <div style={{
+              ...cCell, textAlign: 'center', fontWeight: r.atm ? 700 : 500,
+              background: r.atm ? 'rgba(240,192,104,0.08)' : 'rgba(255,255,255,0.02)',
+              color: r.atm ? '#f7d394' : '#cdd3df',
+              borderLeft: '1px solid rgba(255,255,255,0.04)',
+              borderRight: '1px solid rgba(255,255,255,0.04)',
+              fontSize: r.atm ? 12 : 11,
+            }}>{r.strike}</div>
+            <div onClick={() => onAddLeg({ side: 'long', type: 'put', strike: r.strike, premium: parseFloat(r.put.last.toFixed(2)), qty: 1 })}
+              style={{ ...cCell, background: putBg, color: '#26a69a', fontWeight: 600, textAlign: 'left' }}>{r.put.bid.toFixed(0)}/{r.put.ask.toFixed(0)}</div>
+            <div onClick={() => onAddLeg({ side: 'long', type: 'put', strike: r.strike, premium: parseFloat(r.put.last.toFixed(2)), qty: 1 })}
+              style={{ ...cCell, background: putBg, color: 'rgba(255,255,255,0.6)', textAlign: 'left' }}>{r.put.iv.toFixed(0)}%</div>
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+}
+const hCell = {
+  padding: '6px 8px', fontSize: 9, letterSpacing: 0.4, textTransform: 'uppercase',
+  color: 'rgba(255,255,255,0.45)', fontWeight: 600, textAlign: 'right',
+  background: 'rgba(255,255,255,0.04)',
+  borderBottom: '1px solid rgba(255,255,255,0.08)',
+};
+const cCell = {
+  padding: '8px', textAlign: 'right', cursor: 'pointer',
+  borderTop: '1px solid rgba(255,255,255,0.04)',
+  transition: 'background .12s',
 };
 
 window.Obsidian3 = Obsidian3;
