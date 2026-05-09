@@ -1,7 +1,7 @@
 // Options Lab service worker.
 // Strategy: cache-first for the app shell + same-origin assets, network-first for HTML.
 // Bumping CACHE_VERSION purges old caches.
-const CACHE_VERSION = 'options-lab-v10';
+const CACHE_VERSION = 'options-lab-v11';
 const APP_SHELL = [
   './',
   './index.html',
