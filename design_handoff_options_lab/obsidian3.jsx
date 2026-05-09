@@ -185,8 +185,16 @@ function Obsidian3() {
     if (vp.layout !== 'desk' && (workspace === 'iv' || workspace === 'compare')) setWorkspace('calc');
   }, [vp.layout]);
 
-  // P&L numbers (×50 NTD per point)
-  const pnlPts = uM(() => legs.reduce((acc, l) => acc + legPayoff(l, spot), 0) * sliceFrac, [legs, spot, sliceFrac]);
+  // P&L numbers (×50 NTD per point). BS-valued at the same daysRem as PayoffChart
+  // so the displayed number always matches the curve.
+  const pnlPts = uM(() => {
+    const daysRem = Math.max(0, dte * (1 - sliceFrac));
+    return legs.reduce((acc, l) => {
+      const sign = l.side === 'long' ? 1 : -1;
+      const v = bsPrice(l.type, spot, l.strike, iv, daysRem);
+      return acc + sign * l.qty * (v - l.premium);
+    }, 0);
+  }, [legs, spot, iv, dte, sliceFrac]);
   const pnlNTD = pnlPts * 50;
   const maxProfit = uM(() => {
     let m = -Infinity;
