@@ -25,13 +25,13 @@ const TXO_DEFAULT_LEGS = [
   { side: 'short', type: 'call', strike: 22100, premium: 18, qty: 1 },
 ];
 
-// TXO weekly expiries (third Wed = monthly settlement)
+// TXO weekly expiries (third Wed = monthly settlement). Capped at 1 month —
+// 自選 / day-trade 用戶通常不交易超過月選的合約，去掉 M+1 (45d) 簡化選項。
 const TXO_EXPIRIES = [
   { id: 'w1', label: 'W1', dte: 3,  type: 'weekly',  date: '12/04' },
   { id: 'w2', label: 'W2', dte: 10, type: 'weekly',  date: '12/11' },
   { id: 'm',  label: 'M',  dte: 17, type: 'monthly', date: '12/18' },
   { id: 'w4', label: 'W4', dte: 24, type: 'weekly',  date: '12/25' },
-  { id: 'm2', label: 'M+1',dte: 45, type: 'monthly', date: '01/22' },
 ];
 
 const SAVED_SCENARIOS = [
@@ -393,15 +393,15 @@ function CalcWorkspace({ legs, setLegs, spot, setSpot, iv, setIv, dte, sliceFrac
           }>Stress test</Eyebrow>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
             {[
-              { label: '−5% & IV+30%', spot: -5, iv: 30 },
-              { label: '+3% & IV−10%', spot: 3, iv: -10 },
-              { label: '−10% crash',   spot: -10, iv: 50 },
+              { label: '−5% & IV+15%', spot: -5, iv: 15 },
+              { label: '+3% & IV−5%',  spot: 3,  iv: -5 },
+              { label: '−10% crash',   spot: -10, iv: 21 },
               { label: 'Reset',        spot: 0,  iv: 0,  reset: true },
             ].map((s, i) => (
               <button key={i} onClick={() => {
                 if (s.reset) { setSpot(TXO_SPOT); setIv(24); return; }
                 setSpot(Math.round(TXO_SPOT * (1 + s.spot/100)));
-                setIv(Math.max(5, 24 + s.iv));
+                setIv(Math.max(10, Math.min(50, 24 + s.iv)));
               }} style={{
                 padding: '8px 6px', borderRadius: 8, fontSize: 10, fontWeight: 600,
                 border: '1px solid rgba(255,255,255,0.10)', cursor: 'pointer',
@@ -540,7 +540,7 @@ function CalcWorkspace({ legs, setLegs, spot, setSpot, iv, setIv, dte, sliceFrac
         <Glass2 tone="raised" padding="16px 22px">
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28 }}>
             <Slider label="Spot" value={spot} min={20000} max={23500} step={10} onChange={setSpot} format={(v) => v.toLocaleString()} theme="dark" />
-            <Slider label="IV" value={iv} min={5} max={80} step={0.5} suffix="%" onChange={setIv} theme="dark" />
+            <Slider label="IV" value={iv} min={10} max={50} step={0.5} suffix="%" onChange={setIv} theme="dark" />
           </div>
         </Glass2>
       </div>
@@ -984,7 +984,7 @@ function MobileApp({
         <div style={{ display: 'grid', gridTemplateColumns: workspace === 'calc' ? '1fr 1fr' : '1fr', gap: 16 }}>
           <Slider label="Spot" value={spot} min={20000} max={23500} step={10} onChange={setSpot} format={(v) => v.toLocaleString()} theme="dark" />
           {workspace === 'calc' && (
-            <Slider label="IV" value={iv} min={5} max={80} step={0.5} suffix="%" onChange={setIv} theme="dark" />
+            <Slider label="IV" value={iv} min={10} max={50} step={0.5} suffix="%" onChange={setIv} theme="dark" />
           )}
         </div>
       </div>
@@ -1152,15 +1152,15 @@ function MobileCalc({
         <Eyebrow>Stress test</Eyebrow>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
           {[
-            { label: '−5% & IV+30%', spot: -5, iv: 30 },
-            { label: '+3% & IV−10%', spot: 3, iv: -10 },
-            { label: '−10% crash',   spot: -10, iv: 50 },
+            { label: '−5% & IV+15%', spot: -5, iv: 15 },
+            { label: '+3% & IV−5%',  spot: 3,  iv: -5 },
+            { label: '−10% crash',   spot: -10, iv: 21 },
             { label: 'Reset',        spot: 0, iv: 0, reset: true },
           ].map((s, i) => (
             <button key={i} onClick={() => {
               if (s.reset) { setSpot(TXO_SPOT); setIv(24); return; }
               setSpot(Math.round(TXO_SPOT * (1 + s.spot / 100)));
-              setIv(Math.max(5, 24 + s.iv));
+              setIv(Math.max(10, Math.min(50, 24 + s.iv)));
             }} style={{
               padding: '10px 6px', borderRadius: 8, fontSize: 11, fontWeight: 600,
               border: '1px solid rgba(255,255,255,0.10)', cursor: 'pointer',

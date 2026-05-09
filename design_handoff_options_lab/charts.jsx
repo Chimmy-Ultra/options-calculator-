@@ -4,15 +4,23 @@
 const { useMemo: useMemoM } = React;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Theta decay curve — value of position vs. days remaining
-function ThetaDecay({ theme = 'dark', height = 90, width = 280, dte = 30 }) {
+// Theta decay curve — option's remaining time value as time flows forward.
+// X axis: 0 = now (left) → dte days from now = expiry (right).
+// Y axis: remaining time value (drops to 0 at expiry).
+// This is the natural reading direction (time → moves left → right) so the curve
+// visibly DECAYS instead of looking like it's growing.
+function ThetaDecay({ theme = 'dark', height = 90, width = 280, dte = 17, dteMax = 30 }) {
   const W = width, H = height, pad = 14;
   const N = 40;
+  // X = time elapsed from now [0, dte]. At t=0 → daysRemaining=dte (full value).
+  // At t=dte → daysRemaining=0 (zero time value).
+  const baseDays = Math.max(1, dteMax);
   const pts = [];
   for (let i = 0; i <= N; i++) {
-    const d = (i / N) * 90; // days remaining
-    // simple convex decay model: value = a * sqrt(d) + b
-    const v = 0.18 * Math.sqrt(d / 90) + 0.02;
+    const t = (i / N) * dte;             // days elapsed
+    const remaining = dte - t;           // days to expiry
+    // sqrt-decay: time value ≈ k * sqrt(daysRemaining)
+    const v = 0.18 * Math.sqrt(remaining / baseDays) + 0.02;
     pts.push([pad + (i / N) * (W - pad * 2), H - pad - v * (H - pad * 2) * 4.0]);
   }
   const path = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
@@ -21,10 +29,9 @@ function ThetaDecay({ theme = 'dark', height = 90, width = 280, dte = 30 }) {
   const fill = theme === 'dark' ? 'rgba(240,192,104,0.18)' : 'rgba(217,154,44,0.18)';
   const axis = theme === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.10)';
   const txt = theme === 'dark' ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.5)';
-  // Marker at current dte
-  const mx = pad + (dte / 90) * (W - pad * 2);
-  const myIdx = Math.round((dte / 90) * N);
-  const my = pts[myIdx]?.[1] ?? H/2;
+  // Marker at t=0 (now). Lives on the left edge of the chart.
+  const mx = pts[0][0];
+  const my = pts[0][1];
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H}>
       <line x1={pad} x2={W-pad} y1={H-pad} y2={H-pad} stroke={axis} />
@@ -32,8 +39,8 @@ function ThetaDecay({ theme = 'dark', height = 90, width = 280, dte = 30 }) {
       <path d={path} stroke={stroke} strokeWidth="1.5" fill="none" />
       <line x1={mx} x2={mx} y1={pad/2} y2={H-pad} stroke={txt} strokeDasharray="2 3" strokeOpacity="0.5" />
       <circle cx={mx} cy={my} r="3.5" fill={stroke} stroke={theme === 'dark' ? '#0c0e14' : '#fff'} strokeWidth="1.5" />
-      <text x={pad} y={H-3} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace">0d</text>
-      <text x={W-pad} y={H-3} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace" textAnchor="end">90d</text>
+      <text x={pad} y={H-3} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace">now</text>
+      <text x={W-pad} y={H-3} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace" textAnchor="end">expiry · {dte}d</text>
     </svg>
   );
 }
