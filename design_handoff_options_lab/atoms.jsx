@@ -78,25 +78,30 @@ function Glass({ variant = 'light', radius = 18, padding = 20, style, children, 
 // ─────────────────────────────────────────────────────────────────────────────
 // 2D payoff at expiry (SVG) — with probability cone overlay and time-slice
 function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, iv = 28, dte = 30, showCone = false, sliceFrac = 1, rangePct = 0.08, showKeyNumbers = false }) {
-  // Auto-fit X range around the legs' strikes + spot, with a margin. Falls back to
-  // spot ± rangePct when there are no legs. The previous fixed rangePct made narrow
-  // strategies (e.g. 200pt-wide bull-call) look flat because the elbow sat in 10%
-  // of the chart while the rest was just capped max-profit / max-loss plateaus.
+  // Auto-fit X range. Anchor on the STRIKE midpoint, span = max(strike spread,
+  // 1σ ATM move). Crucially we do NOT pre-include spot in the range — when spot
+  // is far from strikes (e.g. 2000pt deep OTM bull-call), forcing the range to
+  // cover spot stretches the chart so 90% of it is flat max-loss plateau and
+  // the actual "elbow" gets squished into a tiny corner. Instead, if spot is
+  // close-ish (within halfSpan), extend gently; if spot is far, clamp the spot
+  // indicator to the chart edge with an arrow in the render below.
   const xs = useMemo(() => {
     let lo, hi;
     if (legs && legs.length > 0) {
       const strikes = legs.map((l) => l.strike);
-      const strikeLo = Math.min.apply(null, [...strikes, spot]);
-      const strikeHi = Math.max.apply(null, [...strikes, spot]);
-      const spread = strikeHi - strikeLo;
-      // Wider margin for narrow strategies (so they don't fill 100% of chart)
-      // tighter margin (relative) for wide strategies (iron condor, etc.).
-      const margin = Math.max(spread * 0.40, spot * 0.012);
-      lo = strikeLo - margin;
-      hi = strikeHi + margin;
-      // We do NOT extend the X range to fit the probability cone — that would defeat
-      // the strike-tight fit on narrow strategies. The cone rects are clamped to the
-      // chart bounds in the render below, so they show the visible portion only.
+      const sLo = Math.min.apply(null, strikes);
+      const sHi = Math.max.apply(null, strikes);
+      const spread = sHi - sLo;
+      const center = (sLo + sHi) / 2;
+      // 1σ ATM move in points (use spot as ATM proxy). Gives a sensible default
+      // breathing room for single-strike strategies (long call/put) where spread=0.
+      const sigmaTpts = spot * (iv / 100) * Math.sqrt(Math.max(dte, 0.5) / 365);
+      const halfSpan = Math.max(spread / 2 + 100, sigmaTpts * 0.6);
+      lo = center - halfSpan;
+      hi = center + halfSpan;
+      // Stretch toward spot if it's nearby; otherwise keep chart focused on strikes.
+      if (spot < lo && lo - spot < halfSpan) lo = spot - 50;
+      if (spot > hi && spot - hi < halfSpan) hi = spot + 50;
     } else {
       lo = spot * (1 - rangePct);
       hi = spot * (1 + rangePct);
@@ -138,7 +143,6 @@ function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, i
   const coneColor = theme === 'dark' ? 'rgba(167,139,250,0.18)' : 'rgba(124,58,237,0.18)';
 
   const linePath = ys.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-  const spotIdx = xs.findIndex((v) => v >= spot);
 
   // Find break-even points (zero crossings)
   const breakEvens = [];
@@ -185,12 +189,33 @@ function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, i
         return <path key={k} d={d} fill={seg.sign > 0 ? upColor : downColor} fillOpacity="0.22" />;
       })}
       <path d={linePath} fill="none" stroke={textColor} strokeWidth="1.5" strokeOpacity="0.9" />
-      {spotIdx >= 0 && (
-        <g>
-          <line x1={x(spotIdx)} x2={x(spotIdx)} y1={pad/2} y2={H - pad/2} stroke={textColor} strokeWidth="1" strokeDasharray="3 3" strokeOpacity="0.6" />
-          <circle cx={x(spotIdx)} cy={y(ys[spotIdx])} r="3.5" fill={ys[spotIdx] >= 0 ? upColor : downColor} stroke={theme === 'dark' ? '#0c0e14' : '#fff'} strokeWidth="1.5" />
-        </g>
-      )}
+      {(() => {
+        // Spot indicator. If spot is inside the chart range, plot it on the curve.
+        // If spot is outside, clamp to the nearest edge and draw an arrow + label
+        // pointing the direction the spot is in — so the user can see "spot is way
+        // OTM" at a glance without forcing the chart to widen.
+        const inRange = spot >= xs[0] && spot <= xs[xs.length - 1];
+        if (inRange) {
+          const idx = xs.findIndex((v) => v >= spot);
+          if (idx < 0) return null;
+          return (
+            <g>
+              <line x1={x(idx)} x2={x(idx)} y1={pad/2} y2={H - pad/2} stroke={textColor} strokeWidth="1" strokeDasharray="3 3" strokeOpacity="0.6" />
+              <circle cx={x(idx)} cy={y(ys[idx])} r="3.5" fill={ys[idx] >= 0 ? upColor : downColor} stroke={theme === 'dark' ? '#0c0e14' : '#fff'} strokeWidth="1.5" />
+            </g>
+          );
+        }
+        const left = spot < xs[0];
+        const ex = left ? pad + 6 : W - pad - 6;
+        return (
+          <g>
+            <line x1={ex} x2={ex} y1={pad/2} y2={H - pad/2} stroke={textColor} strokeWidth="1" strokeDasharray="3 3" strokeOpacity="0.4" />
+            <text x={left ? ex + 4 : ex - 4} y={H - pad/2 - 2} fontSize="9" fill={textColor} textAnchor={left ? 'start' : 'end'} fontFamily="ui-monospace, SF Mono, monospace">
+              {left ? '←' : '→'} spot {spot.toFixed(0)}
+            </text>
+          </g>
+        );
+      })()}
       {showKeyNumbers && breakEvens.map((be, k) => {
         const tx = xat(be);
         // place break-even labels at very top of chart so they never collide with line/spot/maxProfit
