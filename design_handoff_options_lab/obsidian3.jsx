@@ -88,6 +88,7 @@ function WorkspaceTabs({ value, onChange, accent }) {
   const items = [
     { id: 'chain',  label: 'Chain',      icon: '☷' },
     { id: 'calc',   label: 'Calculator', icon: '◈' },
+    { id: 'pricer', label: 'Pricer',     icon: '$' },
     { id: 'iv',     label: 'IV Surface', icon: '◬' },
     { id: 'compare',label: 'Compare',    icon: '◫' },
   ];
@@ -176,7 +177,7 @@ function Obsidian3() {
   const D = DENSITY[t.density] || DENSITY.comfortable;
   const accent = `oklch(0.66 0.16 ${t.accentHue})`;
   const vp = useViewport();
-  // On phone/fold, only Calculator + Chain workspaces are shown.
+  // On phone/fold, only Calculator / Chain / Pricer workspaces are shown.
   // If the user previously chose iv/compare on a desktop, snap back to calc.
   uE(() => {
     if (vp.layout !== 'desk' && (workspace === 'iv' || workspace === 'compare')) setWorkspace('calc');
@@ -300,6 +301,9 @@ function Obsidian3() {
           D={D}
           quality={quality}
         />
+      )}
+      {workspace === 'pricer' && (
+        <PricerWorkspace D={D} spot={spot} iv={iv} dte={dte} accent={accent} />
       )}
       {workspace === 'iv' && (
         <IVWorkspace D={D} expiry={expiry} />
@@ -612,6 +616,22 @@ function ChainWorkspace({ spot, expiry, onAddLeg, legs, setLegs, D, quality }) {
   );
 }
 
+// ───────────────────────────────────────────────── PRICER WORKSPACE
+function PricerWorkspace({ D, spot, iv, dte, accent }) {
+  return (
+    <div style={{ position: 'absolute', top: 110, left: 0, right: 0, bottom: 0, zIndex: 5, padding: '0 24px 24px', overflowY: 'auto' }}>
+      <div style={{ maxWidth: 540, margin: '0 auto' }}>
+        <Glass2 tone="panel" padding={D.panelPad}>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>Black-Scholes · 歐式</span>}>
+            Option Pricer <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· 單張合約理論定價</span>
+          </Eyebrow>
+          <OptionPricer spot={spot} iv={iv} dte={dte} theme="dark" accent={accent} />
+        </Glass2>
+      </div>
+    </div>
+  );
+}
+
 // ───────────────────────────────────────────────── IV SURFACE WORKSPACE
 function IVWorkspace({ D, expiry }) {
   const ref = uR(null);
@@ -899,13 +919,17 @@ function MobileApp({
           </Glass2>
         </div>
 
-        {/* Workspace toggle (mobile = only Calc + Chain) */}
+        {/* Workspace toggle (mobile = Calc / Chain / Pricer) */}
         <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-          {[{ id: 'calc', label: 'Calculator' }, { id: 'chain', label: 'Chain' }].map((it) => {
+          {[
+            { id: 'calc', label: 'Calc' },
+            { id: 'chain', label: 'Chain' },
+            { id: 'pricer', label: 'Pricer' },
+          ].map((it) => {
             const active = workspace === it.id;
             return (
               <button key={it.id} onClick={() => setWorkspace(it.id)} style={{
-                flex: 1, padding: '8px 10px', borderRadius: 10, border: 'none',
+                flex: 1, padding: '8px 6px', borderRadius: 10, border: 'none',
                 fontSize: 12, fontWeight: 700, letterSpacing: 0.2,
                 background: active ? `linear-gradient(150deg, ${accent}, oklch(0.55 0.18 240))` : 'rgba(255,255,255,0.05)',
                 color: active ? '#fff' : 'rgba(255,255,255,0.65)',
@@ -946,7 +970,7 @@ function MobileApp({
 
       {/* Body */}
       <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {workspace === 'calc' ? (
+        {workspace === 'calc' && (
           <MobileCalc
             isFold={isFold} chartW={chartW}
             legs={legs} setLegs={setLegs}
@@ -958,7 +982,8 @@ function MobileApp({
             portfolioG={portfolioG} popValue={popValue} quality={quality}
             accent={accent} t={t}
           />
-        ) : (
+        )}
+        {workspace === 'chain' && (
           <MobileChain
             isFold={isFold} chartW={chartW}
             spot={spot} expiry={expiry}
@@ -966,6 +991,12 @@ function MobileApp({
             addLegFromChain={addLegFromChain}
             quality={quality}
           />
+        )}
+        {workspace === 'pricer' && (
+          <Glass2 tone="panel" padding={14}>
+            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>單張定價</span>}>Option Pricer</Eyebrow>
+            <OptionPricer spot={spot} iv={iv} dte={dte} theme="dark" accent={accent} />
+          </Glass2>
         )}
       </div>
 
@@ -981,9 +1012,9 @@ function MobileApp({
         WebkitBackdropFilter: 'blur(12px)',
         borderTop: '1px solid rgba(255,255,255,0.06)',
       }}>
-        <div style={{ display: 'grid', gridTemplateColumns: workspace === 'calc' ? '1fr 1fr' : '1fr', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: workspace !== 'chain' ? '1fr 1fr' : '1fr', gap: 16 }}>
           <Slider label="Spot" value={spot} min={20000} max={23500} step={10} onChange={setSpot} format={(v) => v.toLocaleString()} theme="dark" />
-          {workspace === 'calc' && (
+          {workspace !== 'chain' && (
             <Slider label="IV" value={iv} min={10} max={50} step={0.5} suffix="%" onChange={setIv} theme="dark" />
           )}
         </div>

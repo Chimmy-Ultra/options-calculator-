@@ -247,6 +247,50 @@ function normalCdf(x) {
   return 0.5 * (1 + sign * y);
 }
 
+// Black-Scholes theoretical price for a European call/put at spot S, strike K,
+// implied vol ivPct (in %), days to expiry, risk-free r (decimal). Returns price
+// in points (multiply by 50 for TXO NTD).
+function bsPrice(type, S, K, ivPct, dte, r = 0.015) {
+  const T = Math.max(dte / 365, 1e-6);
+  const sigma = Math.max(ivPct / 100, 1e-4);
+  const sigmaRT = sigma * Math.sqrt(T);
+  const d1 = (Math.log(S / K) + (r + sigma * sigma / 2) * T) / sigmaRT;
+  const d2 = d1 - sigmaRT;
+  if (type === 'call') {
+    return S * normalCdf(d1) - K * Math.exp(-r * T) * normalCdf(d2);
+  }
+  return K * Math.exp(-r * T) * normalCdf(-d2) - S * normalCdf(-d1);
+}
+
+// All BS Greeks for a single contract (no qty / side scaling), suitable for the
+// single-contract pricer UI. Includes Rho. Theta scaled to per-day, Vega to
+// per-1-vol-pt, Rho to per-1-pct-rate.
+function bsGreeks(type, S, K, ivPct, dte, r = 0.015) {
+  const T = Math.max(dte / 365, 1e-6);
+  const sigma = Math.max(ivPct / 100, 1e-4);
+  const sigmaRT = sigma * Math.sqrt(T);
+  const d1 = (Math.log(S / K) + (r + sigma * sigma / 2) * T) / sigmaRT;
+  const d2 = d1 - sigmaRT;
+  const nd1 = normalPdf(d1);
+  let delta, theta, rho;
+  if (type === 'call') {
+    delta = normalCdf(d1);
+    theta = (-S * nd1 * sigma) / (2 * Math.sqrt(T)) - r * K * Math.exp(-r * T) * normalCdf(d2);
+    rho   = K * T * Math.exp(-r * T) * normalCdf(d2);
+  } else {
+    delta = normalCdf(d1) - 1;
+    theta = (-S * nd1 * sigma) / (2 * Math.sqrt(T)) + r * K * Math.exp(-r * T) * normalCdf(-d2);
+    rho   = -K * T * Math.exp(-r * T) * normalCdf(-d2);
+  }
+  return {
+    delta,
+    gamma: nd1 / (S * sigmaRT),
+    theta: theta / 365,    // per day
+    vega:  (S * nd1 * Math.sqrt(T)) / 100,  // per 1 vol pt
+    rho:   rho / 100,      // per 1 pct rate
+  };
+}
+
 // Per-leg BS Greeks at spot S, IV (percent), DTE (days), risk-free r (decimal).
 // Returns { delta, gamma, theta, vega } scaled to per-day theta and per-1-vol-pt vega.
 function legGreeks(leg, S, ivPct, dte, r = 0.015) {
@@ -586,6 +630,7 @@ Object.assign(window, {
   Glass, PayoffChart, CrossSection, Slider, LegEditor, NumField, GreekChip, Surface3DMount,
   STRATEGIES, DEFAULT_LEGS,
   legPayoff, normalPdf, normalCdf, legGreeks, portfolioGreeks, pnlDistribution,
+  bsPrice, bsGreeks,
   legLiquidity, dataQuality,
   useViewport,
 });
