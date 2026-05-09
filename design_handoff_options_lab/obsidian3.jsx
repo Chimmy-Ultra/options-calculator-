@@ -19,10 +19,12 @@ const DENSITY = {
 // TXO market state
 const TXO_SPOT = 21850;
 const STRIKE_STEP = 50;
-// Default legs: a TXO bull-call spread
+// Default legs: a TXO bull-call spread, premiums priced by Black-Scholes
+// at the default spot/iv/dte (21850 / 24% / 17d ≈ monthly settlement).
+const _bsRound = (type, S, K, iv, dte) => Math.round(window.bsPrice(type, S, K, iv, dte) * 100) / 100;
 const TXO_DEFAULT_LEGS = [
-  { side: 'long',  type: 'call', strike: 21900, premium: 65, qty: 1 },
-  { side: 'short', type: 'call', strike: 22100, premium: 18, qty: 1 },
+  { side: 'long',  type: 'call', strike: 21900, premium: _bsRound('call', 21850, 21900, 24, 17), qty: 1 },
+  { side: 'short', type: 'call', strike: 22100, premium: _bsRound('call', 21850, 22100, 24, 17), qty: 1 },
 ];
 
 // TXO weekly expiries (third Wed = monthly settlement). Capped at 1 month —
@@ -309,7 +311,7 @@ function Obsidian3() {
         <IVWorkspace D={D} expiry={expiry} />
       )}
       {workspace === 'compare' && (
-        <CompareWorkspace D={D} spot={spot} />
+        <CompareWorkspace D={D} spot={spot} iv={iv} dte={dte} />
       )}
 
       {/* Tweaks panel */}
@@ -386,7 +388,7 @@ function CalcWorkspace({ legs, setLegs, spot, setSpot, iv, setIv, dte, sliceFrac
       }}>
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow right={
-            <button style={miniBtn} onClick={() => setLegs([...legs, { side: 'long', type: 'call', strike: spot + 100, premium: 30, qty: 1 }])}>+ leg</button>
+            <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 100) / 50) * 50, iv, dte)])}>+ leg</button>
           }>Legs</Eyebrow>
           <LegEditor legs={legs} onChange={setLegs} theme="dark" />
         </Glass2>
@@ -679,21 +681,42 @@ function IVWorkspace({ D, expiry }) {
 }
 
 // ───────────────────────────────────────────────── COMPARE WORKSPACE
+// Strategy templates. Premium is computed by Black-Scholes at the current
+// spot/iv/dte so the numbers actually reflect the underlying TXO regime
+// (previously these were hardcoded for spot≈480 and made the calc nonsense
+// at TXO 21850). Strikes snap to the 50pt TXO grid.
+function _bs(type, S, K, iv, dte) {
+  return Math.round(window.bsPrice(type, S, K, iv, dte) * 100) / 100;
+}
+function _mkLeg(side, type, S, K, iv, dte, qty = 1) {
+  return { side, type, strike: K, premium: _bs(type, S, K, iv, dte), qty };
+}
 const STRATEGY_LIBRARY = [
-  { id: 'bull-call',  name: 'Bull Call Spread',  bias: 'bullish', tag: '看小漲', build: (s) => [{ side:'long',type:'call',strike:s,premium:65,qty:1 }, { side:'short',type:'call',strike:s+200,premium:18,qty:1 }] },
-  { id: 'bear-put',   name: 'Bear Put Spread',   bias: 'bearish', tag: '看小跌', build: (s) => [{ side:'long',type:'put',strike:s,premium:60,qty:1 }, { side:'short',type:'put',strike:s-200,premium:16,qty:1 }] },
-  { id: 'iron-condor',name: 'Iron Condor',       bias: 'neutral', tag: '盤整收租', build: (s) => [{ side:'short',type:'put',strike:s-300,premium:30,qty:1 }, { side:'long',type:'put',strike:s-500,premium:14,qty:1 }, { side:'short',type:'call',strike:s+300,premium:22,qty:1 }, { side:'long',type:'call',strike:s+500,premium:10,qty:1 }] },
-  { id: 'straddle',   name: 'Long Straddle',     bias: 'volatile',tag: '大波動', build: (s) => [{ side:'long',type:'call',strike:s,premium:120,qty:1 }, { side:'long',type:'put',strike:s,premium:115,qty:1 }] },
-  { id: 'strangle',   name: 'Long Strangle',     bias: 'volatile',tag: '大波動(便宜)', build: (s) => [{ side:'long',type:'call',strike:s+150,premium:55,qty:1 }, { side:'long',type:'put',strike:s-150,premium:50,qty:1 }] },
-  { id: 'short-strangle', name: 'Short Strangle',bias: 'neutral', tag: '盤整裸賣', build: (s) => [{ side:'short',type:'call',strike:s+200,premium:45,qty:1 }, { side:'short',type:'put',strike:s-200,premium:40,qty:1 }] },
-  { id: 'put-credit', name: 'Put Credit Spread', bias: 'bullish', tag: '看不跌', build: (s) => [{ side:'short',type:'put',strike:s-100,premium:50,qty:1 }, { side:'long',type:'put',strike:s-300,premium:18,qty:1 }] },
-  { id: 'call-credit',name: 'Call Credit Spread',bias: 'bearish', tag: '看不漲', build: (s) => [{ side:'short',type:'call',strike:s+100,premium:48,qty:1 }, { side:'long',type:'call',strike:s+300,premium:16,qty:1 }] },
-  { id: 'butterfly',  name: 'Long Butterfly',    bias: 'neutral', tag: '精準錨點', build: (s) => [{ side:'long',type:'call',strike:s-150,premium:120,qty:1 }, { side:'short',type:'call',strike:s,premium:60,qty:2 }, { side:'long',type:'call',strike:s+150,premium:25,qty:1 }] },
-  { id: 'long-call',  name: 'Long Call',         bias: 'bullish', tag: '純多單', build: (s) => [{ side:'long',type:'call',strike:s,premium:80,qty:1 }] },
-  { id: 'long-put',   name: 'Long Put',          bias: 'bearish', tag: '純空單', build: (s) => [{ side:'long',type:'put',strike:s,premium:75,qty:1 }] },
+  { id: 'bull-call',  name: 'Bull Call Spread',  bias: 'bullish', tag: '看小漲',
+    build: (s, iv, dte) => [_mkLeg('long','call',s,s,iv,dte), _mkLeg('short','call',s,s+200,iv,dte)] },
+  { id: 'bear-put',   name: 'Bear Put Spread',   bias: 'bearish', tag: '看小跌',
+    build: (s, iv, dte) => [_mkLeg('long','put',s,s,iv,dte), _mkLeg('short','put',s,s-200,iv,dte)] },
+  { id: 'iron-condor',name: 'Iron Condor',       bias: 'neutral', tag: '盤整收租',
+    build: (s, iv, dte) => [_mkLeg('short','put',s,s-300,iv,dte), _mkLeg('long','put',s,s-500,iv,dte), _mkLeg('short','call',s,s+300,iv,dte), _mkLeg('long','call',s,s+500,iv,dte)] },
+  { id: 'straddle',   name: 'Long Straddle',     bias: 'volatile',tag: '大波動',
+    build: (s, iv, dte) => [_mkLeg('long','call',s,s,iv,dte), _mkLeg('long','put',s,s,iv,dte)] },
+  { id: 'strangle',   name: 'Long Strangle',     bias: 'volatile',tag: '大波動(便宜)',
+    build: (s, iv, dte) => [_mkLeg('long','call',s,s+150,iv,dte), _mkLeg('long','put',s,s-150,iv,dte)] },
+  { id: 'short-strangle', name: 'Short Strangle',bias: 'neutral', tag: '盤整裸賣',
+    build: (s, iv, dte) => [_mkLeg('short','call',s,s+200,iv,dte), _mkLeg('short','put',s,s-200,iv,dte)] },
+  { id: 'put-credit', name: 'Put Credit Spread', bias: 'bullish', tag: '看不跌',
+    build: (s, iv, dte) => [_mkLeg('short','put',s,s-100,iv,dte), _mkLeg('long','put',s,s-300,iv,dte)] },
+  { id: 'call-credit',name: 'Call Credit Spread',bias: 'bearish', tag: '看不漲',
+    build: (s, iv, dte) => [_mkLeg('short','call',s,s+100,iv,dte), _mkLeg('long','call',s,s+300,iv,dte)] },
+  { id: 'butterfly',  name: 'Long Butterfly',    bias: 'neutral', tag: '精準錨點',
+    build: (s, iv, dte) => [_mkLeg('long','call',s,s-150,iv,dte), _mkLeg('short','call',s,s,iv,dte,2), _mkLeg('long','call',s,s+150,iv,dte)] },
+  { id: 'long-call',  name: 'Long Call',         bias: 'bullish', tag: '純多單',
+    build: (s, iv, dte) => [_mkLeg('long','call',s,s,iv,dte)] },
+  { id: 'long-put',   name: 'Long Put',          bias: 'bearish', tag: '純空單',
+    build: (s, iv, dte) => [_mkLeg('long','put',s,s,iv,dte)] },
 ];
 
-function CompareWorkspace({ D, spot }) {
+function CompareWorkspace({ D, spot, iv, dte }) {
   const [picked, setPicked] = uS(['bull-call', 'iron-condor', 'straddle']);
   const [showPicker, setShowPicker] = uS(false);
 
@@ -743,6 +766,8 @@ function CompareWorkspace({ D, spot }) {
             key={id}
             strategy={STRATEGY_LIBRARY.find((x) => x.id === id)}
             spot={spot}
+            iv={iv}
+            dte={dte}
             D={D}
             biasColor={biasColor}
             onRemove={() => toggle(id)}
@@ -753,9 +778,9 @@ function CompareWorkspace({ D, spot }) {
   );
 }
 
-function CompareCard({ strategy: s, spot, D, biasColor, onRemove }) {
-  // Local editable legs — initialize from strategy's build()
-  const [legs, setLegs] = uS(() => s.build(Math.round(spot / 50) * 50));
+function CompareCard({ strategy: s, spot, iv, dte, D, biasColor, onRemove }) {
+  // Local editable legs — initialize from strategy's build() at current iv/dte.
+  const [legs, setLegs] = uS(() => s.build(Math.round(spot / 50) * 50, iv, dte));
   const c = biasColor[s.bias];
 
   const credit = legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0);
@@ -1137,7 +1162,7 @@ function MobileCalc({
       <Glass2 tone="panel" padding={12}>
         <Eyebrow right={
           <div style={{ display: 'flex', gap: 4 }}>
-            <button style={miniBtn} onClick={() => setLegs([...legs, { side: 'long', type: 'call', strike: spot + 100, premium: 30, qty: 1 }])}>+ leg</button>
+            <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 100) / 50) * 50, iv, dte)])}>+ leg</button>
             {legs.length > 0 && <button style={miniBtn} onClick={() => setLegs([])}>clear</button>}
           </div>
         }>Legs · {legs.length}</Eyebrow>
@@ -1152,7 +1177,7 @@ function MobileCalc({
             const c = { bullish: '#ef5350', bearish: '#26a69a', neutral: '#a78bfa', volatile: '#f0c068' }[s.bias];
             return (
               <button key={s.id}
-                onClick={() => setLegs(s.build(Math.round(spot / 50) * 50))}
+                onClick={() => setLegs(s.build(Math.round(spot / 50) * 50, iv, dte))}
                 style={{
                   flexShrink: 0,
                   padding: '5px 9px', borderRadius: 999,

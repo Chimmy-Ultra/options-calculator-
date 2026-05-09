@@ -105,8 +105,16 @@ function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, i
     for (let i = 0; i <= 80; i++) arr.push(lo + (i / 80) * (hi - lo));
     return arr;
   }, [legs, spot, iv, dte, showCone, rangePct]);
-  // payoff at slice: lerp between zero P&L (now, no time decay) and full intrinsic at expiry
-  const ys = xs.map((s) => legs.reduce((acc, l) => acc + legPayoff(l, s), 0) * sliceFrac);
+  // P&L at the time slice: BS-valued at daysRem = dte * (1 - sliceFrac).
+  // sliceFrac=0 → daysRem=dte → smooth BS curve − premium (the realistic "now" P&L).
+  // sliceFrac=1 → daysRem≈0 → kinked intrinsic − premium (expiry hockey stick).
+  // Previous `intrinsic * sliceFrac` showed a flat zero line at "now", which is wrong.
+  const daysRem = Math.max(0, dte * (1 - sliceFrac));
+  const ys = xs.map((s) => legs.reduce((acc, l) => {
+    const sign = l.side === 'long' ? 1 : -1;
+    const value = bsPrice(l.type, s, l.strike, iv, daysRem);
+    return acc + sign * l.qty * (value - l.premium);
+  }, 0));
   const maxY = Math.max(...ys.map(Math.abs), 1);
   const pad = 16;
   const W = width, H = height;
