@@ -82,32 +82,29 @@
     return sp;
   }
 
-  function makeSurface({ container, theme = 'dark', scheme = 'diverging', segments, params, onHover }) {
+  function makeSurface({ container, theme = 'dark', scheme = 'diverging', segments = 80, params, onHover }) {
     if (!READY() || !container) return null;
     container.innerHTML = '';
 
-    // Detect touch devices to apply mobile perf budget:
-    //   - mesh density 80×80 (6400 verts) → 40×40 (1600 verts) (4× lighter)
-    //   - MeshPhysicalMaterial (clearcoat / sheen / fancy shaders) → MeshLambertMaterial
-    //     (much cheaper fragment shader, still respects vertex colors + lights)
-    //   - cap pixel ratio at 1.5 instead of 2 (cuts fragment work ~30%)
-    // These cumulatively let mid-tier Android phones render the surface without
-    // chewing the GPU during page scroll.
+    // We keep the full MeshPhysicalMaterial (clearcoat / sheen) and full mesh
+    // density (80×80) on all devices — the user wants the lush look. The major
+    // mobile perf win comes from the IntersectionObserver below: when the canvas
+    // scrolls off-screen we stop the render loop entirely. So scrolling the
+    // page past the 3D doesn't continuously chew the GPU.
     const isTouch = !!(window.matchMedia && !window.matchMedia('(hover: hover)').matches);
-    const segs = segments || (isTouch ? 40 : 80);
 
     const w = container.clientWidth, h = container.clientHeight;
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(36, w / h, 0.1, 100);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: !isTouch, alpha: true });
-    renderer.setPixelRatio(Math.min(isTouch ? 1.5 : 2, window.devicePixelRatio || 1));
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     renderer.setSize(w, h);
     renderer.setClearColor(0x000000, 0);
     container.appendChild(renderer.domElement);
 
     const size = 2;
-    const geom = new THREE.PlaneGeometry(size, size, segs, segs);
+    const geom = new THREE.PlaneGeometry(size, size, segments, segments);
     geom.rotateX(-Math.PI / 2);
 
     function rebuildColors(curScheme) {
@@ -134,29 +131,20 @@
     let curScheme = scheme;
     rebuildColors(curScheme);
 
-    const mat = isTouch
-      ? new THREE.MeshLambertMaterial({
-          vertexColors: true,
-          side: THREE.DoubleSide,
-          transparent: true,
-          opacity: 0.95,
-          emissive: new THREE.Color(theme === 'dark' ? 0x1a1f2e : 0x000000),
-          emissiveIntensity: theme === 'dark' ? 0.18 : 0,
-        })
-      : new THREE.MeshPhysicalMaterial({
-          vertexColors: true,
-          roughness: 0.35,
-          metalness: 0.15,
-          clearcoat: 0.85,
-          clearcoatRoughness: 0.18,
-          side: THREE.DoubleSide,
-          transparent: true,
-          opacity: 0.98,
-          emissive: new THREE.Color(theme === 'dark' ? 0x1a1f2e : 0x000000),
-          emissiveIntensity: theme === 'dark' ? 0.25 : 0,
-          sheen: 0.5,
-          sheenColor: new THREE.Color(theme === 'dark' ? 0x88aaff : 0xffe0c0),
-        });
+    const mat = new THREE.MeshPhysicalMaterial({
+      vertexColors: true,
+      roughness: 0.35,
+      metalness: 0.15,
+      clearcoat: 0.85,
+      clearcoatRoughness: 0.18,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.98,
+      emissive: new THREE.Color(theme === 'dark' ? 0x1a1f2e : 0x000000),
+      emissiveIntensity: theme === 'dark' ? 0.25 : 0,
+      sheen: 0.5,
+      sheenColor: new THREE.Color(theme === 'dark' ? 0x88aaff : 0xffe0c0),
+    });
     const mesh = new THREE.Mesh(geom, mat);
     scene.add(mesh);
 
@@ -286,8 +274,8 @@
     // rotate (1-finger) and pinch-zoom (2-finger). Without this, mobile Chrome will
     // try to scroll the page during a drag, which feels broken.
     dom.style.touchAction = 'none';
-    // isTouch was already detected at the top of makeSurface (used for mesh density
-    // + material choice). Reused here to disable auto-rotate on phones.
+    // isTouch (declared at top of makeSurface) is used below to disable auto-rotate
+    // on phones — auto-spin fights with user gestures when they pause to read.
     const ray = new THREE.Raycaster();
     const mouseN = new THREE.Vector2();
 
