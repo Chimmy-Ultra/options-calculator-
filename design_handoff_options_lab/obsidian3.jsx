@@ -27,13 +27,14 @@ const TXO_DEFAULT_LEGS = [
   { side: 'short', type: 'call', strike: 22100, premium: _bsRound('call', 21850, 22100, 24, 17), qty: 1 },
 ];
 
-// TXO weekly expiries (third Wed = monthly settlement). Capped at 1 month —
-// 自選 / day-trade 用戶通常不交易超過月選的合約，去掉 M+1 (45d) 簡化選項。
+// TXO weekly expiries. Anchored to 2026-05 calendar.
+// 第三個禮拜三 (5/20) 是 May monthly settlement，標金點代表「月選」。
+// 不放 M+1（6/17，39d）因為 day-trade 用戶通常不做那麼長。
 const TXO_EXPIRIES = [
-  { id: 'w1', label: 'W1', dte: 3,  type: 'weekly',  date: '12/04' },
-  { id: 'w2', label: 'W2', dte: 10, type: 'weekly',  date: '12/11' },
-  { id: 'm',  label: 'M',  dte: 17, type: 'monthly', date: '12/18' },
-  { id: 'w4', label: 'W4', dte: 24, type: 'weekly',  date: '12/25' },
+  { id: 'w1', label: 'W1', dte: 4,  type: 'weekly',  date: '5/13' },
+  { id: 'm',  label: 'M',  dte: 11, type: 'monthly', date: '5/20' },
+  { id: 'w3', label: 'W3', dte: 18, type: 'weekly',  date: '5/27' },
+  { id: 'w4', label: 'W4', dte: 25, type: 'weekly',  date: '6/03' },
 ];
 
 const SAVED_SCENARIOS = [
