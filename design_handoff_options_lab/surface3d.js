@@ -82,22 +82,32 @@
     return sp;
   }
 
-  function makeSurface({ container, theme = 'dark', scheme = 'diverging', segments = 80, params, onHover }) {
+  function makeSurface({ container, theme = 'dark', scheme = 'diverging', segments, params, onHover }) {
     if (!READY() || !container) return null;
     container.innerHTML = '';
+
+    // Detect touch devices to apply mobile perf budget:
+    //   - mesh density 80×80 (6400 verts) → 40×40 (1600 verts) (4× lighter)
+    //   - MeshPhysicalMaterial (clearcoat / sheen / fancy shaders) → MeshLambertMaterial
+    //     (much cheaper fragment shader, still respects vertex colors + lights)
+    //   - cap pixel ratio at 1.5 instead of 2 (cuts fragment work ~30%)
+    // These cumulatively let mid-tier Android phones render the surface without
+    // chewing the GPU during page scroll.
+    const isTouch = !!(window.matchMedia && !window.matchMedia('(hover: hover)').matches);
+    const segs = segments || (isTouch ? 40 : 80);
 
     const w = container.clientWidth, h = container.clientHeight;
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(36, w / h, 0.1, 100);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    const renderer = new THREE.WebGLRenderer({ antialias: !isTouch, alpha: true });
+    renderer.setPixelRatio(Math.min(isTouch ? 1.5 : 2, window.devicePixelRatio || 1));
     renderer.setSize(w, h);
     renderer.setClearColor(0x000000, 0);
     container.appendChild(renderer.domElement);
 
     const size = 2;
-    const geom = new THREE.PlaneGeometry(size, size, segments, segments);
+    const geom = new THREE.PlaneGeometry(size, size, segs, segs);
     geom.rotateX(-Math.PI / 2);
 
     function rebuildColors(curScheme) {
@@ -124,20 +134,29 @@
     let curScheme = scheme;
     rebuildColors(curScheme);
 
-    const mat = new THREE.MeshPhysicalMaterial({
-      vertexColors: true,
-      roughness: 0.35,
-      metalness: 0.15,
-      clearcoat: 0.85,
-      clearcoatRoughness: 0.18,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.98,
-      emissive: new THREE.Color(theme === 'dark' ? 0x1a1f2e : 0x000000),
-      emissiveIntensity: theme === 'dark' ? 0.25 : 0,
-      sheen: 0.5,
-      sheenColor: new THREE.Color(theme === 'dark' ? 0x88aaff : 0xffe0c0),
-    });
+    const mat = isTouch
+      ? new THREE.MeshLambertMaterial({
+          vertexColors: true,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.95,
+          emissive: new THREE.Color(theme === 'dark' ? 0x1a1f2e : 0x000000),
+          emissiveIntensity: theme === 'dark' ? 0.18 : 0,
+        })
+      : new THREE.MeshPhysicalMaterial({
+          vertexColors: true,
+          roughness: 0.35,
+          metalness: 0.15,
+          clearcoat: 0.85,
+          clearcoatRoughness: 0.18,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.98,
+          emissive: new THREE.Color(theme === 'dark' ? 0x1a1f2e : 0x000000),
+          emissiveIntensity: theme === 'dark' ? 0.25 : 0,
+          sheen: 0.5,
+          sheenColor: new THREE.Color(theme === 'dark' ? 0x88aaff : 0xffe0c0),
+        });
     const mesh = new THREE.Mesh(geom, mat);
     scene.add(mesh);
 
@@ -267,9 +286,8 @@
     // rotate (1-finger) and pinch-zoom (2-finger). Without this, mobile Chrome will
     // try to scroll the page during a drag, which feels broken.
     dom.style.touchAction = 'none';
-    // Detect touch-primary devices to disable auto-rotate (it fights with user gestures
-    // on phones where they pause to read the chart).
-    const isTouch = !!(window.matchMedia && !window.matchMedia('(hover: hover)').matches);
+    // isTouch was already detected at the top of makeSurface (used for mesh density
+    // + material choice). Reused here to disable auto-rotate on phones.
     const ray = new THREE.Raycaster();
     const mouseN = new THREE.Vector2();
 
@@ -359,9 +377,16 @@
     });
     dom.addEventListener('touchcancel', () => { pinching = false; });
 
-    // Auto-rotate when idle (desktop only; on touch devices it fights with user gestures).
+    // Visibility tracking: when the canvas is scrolled off-screen we stop the
+    // render loop entirely (saves GPU/battery on mobile when scrolling past the
+    // 3D card). When it scrolls back in, we resume.
+    let isVisible = true;
     let rafId = 0, last = performance.now(), idleTime = 0;
     function tick(now) {
+      if (!isVisible) {
+        rafId = 0; // pause; visibility observer will restart us
+        return;
+      }
       const dt = (now - last) / 1000; last = now;
       if (!dragging && !pinching) {
         idleTime += dt;
@@ -375,6 +400,19 @@
     }
     rafId = requestAnimationFrame(tick);
 
+    let visObs = null;
+    if (typeof IntersectionObserver !== 'undefined') {
+      visObs = new IntersectionObserver(([entry]) => {
+        const wasVisible = isVisible;
+        isVisible = entry.isIntersecting;
+        if (isVisible && !wasVisible && rafId === 0) {
+          last = performance.now();
+          rafId = requestAnimationFrame(tick);
+        }
+      }, { threshold: 0 });
+      visObs.observe(container);
+    }
+
     const ro = new ResizeObserver(() => {
       const W = container.clientWidth, H = container.clientHeight;
       if (!W || !H) return;
@@ -386,6 +424,7 @@
     return {
       destroy() {
         cancelAnimationFrame(rafId); ro.disconnect();
+        if (visObs) visObs.disconnect();
         renderer.dispose();
         if (dom.parentNode) dom.parentNode.removeChild(dom);
       },

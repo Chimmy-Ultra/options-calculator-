@@ -522,4 +522,173 @@ function MaxPain({ spot, contract = 'monthly', theme = 'dark', height = 160, wid
   );
 }
 
-Object.assign(window, { ThetaDecay, IVSmile, POPGauge, ScenarioTimeline, GreeksProfile, PnLDistribution, OIProfile, DataQualityPill, PnLAttribution, MaxPain });
+// ─────────────────────────────────────────────────────────────────────────────
+// OptionPricer — single-contract Black-Scholes calculator (moomoo-style).
+// Pick a strike + call/put, see theoretical price + full Greeks (Δ Γ V Θ Ρ).
+// Manages its own type / strike / r state internally; reads spot+iv from props
+// so users can sync to the global TXO_SPOT / IV slider with the "最新" buttons.
+function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = '#7c5cf0' }) {
+  const dark = theme === 'dark';
+  const [type, setType] = React.useState('call');
+  const [strike, setStrike] = React.useState(Math.round(spot / 50) * 50);
+  const [pricerSpot, setPricerSpot] = React.useState(spot);
+  const [pricerIv, setPricerIv] = React.useState(iv);
+  const [pricerDte, setPricerDte] = React.useState(dte);
+  const [r, setR] = React.useState(defaultR);
+  const [marketPx, setMarketPx] = React.useState('');
+
+  const result = useMemoM(() => {
+    const price = window.bsPrice ? window.bsPrice(type, pricerSpot, strike, pricerIv, pricerDte, r / 100) : 0;
+    const g = window.bsGreeks
+      ? window.bsGreeks(type, pricerSpot, strike, pricerIv, pricerDte, r / 100)
+      : { delta: 0, gamma: 0, theta: 0, vega: 0, rho: 0 };
+    return { price, ...g };
+  }, [type, pricerSpot, strike, pricerIv, pricerDte, r]);
+
+  const mp = parseFloat(marketPx);
+  const hasMarket = !isNaN(mp) && mp > 0;
+  const mispricingPct = hasMarket ? ((result.price - mp) / mp) * 100 : null;
+
+  const labelStyle = { fontSize: 10, letterSpacing: 0.5, textTransform: 'uppercase', opacity: 0.55, fontWeight: 600 };
+  const fieldBg = dark ? 'rgba(255,255,255,0.05)' : 'rgba(20,30,60,0.05)';
+  const fieldBorder = dark ? 'rgba(255,255,255,0.10)' : 'rgba(20,30,60,0.10)';
+  const fieldStyle = {
+    width: '100%', padding: '8px 10px', borderRadius: 8,
+    border: `1px solid ${fieldBorder}`, background: fieldBg,
+    color: dark ? '#e8eaef' : '#1d1d22',
+    fontFamily: 'ui-monospace, SF Mono, monospace', fontSize: 13, fontWeight: 600,
+    fontVariantNumeric: 'tabular-nums', outline: 'none',
+  };
+  const snapBtn = {
+    fontSize: 9, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase',
+    padding: '5px 8px', borderRadius: 6, border: `1px solid ${fieldBorder}`,
+    background: 'rgba(255,255,255,0.04)', color: dark ? '#e8eaef' : '#1d1d22',
+    cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit',
+  };
+  const upColor = '#ef5350', downColor = '#26a69a';
+
+  function field(label, value, onChange, sub = null, snap = null, snapLabel = '最新') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <span style={labelStyle}>{label}</span>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <input type="number" value={value} onChange={(e) => onChange(parseFloat(e.target.value))}
+            style={{ ...fieldStyle, flex: 1 }} step="0.01" />
+          {snap && (
+            <button onClick={snap} style={snapBtn}>{snapLabel}</button>
+          )}
+        </div>
+        {sub && <span style={{ fontSize: 9, opacity: 0.45, fontFamily: 'ui-monospace, SF Mono, monospace' }}>{sub}</span>}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* Type toggle + Strike row */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span style={labelStyle}>類型</span>
+          <div style={{ display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden', border: `1px solid ${fieldBorder}` }}>
+            {[
+              { id: 'call', label: 'CALL 買權', color: upColor },
+              { id: 'put',  label: 'PUT 賣權',  color: downColor },
+            ].map((opt) => {
+              const active = type === opt.id;
+              return (
+                <button key={opt.id} onClick={() => setType(opt.id)} style={{
+                  flex: 1, padding: '8px 4px', border: 'none', cursor: 'pointer',
+                  background: active ? `${opt.color}33` : 'transparent',
+                  color: active ? opt.color : (dark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.55)'),
+                  fontWeight: 700, fontSize: 11, letterSpacing: 0.3, fontFamily: 'inherit',
+                }}>{opt.label}</button>
+              );
+            })}
+          </div>
+        </div>
+        {field('履約價', strike, (v) => setStrike(v || 0), null,
+          () => setStrike(Math.round(pricerSpot / 50) * 50), 'ATM')}
+      </div>
+
+      {/* Spot + IV row */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        {field('標的價', pricerSpot, setPricerSpot, null, () => setPricerSpot(spot))}
+        {field('引伸波幅 %', pricerIv, setPricerIv, null, () => setPricerIv(iv))}
+      </div>
+
+      {/* DTE + Risk-free rate row */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        {field('距到期 (天)', pricerDte, setPricerDte, null, () => setPricerDte(dte))}
+        {field('無風險利率 %', r, setR, null, () => setR(defaultR), '預設')}
+      </div>
+
+      {/* Big theoretical price card */}
+      <div style={{
+        padding: '14px 16px', borderRadius: 12,
+        background: 'linear-gradient(155deg, rgba(80,90,115,0.42) 0%, rgba(28,34,48,0.36) 100%)',
+        border: `1px solid ${fieldBorder}`,
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <div style={labelStyle}>理論價格</div>
+            <div className="tnum" style={{
+              fontSize: 30, fontWeight: 700, letterSpacing: -0.6,
+              fontFamily: 'ui-monospace, SF Mono, monospace', lineHeight: 1.05,
+              color: dark ? '#e8eaef' : '#1d1d22',
+            }}>{result.price.toFixed(2)}</div>
+            <div style={{ fontSize: 11, opacity: 0.55, marginTop: 4, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
+              ≈ NT${Math.round(result.price * 50).toLocaleString()} ({type === 'call' ? 'CALL' : 'PUT'} K={strike})
+            </div>
+          </div>
+          {hasMarket && (
+            <div style={{ textAlign: 'right' }}>
+              <div style={labelStyle}>vs 市價</div>
+              <div className="tnum" style={{
+                fontSize: 18, fontWeight: 700, fontFamily: 'ui-monospace, SF Mono, monospace',
+                color: mispricingPct >= 0 ? upColor : downColor,
+              }}>{mispricingPct >= 0 ? '+' : ''}{mispricingPct.toFixed(2)}%</div>
+              <div style={{ fontSize: 9, opacity: 0.45, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
+                {mispricingPct >= 0 ? '理論 > 市價（可能低估）' : '理論 < 市價（可能高估）'}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Optional market price comparison */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <span style={labelStyle}>市價（選填，比對是否便宜）</span>
+        <input type="number" value={marketPx} onChange={(e) => setMarketPx(e.target.value)}
+          placeholder="輸入市場成交價..." style={fieldStyle} step="0.01" />
+      </div>
+
+      {/* Greeks row */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 5 }}>
+        {[
+          { k: 'delta', l: 'Δ', v: result.delta, fmt: (x) => (x >= 0 ? '+' : '') + x.toFixed(3) },
+          { k: 'gamma', l: 'Γ', v: result.gamma, fmt: (x) => x.toFixed(4) },
+          { k: 'vega',  l: 'V', v: result.vega,  fmt: (x) => (x >= 0 ? '+' : '') + x.toFixed(3) },
+          { k: 'theta', l: 'Θ', v: result.theta, fmt: (x) => (x >= 0 ? '+' : '') + x.toFixed(3) },
+          { k: 'rho',   l: 'ρ', v: result.rho,   fmt: (x) => (x >= 0 ? '+' : '') + x.toFixed(4) },
+        ].map((g) => (
+          <div key={g.k} style={{
+            padding: '8px 4px', borderRadius: 8, textAlign: 'center',
+            background: fieldBg, border: `1px solid ${fieldBorder}`,
+          }}>
+            <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.6, fontFamily: 'ui-monospace, SF Mono, monospace' }}>{g.l}</div>
+            <div className="tnum" style={{
+              fontSize: 12, fontWeight: 700, marginTop: 2, fontFamily: 'ui-monospace, SF Mono, monospace',
+              color: g.v > 0 ? upColor : g.v < 0 ? downColor : (dark ? '#e8eaef' : '#1d1d22'),
+            }}>{g.fmt(g.v)}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ fontSize: 9, opacity: 0.4, fontFamily: 'ui-monospace, SF Mono, monospace', textAlign: 'right' }}>
+        Black-Scholes · 歐式期權 · TXO ×50 NTD/pt
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { ThetaDecay, IVSmile, POPGauge, ScenarioTimeline, GreeksProfile, PnLDistribution, OIProfile, DataQualityPill, PnLAttribution, MaxPain, OptionPricer });
