@@ -180,10 +180,10 @@ function Obsidian3() {
   const D = DENSITY[t.density] || DENSITY.comfortable;
   const accent = `oklch(0.66 0.16 ${t.accentHue})`;
   const vp = useViewport();
-  // On phone/fold, only Calculator / Chain / Pricer workspaces are shown.
-  // If the user previously chose iv/compare on a desktop, snap back to calc.
+  // On phone/fold, Compare is the only desktop-exclusive workspace (it needs the
+  // multi-card grid to be useful). IV Surface is now mobile-friendly so it stays.
   uE(() => {
-    if (vp.layout !== 'desk' && (workspace === 'iv' || workspace === 'compare')) setWorkspace('calc');
+    if (vp.layout !== 'desk' && workspace === 'compare') setWorkspace('calc');
   }, [vp.layout]);
 
   // P&L numbers (×50 NTD per point). BS-valued at the same daysRem as PayoffChart
@@ -953,12 +953,13 @@ function MobileApp({
           </Glass2>
         </div>
 
-        {/* Workspace toggle (mobile = Calc / Chain / Pricer) */}
+        {/* Workspace toggle (mobile = Calc / Chain / Pricer / IV) */}
         <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
           {[
             { id: 'calc', label: 'Calc' },
             { id: 'chain', label: 'Chain' },
             { id: 'pricer', label: 'Pricer' },
+            { id: 'iv', label: 'IV' },
           ].map((it) => {
             const active = workspace === it.id;
             return (
@@ -1031,6 +1032,9 @@ function MobileApp({
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>單張定價</span>}>Option Pricer</Eyebrow>
             <OptionPricer spot={spot} iv={iv} dte={dte} theme="dark" accent={accent} />
           </Glass2>
+        )}
+        {workspace === 'iv' && (
+          <MobileIV expiry={expiry} />
         )}
       </div>
 
@@ -1233,6 +1237,47 @@ function MobileCalc({
             }}>{s.label}</button>
           ))}
         </div>
+      </Glass2>
+    </>
+  );
+}
+
+function MobileIV({ expiry }) {
+  const ref = uR(null);
+  uE(() => {
+    if (!ref.current || !window.IVSurface3D) return;
+    const inst = window.IVSurface3D.make({ container: ref.current });
+    return () => inst && inst.destroy && inst.destroy();
+  }, []);
+  return (
+    <>
+      <Glass2 tone="panel" padding={14}>
+        <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>strike × DTE × IV</span>}>IV Surface</Eyebrow>
+        <div ref={ref} style={{ height: 320, borderRadius: 14, overflow: 'hidden', background: 'radial-gradient(ellipse at 30% 30%, rgba(167,139,250,0.10), transparent 60%)' }} />
+        <div style={{ fontSize: 10, opacity: 0.5, marginTop: 8, lineHeight: 1.5 }}>
+          單指拖曳旋轉 · 雙指縮放
+        </div>
+      </Glass2>
+      <Glass2 tone="panel" padding={14}>
+        <Eyebrow>Term structure</Eyebrow>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {TXO_EXPIRIES.map((e) => {
+            const ivAtm = 22 + (1 - e.dte / 60) * 6;
+            return (
+              <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                <span style={{ opacity: 0.7 }}>{e.label} · {e.dte}d</span>
+                <span className="mono" style={{ fontFamily: 'ui-monospace, SF Mono, monospace', fontWeight: 600, color: e.id === expiry.id ? '#f0c068' : '#cdd3df' }}>{ivAtm.toFixed(1)}%</span>
+              </div>
+            );
+          })}
+        </div>
+      </Glass2>
+      <Glass2 tone="panel" padding={14}>
+        <Eyebrow>Skew · 25Δ</Eyebrow>
+        <div className="tnum" style={{ fontSize: 22, fontWeight: 600, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
+          <span style={{ color: '#5fa3d4' }}>+4.2</span><span style={{ opacity: 0.4, fontSize: 14 }}> vol pts</span>
+        </div>
+        <div style={{ fontSize: 11, opacity: 0.55, marginTop: 6 }}>Put skew elevated · downside hedging</div>
       </Glass2>
     </>
   );

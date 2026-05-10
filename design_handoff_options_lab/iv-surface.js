@@ -120,31 +120,70 @@
     applyCam();
     let drag = false, lx=0, ly=0;
     const dom = renderer.domElement; dom.style.cursor = 'grab';
+    dom.style.touchAction = 'none';
+    const isTouch = !window.matchMedia || !window.matchMedia('(hover: hover)').matches;
+    const rotSens = isTouch ? 0.012 : 0.005;
     dom.addEventListener('pointerdown', (e) => { drag = true; lx = e.clientX; ly = e.clientY; dom.setPointerCapture(e.pointerId); dom.style.cursor='grabbing'; });
     dom.addEventListener('pointermove', (e) => {
       if (!drag) return;
-      orbit.az -= (e.clientX - lx) * 0.005;
-      orbit.el = Math.max(0.05, Math.min(Math.PI/2 - 0.05, orbit.el + (e.clientY - ly) * 0.005));
+      orbit.az -= (e.clientX - lx) * rotSens;
+      orbit.el = Math.max(0.05, Math.min(Math.PI/2 - 0.05, orbit.el + (e.clientY - ly) * rotSens));
       lx = e.clientX; ly = e.clientY; applyCam();
     });
     dom.addEventListener('pointerup', (e) => { drag = false; dom.style.cursor='grab'; try{dom.releasePointerCapture(e.pointerId);}catch(_){} });
     dom.addEventListener('wheel', (e) => { e.preventDefault(); orbit.dist = Math.max(2, Math.min(7, orbit.dist + e.deltaY * 0.003)); applyCam(); }, {passive:false});
 
-    let raf = 0, last = performance.now(), idle = 0;
+    // Pinch-to-zoom for touch.
+    let pinchStartDist = 0, pinchStartCamDist = 0;
+    dom.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 2) {
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        pinchStartDist = Math.hypot(dx, dy);
+        pinchStartCamDist = orbit.dist;
+        drag = false;
+      }
+    }, {passive:false});
+    dom.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 2 && pinchStartDist > 0) {
+        e.preventDefault();
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const d = Math.hypot(dx, dy);
+        if (d > 0) {
+          orbit.dist = Math.max(2, Math.min(7, pinchStartCamDist * (pinchStartDist / d)));
+          applyCam();
+        }
+      }
+    }, {passive:false});
+    dom.addEventListener('touchend', () => { pinchStartDist = 0; });
+    dom.addEventListener('touchcancel', () => { pinchStartDist = 0; });
+
+    let raf = 0, last = performance.now(), idle = 0, isVisible = true;
     function tick(now) {
       const dt = (now - last) / 1000; last = now;
-      if (!drag) { idle += dt; if (idle > 1.5) orbit.az += dt * 0.04; applyCam(); } else idle = 0;
+      // Auto-rotate disabled on touch (annoying on phones, also wastes battery).
+      if (!drag) { idle += dt; if (!isTouch && idle > 1.5) orbit.az += dt * 0.04; applyCam(); } else idle = 0;
       renderer.render(scene, camera);
-      raf = requestAnimationFrame(tick);
+      raf = isVisible ? requestAnimationFrame(tick) : 0;
     }
     raf = requestAnimationFrame(tick);
+    // Pause render loop when canvas is scrolled off-screen — IV surface eats GPU
+    // even when not visible, which makes mobile scrolling lag.
+    const io = ('IntersectionObserver' in window) ? new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        isVisible = e.isIntersecting;
+        if (isVisible && !raf) { last = performance.now(); raf = requestAnimationFrame(tick); }
+      }
+    }, { threshold: 0 }) : null;
+    if (io) io.observe(container);
     const ro = new ResizeObserver(() => {
       const W = container.clientWidth, H = container.clientHeight;
       if (!W || !H) return;
       renderer.setSize(W, H); camera.aspect = W/H; camera.updateProjectionMatrix();
     });
     ro.observe(container);
-    return { destroy() { cancelAnimationFrame(raf); ro.disconnect(); renderer.dispose(); if(dom.parentNode) dom.parentNode.removeChild(dom); } };
+    return { destroy() { cancelAnimationFrame(raf); ro.disconnect(); if (io) io.disconnect(); renderer.dispose(); if(dom.parentNode) dom.parentNode.removeChild(dom); } };
   }
 
   window.IVSurface3D = { make: makeIVSurface };
