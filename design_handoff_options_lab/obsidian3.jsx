@@ -27,14 +27,16 @@ const TXO_DEFAULT_LEGS = [
   { side: 'short', type: 'call', strike: 22100, premium: _bsRound('call', 21850, 22100, 24, 17), qty: 1 },
 ];
 
-// TXO weekly expiries. Anchored to 2026-05 calendar.
-// 第三個禮拜三 (5/20) 是 May monthly settlement，標金點代表「月選」。
-// 不放 M+1（6/17，39d）因為 day-trade 用戶通常不做那麼長。
+// TXO 週選/月選到期。台指 2022 起加了週五週選（之前漏掉），所以現在是
+// W (週三) + F (週五) 雙軌。第三個禮拜三 = 月選結算 (M, 金點)。
 const TXO_EXPIRIES = [
-  { id: 'w1', label: 'W1', dte: 4,  type: 'weekly',  date: '5/13' },
-  { id: 'm',  label: 'M',  dte: 11, type: 'monthly', date: '5/20' },
-  { id: 'w3', label: 'W3', dte: 18, type: 'weekly',  date: '5/27' },
-  { id: 'w4', label: 'W4', dte: 25, type: 'weekly',  date: '6/03' },
+  { id: 'w1', label: 'W1', dte: 4,  type: 'weekly',  dow: 'wed', date: '5/13' },
+  { id: 'f1', label: 'F1', dte: 6,  type: 'weekly',  dow: 'fri', date: '5/15' },
+  { id: 'm',  label: 'M',  dte: 11, type: 'monthly', dow: 'wed', date: '5/20' },
+  { id: 'f2', label: 'F2', dte: 13, type: 'weekly',  dow: 'fri', date: '5/22' },
+  { id: 'w3', label: 'W3', dte: 18, type: 'weekly',  dow: 'wed', date: '5/27' },
+  { id: 'f3', label: 'F3', dte: 20, type: 'weekly',  dow: 'fri', date: '5/29' },
+  { id: 'w4', label: 'W4', dte: 25, type: 'weekly',  dow: 'wed', date: '6/03' },
 ];
 
 const SAVED_SCENARIOS = [
@@ -118,10 +120,11 @@ function WorkspaceTabs({ value, onChange, accent }) {
   );
 }
 
-// Expiry strip (TXO weekly/monthly)
+// Expiry strip (TXO weekly/monthly). 7 chips (Wed + Fri) — overflow scroll on
+// narrow desktop windows, plain flex when there's room.
 function ExpiryStrip({ value, onChange }) {
   return (
-    <div style={{ display: 'flex', gap: 6 }}>
+    <div style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
       {TXO_EXPIRIES.map((e) => {
         const active = e.id === value;
         const isMonthly = e.type === 'monthly';
@@ -133,7 +136,7 @@ function ExpiryStrip({ value, onChange }) {
             color: active ? (isMonthly ? '#f7d394' : '#fff') : 'rgba(255,255,255,0.55)',
             fontFamily: 'inherit', fontSize: 11, fontWeight: 600, cursor: 'pointer',
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, lineHeight: 1.1,
-            position: 'relative', minWidth: 52,
+            position: 'relative', minWidth: 52, flexShrink: 0,
           }}>
             <span style={{ fontSize: 11 }}>{e.label}</span>
             <span style={{ fontSize: 9, opacity: 0.75, fontFamily: 'ui-monospace, SF Mono, monospace' }}>{e.date}</span>
