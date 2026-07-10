@@ -66,20 +66,28 @@ This is **not a typical React app.** Skim these before touching code, or you'll 
 ### Don't introduce
 
 - A build step (Vite, Webpack, Next.js, esbuild). The whole point of this prototype is zero-install.
-- TypeScript, package managers, linters as files in the repo. If you want types, use JSDoc comments inline.
+- TypeScript, package managers, linters as files in the **frontend**. If you want types, use JSDoc comments inline. (`server/` is Python with its own `requirements.txt` — the one sanctioned exception.)
 - Imports between modules. Add to the existing global / `window.*` pattern instead.
-- A backend or API call. All P&L / Greeks / IV math is pure functions on mock data.
+- New backends. All P&L / Greeks / IV math stays as pure frontend functions. The ONE backend is `server/` (FastAPI + ib_async) — a read-only market-data proxy to the user's local IB TWS/Gateway for CBOT grain options. The frontend must always work without it: `data-live.js` (`window.LiveData`) returns `null` on any failure and everything falls back to mock.
+
+### Products (multi-product since the IB integration)
+
+Product specs live in `products.js` (`window.PRODUCTS` / `window.getProduct`). Every contract fact — multiplier, strike step, currency, pricing model, IV/spot ranges, expiries — must come from the product object `P`; never hardcode TXO values in shared components.
+
+- **TXO** 台指選擇權 — Black-Scholes on spot (`model: 'bs'`), NT$, ×50/pt, strike step 50.
+- **ZC / ZS / ZW** CBOT 玉米/黃豆/小麥期貨選擇權 — **Black-76 on futures** (`model: 'b76'`), US$, 報價 cents/bushel, 5,000 bu → 1¢ = $50/口. Strike steps: ZC/ZW 10¢, ZS 20¢. Grain IV smiles skew to CALLS (drought risk) — opposite of TXO's put skew (`P.skew`).
+- Live data: grains pull real quotes/expiries/chains from IB via `server/` (see `server/README.md`). Live chain rows replace `genChain` mock rows but keep the same row shape — keep it that way.
 
 ### TXO domain conventions (Taiwan index options)
 
 These break Western intuition — get them wrong and the UI looks correct but means the opposite.
 
-- **Calls are red, puts are teal/green.** This matches Taiwan T-quote convention (`#ef5350` calls, `#26a69a` puts), not the US convention. Don't "fix" it.
+- **Calls are red, puts are teal/green.** This matches Taiwan T-quote convention (`#ef5350` calls, `#26a69a` puts), not the US convention. Don't "fix" it. Applies app-wide, including the US grain products.
 - **Contract multiplier: ×50 NTD per index point.** P&L in NTD = points × 50.
 - **Strikes are multiples of 50.** Strike inputs use `step=50`.
 - **Spot default: 21,850. ATM IV default: 24%. IV slider range: 10–50%.**
 - Expiries are weekly + monthly (W1/W2/M/W4). M+1 was removed in `bb2697b` — don't add it back.
-- Pricing model: Black-Scholes for theoretical premiums everywhere (payoff chart, strategy library, +leg, P&L Now). See commits `f0f1ae2`, `1b7355d`. Don't introduce a separate pricing path.
+- Pricing model: Black-Scholes for theoretical premiums everywhere (payoff chart, strategy library, +leg, P&L Now). See commits `f0f1ae2`, `1b7355d`. Don't introduce a separate pricing path — Black-76 for futures options is a `model` parameter on the SAME functions (`bsPrice` / `bsGreeks` / `legGreeks` / `portfolioGreeks`), not a second code path.
 
 ### Layouts
 
