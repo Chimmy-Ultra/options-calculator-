@@ -896,14 +896,19 @@ function CompareCard({ strategy: s, P, spot, iv, dte, D, biasColor, onRemove }) 
 
   const credit = legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0);
   const scanStep = Math.max(P.strikeStep / 2, spot * 0.001);
+  // 掃描範圍必須涵蓋所有腿的履約價：穀物的檔距佔 spot 比例大（condor 翼可到 ±20%），
+  // 只掃 ±8% 會漏掉翼部，max loss / break-even 就算錯。
+  const _ks = legs.map((l) => l.strike);
+  const scanLo = Math.min(spot * 0.92, Math.min.apply(null, _ks) - 2 * P.strikeStep);
+  const scanHi = Math.max(spot * 1.08, Math.max.apply(null, _ks) + 2 * P.strikeStep);
   let mp = -Infinity, ml = Infinity;
-  for (let st = spot * 0.92; st <= spot * 1.08; st += scanStep) {
+  for (let st = scanLo; st <= scanHi; st += scanStep) {
     const v = legs.reduce((a, l) => a + legPayoff(l, st), 0);
     mp = Math.max(mp, v); ml = Math.min(ml, v);
   }
   const bes = [];
   let prev = null;
-  for (let st = spot * 0.92; st <= spot * 1.08; st += scanStep / 2.5) {
+  for (let st = scanLo; st <= scanHi; st += scanStep / 2.5) {
     const v = legs.reduce((a, l) => a + legPayoff(l, st), 0);
     if (prev !== null && (prev.v >= 0) !== (v >= 0)) {
       const t = Math.abs(prev.v) / (Math.abs(prev.v) + Math.abs(v));
