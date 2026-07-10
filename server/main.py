@@ -259,6 +259,47 @@ async def expiries(pid: str):
     return out
 
 
+@app.get("/api/bars/{pid}")
+async def bars(pid: str, duration: str = "3 M", bar: str = "1 day"):
+    """近月期貨的歷史 K 棒（給前端 K 線圖）。"""
+    if duration not in {"1 M", "3 M", "6 M", "1 Y"} or bar not in {"1 day", "1 hour", "4 hours"}:
+        raise HTTPException(400, "duration ∈ {1 M,3 M,6 M,1 Y}, bar ∈ {1 day,1 hour,4 hours}")
+    spec = _product(pid)
+    cache_key = ("bars", spec["symbol"], duration, bar)
+    hit = _cache_get(cache_key)
+    if hit:
+        return hit
+    async with _ib_lock:
+        if not await _ensure_connected():
+            raise HTTPException(503, "IB not connected")
+        futs = await _futures(spec)
+        exp, front = futs[0]
+        try:
+            raw = await ib.reqHistoricalDataAsync(
+                front, endDateTime="", durationStr=duration,
+                barSizeSetting=bar, whatToShow="TRADES", useRTH=True,
+            )
+        except Exception as e:
+            raise HTTPException(503, f"historical data unavailable: {e}")
+    if not raw:
+        raise HTTPException(503, "IB returned no historical bars")
+    out = {
+        "symbol": spec["symbol"],
+        "month": exp[:6],
+        "bar": bar,
+        "bars": [
+            {
+                "t": b.date.strftime("%Y%m%d") if hasattr(b.date, "strftime") else str(b.date),
+                "o": _f(b.open), "h": _f(b.high), "l": _f(b.low), "c": _f(b.close),
+                "v": int(_f(b.volume) or 0),
+            }
+            for b in raw
+        ],
+    }
+    _cache_put(cache_key, out, 300)
+    return out
+
+
 @app.get("/api/chain/{pid}")
 async def chain(pid: str, expiry: str):
     spec = _product(pid)
