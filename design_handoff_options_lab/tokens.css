@@ -32,3 +32,32 @@
     rgba(120,120,135,0.12) 8px 16px
   );
 }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Light / Dark 主題。基底樣式（inline）都是深色；body.light 只做覆蓋。
+   配色抄自 claude.ai/design 的設計稿（期權交易主畫面.dc.html）。
+   桌面 shell 用這些 class 覆蓋；圖表/期權鏈等元件走各自的 theme='light' 分支。
+   ─────────────────────────────────────────────────────────────────────────── */
+body.light .g2 { color: #1c2433 !important; }
+body.light .g2-panel {
+  background: linear-gradient(155deg, rgba(255,255,255,0.72), rgba(244,247,252,0.55)) !important;
+  border-color: rgba(25,40,70,0.12) !important;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.85) inset, 0 20px 40px -20px rgba(30,45,80,0.22), 0 1px 2px rgba(30,45,80,0.08) !important;
+}
+body.light .g2-raised {
+  background: linear-gradient(155deg, rgba(255,255,255,0.88), rgba(238,242,250,0.72)) !important;
+  border-color: rgba(25,40,70,0.16) !important;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.9) inset, 0 28px 56px -24px rgba(30,45,80,0.3) !important;
+}
+body.light .g2-chip {
+  background: linear-gradient(150deg, rgba(255,255,255,0.92), rgba(240,244,250,0.72)) !important;
+  border-color: rgba(25,40,70,0.14) !important;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.9) inset, 0 4px 12px -6px rgba(30,45,80,0.14) !important;
+}
+/* Glass2 內層白色高光在亮底下太亮 → 收掉 */
+body.light .g2 > [aria-hidden] { opacity: 0.4; }
+/* shell 內散落的深色 helper（tile / select / 期權鏈底） */
+body.light .lt-tile { background: rgba(20,40,80,0.05) !important; border-color: rgba(25,40,70,0.12) !important; }
+body.light .lt-prodsel { background: rgba(20,40,80,0.08) !important; color: #1c2433 !important; }
+body.light .lt-mock { color: rgba(20,30,50,0.45) !important; }
+body.light .lt-chainbg { background: rgba(255,255,255,0.55) !important; border-color: rgba(25,40,70,0.10) !important; }

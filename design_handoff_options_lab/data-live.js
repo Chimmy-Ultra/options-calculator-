@@ -37,5 +37,14 @@
     // { expiry, dte, underlying: { month, price }, rows: [...] } | null
     // rows 形狀跟 genChain 一致，元件可以直接吃。鏈要對 30+ 合約做行情快照，給長一點的 timeout。
     chain: (pid, expiry) => get('/api/chain/' + encodeURIComponent(pid) + '?expiry=' + encodeURIComponent(expiry), 30000),
+    // { symbol, month, bar, bars: [{t,o,h,l,c,v}] } | null — 近月期貨歷史 K
+    // opts: { bar: '1 day'|'1 hour'|'4 hours', duration: '1 M'|'3 M'|... }
+    bars: (pid, opts) => {
+      opts = opts || {};
+      const q = [];
+      if (opts.bar) q.push('bar=' + encodeURIComponent(opts.bar));
+      if (opts.duration) q.push('duration=' + encodeURIComponent(opts.duration));
+      return get('/api/bars/' + encodeURIComponent(pid) + (q.length ? '?' + q.join('&') : ''), 15000);
+    },
   };
 })();

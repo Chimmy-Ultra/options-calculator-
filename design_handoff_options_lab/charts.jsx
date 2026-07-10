@@ -701,4 +701,87 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
   );
 }
 
-Object.assign(window, { ThetaDecay, IVSmile, POPGauge, ScenarioTimeline, GreeksProfile, PnLDistribution, OIProfile, DataQualityPill, PnLAttribution, MaxPain, OptionPricer });
+// ─────────────────────────────────────────────────────────────────────────────
+// K 線（蠟燭圖）。mock 用 genBars 的隨機漫步；live 模式吃 IB /api/bars 的歷史 K。
+// 台式配色：紅漲（收 >= 開）、綠跌 — 跟期權鏈同一套語意。
+// volScale：把每根的波動縮放到對應週期（日=1、4時≈0.5、1時≈0.4），日內 K 才不會過度誇張。
+function genBars({ spot, n = 60, volScale = 1, product }) {
+  const ivPct = (product && product.defaultIv) || 24;
+  const dailyVol = (ivPct / 100) / Math.sqrt(252) * volScale;
+  // 從現價往回走隨機漫步，最後一根收在 spot
+  const closes = [spot];
+  for (let i = 1; i < n; i++) {
+    closes.push(closes[i - 1] / (1 + dailyVol * (Math.random() * 2 - 1) * 1.2));
+  }
+  closes.reverse();
+  const bars = [];
+  for (let i = 0; i < n; i++) {
+    const c = closes[i];
+    const o = i === 0 ? c * (1 + dailyVol * (Math.random() - 0.5)) : closes[i - 1];
+    bars.push({
+      t: '',
+      o,
+      h: Math.max(o, c) * (1 + dailyVol * Math.random() * 0.6),
+      l: Math.min(o, c) * (1 - dailyVol * Math.random() * 0.6),
+      c,
+      v: Math.round(1000 + Math.random() * 4000),
+    });
+  }
+  return bars;
+}
+
+function KBarChart({ bars, theme = 'dark', height = 160, width = 304 }) {
+  if (!bars || bars.length === 0) return null;
+  const W = width, H = height, padL = 6, padR = 46, padT = 8;
+  const volH = Math.round(H * 0.16);
+  const priceH = H - volH - padT - 8;
+  const lo = Math.min(...bars.map((b) => b.l));
+  const hi = Math.max(...bars.map((b) => b.h));
+  const span = Math.max(hi - lo, 1e-9);
+  const maxV = Math.max(...bars.map((b) => b.v), 1);
+  const n = bars.length;
+  const slot = (W - padL - padR) / n;
+  const cw = Math.max(1.5, slot * 0.65);
+  const x = (i) => padL + i * slot + slot / 2;
+  const y = (p) => padT + (1 - (p - lo) / span) * priceH;
+  const up = '#ef5350', down = '#26a69a'; // 台式：紅漲綠跌
+  const txt = theme === 'dark' ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.5)';
+  const last = bars[n - 1];
+  const lastUp = last.c >= last.o;
+  const dec = hi >= 5000 ? 0 : hi >= 100 ? 1 : 2;
+  const fmt = (p) => p.toFixed(dec);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} style={{ display: 'block' }}>
+      {/* 最新收盤虛線 + 右側價標 */}
+      <line x1={padL} x2={W - padR + 4} y1={y(last.c)} y2={y(last.c)}
+        stroke={lastUp ? up : down} strokeWidth="1" strokeDasharray="3 3" strokeOpacity="0.55" />
+      <text x={W - padR + 6} y={y(last.c) + 3.5} fontSize="10" fontWeight="700"
+        fill={lastUp ? up : down} fontFamily="ui-monospace, SF Mono, monospace">{fmt(last.c)}</text>
+      {/* 高低價標 */}
+      <text x={W - padR + 6} y={padT + 8} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace">{fmt(hi)}</text>
+      <text x={W - padR + 6} y={padT + priceH} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace">{fmt(lo)}</text>
+      {bars.map((b, i) => {
+        const isUp = b.c >= b.o;
+        const col = isUp ? up : down;
+        const top = y(Math.max(b.o, b.c));
+        const bot = y(Math.min(b.o, b.c));
+        const vh = (b.v / maxV) * volH;
+        return (
+          <g key={i}>
+            <line x1={x(i)} x2={x(i)} y1={y(b.h)} y2={y(b.l)} stroke={col} strokeWidth="1" />
+            <rect x={x(i) - cw / 2} y={top} width={cw} height={Math.max(1, bot - top)} fill={col} />
+            <rect x={x(i) - cw / 2} y={H - 4 - vh} width={cw} height={Math.max(0.5, vh)} fill={col} fillOpacity="0.45" />
+          </g>
+        );
+      })}
+      {/* 首尾日期（live 才有） */}
+      {bars[0].t && (
+        <text x={padL} y={H - 6 - volH} fontSize="8" fill={txt} fontFamily="ui-monospace, SF Mono, monospace">
+          {bars[0].t.slice(4, 6)}/{bars[0].t.slice(6, 8)}
+        </text>
+      )}
+    </svg>
+  );
+}
+
+Object.assign(window, { ThetaDecay, IVSmile, POPGauge, ScenarioTimeline, GreeksProfile, PnLDistribution, OIProfile, DataQualityPill, PnLAttribution, MaxPain, OptionPricer, genBars, KBarChart });
