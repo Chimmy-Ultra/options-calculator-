@@ -136,7 +136,7 @@ function ScenarioTimeline({ theme = 'dark', items, current }) {
 // Greeks Profile — overlays Δ/Γ/Θ/V curves vs. spot.
 // Each greek normalized to its own max-abs in range so all 4 fit one chart;
 // absolute values at current spot shown in side legend.
-function GreeksProfile({ legs, spot, iv = 24, dte = 17, theme = 'dark', height = 160, width = 304 }) {
+function GreeksProfile({ legs, spot, iv = 24, dte = 17, theme = 'dark', height = 160, width = 304, model = 'bs', r = 0.015 }) {
   const W = width, H = height, pad = 18;
   const N = 60;
   const rangePct = 0.08;
@@ -148,11 +148,11 @@ function GreeksProfile({ legs, spot, iv = 24, dte = 17, theme = 'dark', height =
     for (let i = 0; i <= N; i++) {
       const S = lo + (i / N) * (hi - lo);
       xs.push(S);
-      const g = window.portfolioGreeks(legs, S, iv, dte);
+      const g = window.portfolioGreeks(legs, S, iv, dte, r, model);
       dArr.push(g.delta); gArr.push(g.gamma); tArr.push(g.theta); vArr.push(g.vega);
     }
     return { xs, delta: dArr, gamma: gArr, theta: tArr, vega: vArr };
-  }, [legs, spot, iv, dte]);
+  }, [legs, spot, iv, dte, model, r]);
 
   const colors = {
     delta: '#ef5350',  // red
@@ -223,7 +223,7 @@ function GreeksProfile({ legs, spot, iv = 24, dte = 17, theme = 'dark', height =
 // ─────────────────────────────────────────────────────────────────────────────
 // P&L Distribution Histogram — lognormal expected-P&L distribution at expiry.
 // Profit buckets red, loss buckets teal. Vertical zero line. Stats row above.
-function PnLDistribution({ legs, spot, iv = 24, dte = 17, theme = 'dark', height = 160, width = 304, ntdMult = 50 }) {
+function PnLDistribution({ legs, spot, iv = 24, dte = 17, theme = 'dark', height = 160, width = 304, ntdMult = 50, cur = 'NT$' }) {
   const W = width, H = height, pad = 14;
   const dist = useMemoM(() => window.pnlDistribution(legs, spot, iv, dte), [legs, spot, iv, dte]);
   const buckets = dist.buckets;
@@ -246,8 +246,8 @@ function PnLDistribution({ legs, spot, iv = 24, dte = 17, theme = 'dark', height
       {/* stats row */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, fontSize: 10, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
         <span><span style={{ opacity: 0.55 }}>POP </span><span style={{ color: '#f0c068', fontWeight: 700 }}>{popPct}%</span></span>
-        <span><span style={{ opacity: 0.55 }}>E[P&L] </span><span style={{ color: ePnlNTD >= 0 ? upColor : downColor, fontWeight: 600 }}>{ePnlNTD >= 0 ? '+' : ''}NT${ePnlNTD.toLocaleString()}</span></span>
-        <span><span style={{ opacity: 0.55 }}>P10 </span><span style={{ color: downColor, fontWeight: 600 }}>NT${p10NTD.toLocaleString()}</span></span>
+        <span><span style={{ opacity: 0.55 }}>E[P&L] </span><span style={{ color: ePnlNTD >= 0 ? upColor : downColor, fontWeight: 600 }}>{ePnlNTD >= 0 ? '+' : ''}{cur}{ePnlNTD.toLocaleString()}</span></span>
+        <span><span style={{ opacity: 0.55 }}>P10 </span><span style={{ color: downColor, fontWeight: 600 }}>{cur}{p10NTD.toLocaleString()}</span></span>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} style={{ display: 'block' }}>
         {/* baseline */}
@@ -275,8 +275,8 @@ function PnLDistribution({ legs, spot, iv = 24, dte = 17, theme = 'dark', height
         <line x1={xat(dist.p10)} x2={xat(dist.p10)} y1={H - pad - 4} y2={H - pad + 2} stroke={txt} strokeWidth="1.2" />
         <line x1={xat(dist.p90)} x2={xat(dist.p90)} y1={H - pad - 4} y2={H - pad + 2} stroke={txt} strokeWidth="1.2" />
         {/* end labels */}
-        <text x={pad} y={H - 2} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace">NT${Math.round(lo * ntdMult).toLocaleString()}</text>
-        <text x={W - pad} y={H - 2} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace" textAnchor="end">NT${Math.round(hi * ntdMult).toLocaleString()}</text>
+        <text x={pad} y={H - 2} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace">{cur}{Math.round(lo * ntdMult).toLocaleString()}</text>
+        <text x={W - pad} y={H - 2} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace" textAnchor="end">{cur}{Math.round(hi * ntdMult).toLocaleString()}</text>
       </svg>
     </div>
   );
@@ -285,11 +285,13 @@ function PnLDistribution({ legs, spot, iv = 24, dte = 17, theme = 'dark', height
 // ─────────────────────────────────────────────────────────────────────────────
 // OI Profile — mirrored horizontal bars: Call OI (left, red) vs Put OI (right, teal).
 // Reads chain rows from window.genChain(spot, contract). ATM row highlighted.
-function OIProfile({ spot, contract = 'monthly', theme = 'dark', height, maxRows = 13 }) {
-  const rows = useMemoM(() => {
+function OIProfile({ spot, contract = 'monthly', theme = 'dark', height, maxRows = 13, rows: rowsProp }) {
+  const genRows = useMemoM(() => {
+    if (rowsProp && rowsProp.length) return [];
     if (!window.genChain) return [];
     return window.genChain({ spot, contract });
-  }, [spot, contract]);
+  }, [spot, contract, rowsProp]);
+  const rows = (rowsProp && rowsProp.length) ? rowsProp : genRows;
   // Center on ATM, take ±maxRows/2
   const center = rows.findIndex((r) => r.atm);
   const half = Math.floor(maxRows / 2);
@@ -391,11 +393,11 @@ function DataQualityPill({ quality }) {
 //   theta /day  ≈ Θ                                   (Θ is per-day, × 50)
 //
 // Renders 3 horizontal diverging bars centered on a 0-line; red = profit, teal = loss.
-function PnLAttribution({ legs, spot, iv, dte, theme = 'dark', height = 150, width = 304, baseSpot = 21850, baseIv = 24, ntdMult = 50 }) {
+function PnLAttribution({ legs, spot, iv, dte, theme = 'dark', height = 150, width = 304, baseSpot = 21850, baseIv = 24, ntdMult = 50, cur = 'NT$', model = 'bs', r = 0.015 }) {
   const W = width, H = height, pad = 14;
   const pg = useMemoM(() => window.portfolioGreeks
-    ? window.portfolioGreeks(legs, spot, iv, dte)
-    : { delta: 0, gamma: 0, theta: 0, vega: 0 }, [legs, spot, iv, dte]);
+    ? window.portfolioGreeks(legs, spot, iv, dte, r, model)
+    : { delta: 0, gamma: 0, theta: 0, vega: 0 }, [legs, spot, iv, dte, model, r]);
   const dSpot = spot - baseSpot;
   const dIv   = iv   - baseIv;
   const items = [
@@ -429,7 +431,7 @@ function PnLAttribution({ legs, spot, iv, dte, theme = 'dark', height = 150, wid
             <text x={pad} y={yMid + 9} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace">{it.sub}</text>
             {/* value (right) */}
             <text x={W - pad} y={yMid + 4} fontSize="12" fontWeight="700" textAnchor="end" fill={color} fontFamily="ui-monospace, SF Mono, monospace">
-              {it.value >= 0 ? '+' : ''}NT${Math.round(it.value).toLocaleString()}
+              {it.value >= 0 ? '+' : ''}{cur}{Math.round(it.value).toLocaleString()}
             </text>
           </g>
         );
@@ -447,8 +449,12 @@ function PnLAttribution({ legs, spot, iv, dte, theme = 'dark', height = 150, wid
 // The strike K* that minimises pain(K) = "max pain price" — the level where
 // option WRITERS lose the least, i.e. where market makers theoretically want
 // settlement to land. Classic TXO settlement-day indicator.
-function MaxPain({ spot, contract = 'monthly', theme = 'dark', height = 160, width = 304, ntdMult = 50 }) {
-  const rows = useMemoM(() => (window.genChain ? window.genChain({ spot, contract }) : []), [spot, contract]);
+function MaxPain({ spot, contract = 'monthly', theme = 'dark', height = 160, width = 304, ntdMult = 50, cur = 'NT$', rows: rowsProp }) {
+  const genRows = useMemoM(() => {
+    if (rowsProp && rowsProp.length) return [];
+    return window.genChain ? window.genChain({ spot, contract }) : [];
+  }, [spot, contract, rowsProp]);
+  const rows = (rowsProp && rowsProp.length) ? rowsProp : genRows;
   const pains = useMemoM(() => rows.map((rk) => {
     let p = 0;
     for (const ri of rows) {
@@ -516,7 +522,7 @@ function MaxPain({ spot, contract = 'monthly', theme = 'dark', height = 160, wid
         <text x={W - pad} y={H - 3} fontSize="9" fill={txt} textAnchor="end" fontFamily="ui-monospace, SF Mono, monospace">{pains[pains.length - 1].strike}</text>
       </svg>
       <div style={{ marginTop: 4, fontSize: 9, opacity: 0.45, fontFamily: 'ui-monospace, SF Mono, monospace', textAlign: 'right' }}>
-        min pain = NT${Math.round(minPainNTD).toLocaleString()}
+        min pain = {cur}{Math.round(minPainNTD).toLocaleString()}
       </div>
     </div>
   );
@@ -527,23 +533,27 @@ function MaxPain({ spot, contract = 'monthly', theme = 'dark', height = 160, wid
 // Pick a strike + call/put, see theoretical price + full Greeks (Δ Γ V Θ Ρ).
 // Manages its own type / strike / r state internally; reads spot+iv from props
 // so users can sync to the global TXO_SPOT / IV slider with the "最新" buttons.
-function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = '#7c5cf0' }) {
+function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = '#7c5cf0', product }) {
   const dark = theme === 'dark';
+  // 換商品時請在呼叫端用 key={product.id} 重掛，內部 state 才會跟著重設。
+  const P = product || (window.getProduct && window.getProduct('txo'))
+    || { cur: 'NT$', mult: 50, strikeStep: 50, model: 'bs', r: defaultR, unitLabel: '×50 NTD/pt' };
+  const baseR = P.r != null ? P.r : defaultR;
   const [type, setType] = React.useState('call');
-  const [strike, setStrike] = React.useState(Math.round(spot / 50) * 50);
+  const [strike, setStrike] = React.useState(Math.round(spot / P.strikeStep) * P.strikeStep);
   const [pricerSpot, setPricerSpot] = React.useState(spot);
   const [pricerIv, setPricerIv] = React.useState(iv);
   const [pricerDte, setPricerDte] = React.useState(dte);
-  const [r, setR] = React.useState(defaultR);
+  const [r, setR] = React.useState(baseR);
   const [marketPx, setMarketPx] = React.useState('');
 
   const result = useMemoM(() => {
-    const price = window.bsPrice ? window.bsPrice(type, pricerSpot, strike, pricerIv, pricerDte, r / 100) : 0;
+    const price = window.bsPrice ? window.bsPrice(type, pricerSpot, strike, pricerIv, pricerDte, r / 100, P.model) : 0;
     const g = window.bsGreeks
-      ? window.bsGreeks(type, pricerSpot, strike, pricerIv, pricerDte, r / 100)
+      ? window.bsGreeks(type, pricerSpot, strike, pricerIv, pricerDte, r / 100, P.model)
       : { delta: 0, gamma: 0, theta: 0, vega: 0, rho: 0 };
     return { price, ...g };
-  }, [type, pricerSpot, strike, pricerIv, pricerDte, r]);
+  }, [type, pricerSpot, strike, pricerIv, pricerDte, r, P.model]);
 
   const mp = parseFloat(marketPx);
   const hasMarket = !isNaN(mp) && mp > 0;
@@ -607,7 +617,7 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
           </div>
         </div>
         {field('履約價', strike, (v) => setStrike(v || 0), null,
-          () => setStrike(Math.round(pricerSpot / 50) * 50), 'ATM')}
+          () => setStrike(Math.round(pricerSpot / P.strikeStep) * P.strikeStep), 'ATM')}
       </div>
 
       {/* Spot + IV row */}
@@ -619,7 +629,7 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
       {/* DTE + Risk-free rate row */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         {field('距到期 (天)', pricerDte, setPricerDte, null, () => setPricerDte(dte))}
-        {field('無風險利率 %', r, setR, null, () => setR(defaultR), '預設')}
+        {field('無風險利率 %', r, setR, null, () => setR(baseR), '預設')}
       </div>
 
       {/* Big theoretical price card */}
@@ -637,7 +647,7 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
               color: dark ? '#e8eaef' : '#1d1d22',
             }}>{result.price.toFixed(2)}</div>
             <div style={{ fontSize: 11, opacity: 0.55, marginTop: 4, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
-              ≈ NT${Math.round(result.price * 50).toLocaleString()} ({type === 'call' ? 'CALL' : 'PUT'} K={strike})
+              ≈ {P.cur}{Math.round(result.price * P.mult).toLocaleString()} ({type === 'call' ? 'CALL' : 'PUT'} K={strike})
             </div>
           </div>
           {hasMarket && (
@@ -685,7 +695,7 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
       </div>
 
       <div style={{ fontSize: 9, opacity: 0.4, fontFamily: 'ui-monospace, SF Mono, monospace', textAlign: 'right' }}>
-        Black-Scholes · 歐式期權 · TXO ×50 NTD/pt
+        {P.model === 'b76' ? 'Black-76 · 期貨選擇權' : 'Black-Scholes · 歐式期權'} · {P.unitLabel}
       </div>
     </div>
   );

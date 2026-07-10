@@ -3,21 +3,27 @@
 
 const { useMemo: cnM, useState: cnS } = React;
 
-function genChain({ spot, contract }) {
-  const strikeStep = 50; // TXO 點
+// Mock chain rows。product 給合約規格（strikeStep / 定價模型 / smile 方向），
+// 理論價直接走 bsPrice（'bs' 或 'b76'），跟 payoff / P&L / Pricer 同一條定價路徑。
+// live 模式下不會呼叫這裡 — rows 由 IB proxy 回傳、經 props 傳進各元件。
+function genChain({ spot, contract, dte = 17, product }) {
+  const P = product || (window.getProduct && window.getProduct('txo')) || {};
+  const strikeStep = P.strikeStep || 50;
+  const model = P.model || 'bs';
+  const r = (P.r != null ? P.r : 1.5) / 100;
+  const skewUp = P.skew === 'call' ? 1 : -1; // TXO put-skew；穀物 call-skew（旱災風險在上檔）
   const center = Math.round(spot / strikeStep) * strikeStep;
   const rows = [];
   for (let i = -8; i <= 8; i++) {
     const strike = center + i * strikeStep;
     const m = Math.abs(strike - spot) / spot;
-    // Mock IV smile + premiums
-    const ivBase = contract === 'weekly' ? 22 : 24;
-    const iv = ivBase + Math.pow(m * 6, 1.6) * 8 + (i < 0 ? 1.2 : -0.4);
-    const callIntrinsic = Math.max(spot - strike, 0);
-    const putIntrinsic = Math.max(strike - spot, 0);
-    const timeVal = Math.max(0, 70 - Math.abs(strike - spot) * 0.7) * (contract === 'weekly' ? 0.5 : 1);
-    const callPx = callIntrinsic + timeVal * (i <= 0 ? 1 : 0.7);
-    const putPx = putIntrinsic + timeVal * (i >= 0 ? 1 : 0.7);
+    // Mock IV smile
+    const ivBase = (P.ivBase && (P.ivBase[contract] != null ? P.ivBase[contract] : P.ivBase.std))
+      || (contract === 'weekly' ? 22 : 24);
+    const iv = ivBase + Math.pow(m * 6, 1.6) * 8 + (i * skewUp > 0 ? 1.2 : -0.4);
+    const callPx = window.bsPrice('call', spot, strike, iv, dte, r, model);
+    const putPx = window.bsPrice('put', spot, strike, iv, dte, r, model);
+    const half = Math.max(strikeStep * 0.02, callPx * 0.02, putPx * 0.02); // bid-ask 半寬
     const callOI = Math.round(8000 - Math.abs(i) * 600 + Math.random() * 400);
     const putOI = Math.round(7500 - Math.abs(i) * 550 + Math.random() * 400);
     const callVol = Math.round(callOI * 0.18);
@@ -26,15 +32,16 @@ function genChain({ spot, contract }) {
       strike,
       atm: Math.abs(strike - spot) <= strikeStep / 2,
       itmCall: strike < spot, itmPut: strike > spot,
-      call: { bid: Math.max(0, callPx - 1.0), ask: callPx + 1.0, last: callPx, iv, oi: callOI, vol: callVol, delta: 0.5 + (spot - strike) / (spot * 0.06) },
-      put:  { bid: Math.max(0, putPx - 1.0),  ask: putPx + 1.0,  last: putPx,  iv, oi: putOI,  vol: putVol,  delta: -0.5 + (spot - strike) / (spot * 0.06) },
+      call: { bid: Math.max(0, callPx - half), ask: callPx + half, last: callPx, iv, oi: callOI, vol: callVol, delta: window.bsGreeks('call', spot, strike, iv, dte, r, model).delta },
+      put:  { bid: Math.max(0, putPx - half),  ask: putPx + half,  last: putPx,  iv, oi: putOI,  vol: putVol,  delta: window.bsGreeks('put', spot, strike, iv, dte, r, model).delta },
     });
   }
   return rows;
 }
 
-function OptionChain({ spot, contract = 'monthly', onAddLeg, theme = 'dark' }) {
-  const rows = cnM(() => genChain({ spot, contract }), [spot, contract]);
+function OptionChain({ spot, contract = 'monthly', dte, product, rows: rowsProp, onAddLeg, theme = 'dark' }) {
+  const genRows = cnM(() => genChain({ spot, contract, dte, product }), [spot, contract, dte, product]);
+  const rows = (rowsProp && rowsProp.length) ? rowsProp : genRows;
   const [hov, setHov] = cnS(null); // { row, side }
   const dark = theme === 'dark';
   const colHead = dark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)';
@@ -64,7 +71,7 @@ function OptionChain({ spot, contract = 'monthly', onAddLeg, theme = 'dark' }) {
           <span style={{ opacity: 0.4, marginLeft: 12 }}>· click any row to add leg</span>
         </div>
         <div className="mono" style={{ fontSize: 10, opacity: 0.5 }}>
-          contract size = ×50 NTD · ATM = ${rows.find((r) => r.atm)?.strike}
+          {(product && product.unitLabel) || '×50 NTD/pt'} · ATM = ${rows.find((r) => r.atm)?.strike}
         </div>
       </div>
 
