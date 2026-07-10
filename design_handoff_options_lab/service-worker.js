@@ -1,7 +1,7 @@
 // Options Lab service worker.
 // Strategy: cache-first for the app shell + same-origin assets, network-first for HTML.
 // Bumping CACHE_VERSION purges old caches.
-const CACHE_VERSION = 'options-lab-v16';
+const CACHE_VERSION = 'options-lab-v17';
 const APP_SHELL = [
   './',
   './index.html',
@@ -14,6 +14,8 @@ const APP_SHELL = [
   './tweaks-panel.jsx',
   './surface3d.js',
   './iv-surface.js',
+  './products.js',
+  './data-live.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png',
@@ -43,6 +45,10 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
+
+  // IB proxy (/api/*, data-live.js 打 localhost:8720): 絕不快取，直接走網路 —
+  // 快取到舊行情比沒有行情更糟。
+  if (url.pathname.startsWith('/api/')) return;
 
   // Cross-origin (CDN React/Three.js etc.): pass through, but also stash in cache.
   if (url.origin !== self.location.origin) {
