@@ -77,7 +77,7 @@ function Glass({ variant = 'light', radius = 18, padding = 20, style, children, 
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 2D payoff at expiry (SVG) — with probability cone overlay and time-slice
-function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, iv = 28, dte = 30, showCone = false, sliceFrac = 1, rangePct = 0.08, showKeyNumbers = false }) {
+function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, iv = 28, dte = 30, showCone = false, sliceFrac = 1, rangePct = 0.08, showKeyNumbers = false, model = 'bs', r = 0.015, strikeStep = 50 }) {
   // Auto-fit X range. Anchor on the STRIKE midpoint, span = max(strike spread,
   // 1σ ATM move). Crucially we do NOT pre-include spot in the range — when spot
   // is far from strikes (e.g. 2000pt deep OTM bull-call), forcing the range to
@@ -96,12 +96,12 @@ function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, i
       // 1σ ATM move in points (use spot as ATM proxy). Gives a sensible default
       // breathing room for single-strike strategies (long call/put) where spread=0.
       const sigmaTpts = spot * (iv / 100) * Math.sqrt(Math.max(dte, 0.5) / 365);
-      const halfSpan = Math.max(spread / 2 + 100, sigmaTpts * 0.6);
+      const halfSpan = Math.max(spread / 2 + strikeStep * 2, sigmaTpts * 0.6);
       lo = center - halfSpan;
       hi = center + halfSpan;
       // Stretch toward spot if it's nearby; otherwise keep chart focused on strikes.
-      if (spot < lo && lo - spot < halfSpan) lo = spot - 50;
-      if (spot > hi && spot - hi < halfSpan) hi = spot + 50;
+      if (spot < lo && lo - spot < halfSpan) lo = spot - strikeStep;
+      if (spot > hi && spot - hi < halfSpan) hi = spot + strikeStep;
     } else {
       lo = spot * (1 - rangePct);
       hi = spot * (1 + rangePct);
@@ -109,7 +109,7 @@ function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, i
     const arr = [];
     for (let i = 0; i <= 80; i++) arr.push(lo + (i / 80) * (hi - lo));
     return arr;
-  }, [legs, spot, iv, dte, showCone, rangePct]);
+  }, [legs, spot, iv, dte, showCone, rangePct, strikeStep]);
   // P&L at the time slice: BS-valued at daysRem = dte * (1 - sliceFrac).
   // sliceFrac=0 → daysRem=dte → smooth BS curve − premium (the realistic "now" P&L).
   // sliceFrac=1 → daysRem≈0 → kinked intrinsic − premium (expiry hockey stick).
@@ -117,7 +117,7 @@ function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, i
   const daysRem = Math.max(0, dte * (1 - sliceFrac));
   const ys = xs.map((s) => legs.reduce((acc, l) => {
     const sign = l.side === 'long' ? 1 : -1;
-    const value = bsPrice(l.type, s, l.strike, iv, daysRem);
+    const value = bsPrice(l.type, s, l.strike, iv, daysRem, r, model);
     return acc + sign * l.qty * (value - l.premium);
   }, 0));
   const maxY = Math.max(...ys.map(Math.abs), 1);
@@ -280,84 +280,84 @@ function normalCdf(x) {
   return 0.5 * (1 + sign * y);
 }
 
-// Black-Scholes theoretical price for a European call/put at spot S, strike K,
-// implied vol ivPct (in %), days to expiry, risk-free r (decimal). Returns price
-// in points (multiply by 50 for TXO NTD).
-function bsPrice(type, S, K, ivPct, dte, r = 0.015) {
+// Theoretical price for a European call/put at spot S, strike K, implied vol
+// ivPct (in %), days to expiry, risk-free r (decimal). Returns price in points
+// (multiply by the product multiplier for currency).
+// model: 'bs' = Black-Scholes on spot (TXO)；'b76' = Black-76 on futures
+// (CBOT 期貨選擇權，S = 期貨價，drift 為 0、整體折現 e^-rT)。
+function bsPrice(type, S, K, ivPct, dte, r = 0.015, model = 'bs') {
   const T = Math.max(dte / 365, 1e-6);
   const sigma = Math.max(ivPct / 100, 1e-4);
   const sigmaRT = sigma * Math.sqrt(T);
-  const d1 = (Math.log(S / K) + (r + sigma * sigma / 2) * T) / sigmaRT;
+  const b = model === 'b76' ? 0 : r; // cost of carry
+  const df = Math.exp(-r * T);
+  const d1 = (Math.log(S / K) + (b + sigma * sigma / 2) * T) / sigmaRT;
   const d2 = d1 - sigmaRT;
+  const fS = model === 'b76' ? S * df : S; // 期貨要折現，現貨不用
   if (type === 'call') {
-    return S * normalCdf(d1) - K * Math.exp(-r * T) * normalCdf(d2);
+    return fS * normalCdf(d1) - K * df * normalCdf(d2);
   }
-  return K * Math.exp(-r * T) * normalCdf(-d2) - S * normalCdf(-d1);
+  return K * df * normalCdf(-d2) - fS * normalCdf(-d1);
 }
 
-// All BS Greeks for a single contract (no qty / side scaling), suitable for the
+// All Greeks for a single contract (no qty / side scaling), suitable for the
 // single-contract pricer UI. Includes Rho. Theta scaled to per-day, Vega to
-// per-1-vol-pt, Rho to per-1-pct-rate.
-function bsGreeks(type, S, K, ivPct, dte, r = 0.015) {
+// per-1-vol-pt, Rho to per-1-pct-rate. model 同 bsPrice（'bs' | 'b76'）。
+function bsGreeks(type, S, K, ivPct, dte, r = 0.015, model = 'bs') {
   const T = Math.max(dte / 365, 1e-6);
   const sigma = Math.max(ivPct / 100, 1e-4);
   const sigmaRT = sigma * Math.sqrt(T);
-  const d1 = (Math.log(S / K) + (r + sigma * sigma / 2) * T) / sigmaRT;
+  const b = model === 'b76' ? 0 : r;
+  const df = Math.exp(-r * T);
+  const d1 = (Math.log(S / K) + (b + sigma * sigma / 2) * T) / sigmaRT;
   const d2 = d1 - sigmaRT;
   const nd1 = normalPdf(d1);
   let delta, theta, rho;
-  if (type === 'call') {
+  if (model === 'b76') {
+    // Black-76: Θ = rV − e^-rT·F·n(d1)·σ/(2√T)，ρ = −T·V（整條折現對 r 微分）
+    const price = bsPrice(type, S, K, ivPct, dte, r, model);
+    delta = type === 'call' ? df * normalCdf(d1) : -df * normalCdf(-d1);
+    theta = r * price - (df * S * nd1 * sigma) / (2 * Math.sqrt(T));
+    rho   = -T * price;
+  } else if (type === 'call') {
     delta = normalCdf(d1);
-    theta = (-S * nd1 * sigma) / (2 * Math.sqrt(T)) - r * K * Math.exp(-r * T) * normalCdf(d2);
-    rho   = K * T * Math.exp(-r * T) * normalCdf(d2);
+    theta = (-S * nd1 * sigma) / (2 * Math.sqrt(T)) - r * K * df * normalCdf(d2);
+    rho   = K * T * df * normalCdf(d2);
   } else {
     delta = normalCdf(d1) - 1;
-    theta = (-S * nd1 * sigma) / (2 * Math.sqrt(T)) + r * K * Math.exp(-r * T) * normalCdf(-d2);
-    rho   = -K * T * Math.exp(-r * T) * normalCdf(-d2);
+    theta = (-S * nd1 * sigma) / (2 * Math.sqrt(T)) + r * K * df * normalCdf(-d2);
+    rho   = -K * T * df * normalCdf(-d2);
   }
+  const dfG = model === 'b76' ? df : 1;
   return {
     delta,
-    gamma: nd1 / (S * sigmaRT),
+    gamma: dfG * nd1 / (S * sigmaRT),
     theta: theta / 365,    // per day
-    vega:  (S * nd1 * Math.sqrt(T)) / 100,  // per 1 vol pt
+    vega:  (dfG * S * nd1 * Math.sqrt(T)) / 100,  // per 1 vol pt
     rho:   rho / 100,      // per 1 pct rate
   };
 }
 
-// Per-leg BS Greeks at spot S, IV (percent), DTE (days), risk-free r (decimal).
+// Per-leg Greeks at spot S, IV (percent), DTE (days), risk-free r (decimal).
 // Returns { delta, gamma, theta, vega } scaled to per-day theta and per-1-vol-pt vega.
-function legGreeks(leg, S, ivPct, dte, r = 0.015) {
+// model 同 bsPrice（'bs' | 'b76'）。
+function legGreeks(leg, S, ivPct, dte, r = 0.015, model = 'bs') {
   const { type, side, strike: K, qty } = leg;
-  const T = Math.max(dte / 365, 1e-6);
-  const sigma = Math.max(ivPct / 100, 1e-4);
-  const sigmaRT = sigma * Math.sqrt(T);
-  const d1 = (Math.log(S / K) + (r + sigma * sigma / 2) * T) / sigmaRT;
-  const d2 = d1 - sigmaRT;
   const sign = side === 'long' ? 1 : -1;
-  const nd1 = normalPdf(d1);
-  let delta, theta;
-  if (type === 'call') {
-    delta = normalCdf(d1);
-    theta = (-S * nd1 * sigma) / (2 * Math.sqrt(T)) - r * K * Math.exp(-r * T) * normalCdf(d2);
-  } else {
-    delta = normalCdf(d1) - 1;
-    theta = (-S * nd1 * sigma) / (2 * Math.sqrt(T)) + r * K * Math.exp(-r * T) * normalCdf(-d2);
-  }
-  const gamma = nd1 / (S * sigmaRT);
-  const vega = S * nd1 * Math.sqrt(T);
+  const g = bsGreeks(type, S, K, ivPct, dte, r, model);
   return {
-    delta: sign * qty * delta,
-    gamma: sign * qty * gamma,
-    theta: sign * qty * theta / 365,   // per day
-    vega:  sign * qty * vega / 100,    // per 1 vol pt
+    delta: sign * qty * g.delta,
+    gamma: sign * qty * g.gamma,
+    theta: sign * qty * g.theta,
+    vega:  sign * qty * g.vega,
   };
 }
 
 // Portfolio-level Greeks: sum of per-leg Greeks at given spot/IV/DTE.
-function portfolioGreeks(legs, S, ivPct, dte, r = 0.015) {
+function portfolioGreeks(legs, S, ivPct, dte, r = 0.015, model = 'bs') {
   const acc = { delta: 0, gamma: 0, theta: 0, vega: 0 };
   for (const l of legs) {
-    const g = legGreeks(l, S, ivPct, dte, r);
+    const g = legGreeks(l, S, ivPct, dte, r, model);
     acc.delta += g.delta; acc.gamma += g.gamma; acc.theta += g.theta; acc.vega += g.vega;
   }
   return acc;
