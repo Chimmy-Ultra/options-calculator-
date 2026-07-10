@@ -16,6 +16,14 @@ const DENSITY = {
   spacious:   { gap: 18, panelPad: 22 },
 };
 
+// K 線週期。bar/duration 直接餵給 IB reqHistoricalData（server 白名單內）；
+// n/volScale 給 mock 用（沒接 IB 時的隨機漫步根數與波動縮放）。
+const K_PERIODS = [
+  { id: 'D',  label: '日',  bar: '1 day',   duration: '3 M', n: 60, volScale: 1 },
+  { id: '4H', label: '4H',  bar: '4 hours', duration: '1 M', n: 60, volScale: 0.5 },
+  { id: '1H', label: '1H',  bar: '1 hour',  duration: '1 M', n: 90, volScale: 0.38 },
+];
+
 // TXO market state（其他商品的合約規格在 products.js 的 window.PRODUCTS）
 const TXO_SPOT = 21850;
 const STRIKE_STEP = 50;
@@ -160,6 +168,26 @@ function ExpiryStrip({ value, onChange, expiries = TXO_EXPIRIES }) {
   );
 }
 
+// K 線週期切換（日 / 4H / 1H）— 小型 segmented。
+function KPeriodToggle({ value, onChange }) {
+  return (
+    <div style={{ display: 'flex', gap: 2 }}>
+      {K_PERIODS.map((p) => {
+        const active = p.id === value;
+        return (
+          <button key={p.id} onClick={() => onChange(p.id)} style={{
+            fontSize: 9, fontWeight: 700, padding: '3px 8px', borderRadius: 6, minWidth: 26,
+            border: '1px solid ' + (active ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.08)'),
+            background: active ? 'rgba(255,255,255,0.10)' : 'transparent',
+            color: active ? '#fff' : 'rgba(255,255,255,0.5)',
+            cursor: 'pointer', fontFamily: 'inherit',
+          }}>{p.label}</button>
+        );
+      })}
+    </div>
+  );
+}
+
 // Settlement countdown
 function SettlementCountdown({ dte, note = '13:30' }) {
   const isSettleDay = dte <= 0;
@@ -185,7 +213,8 @@ function Obsidian3() {
   const P = window.getProduct(productId);
   const [live, setLive] = uS(null);         // { quote, expiries, health } — IB proxy 抓到的
   const [liveRows, setLiveRows] = uS(null); // 當前到期日的 IB 期權鏈 rows
-  const [liveBars, setLiveBars] = uS(null); // 近月期貨的 IB 日 K
+  const [liveBars, setLiveBars] = uS(null); // 近月期貨的 IB 歷史 K
+  const [barPeriodId, setBarPeriodId] = uS('D'); // K 線週期：D / 4H / 1H
   const [expiryId, setExpiryId] = uS('m');
   const expiries = productExpiries(P, live && live.expiries);
   const expiry = expiries.find((e) => e.id === expiryId) || expiries[0];
@@ -222,15 +251,14 @@ function Obsidian3() {
     (async () => {
       const health = await window.LiveData.probe();
       if (dead || !health || !health.connected) return;
-      const [quote, exps, hist] = await Promise.all([
+      const [quote, exps] = await Promise.all([
         window.LiveData.quote(P.id),
         window.LiveData.expiries(P.id),
-        window.LiveData.bars(P.id),
       ]);
       if (dead) return;
       if (quote && quote.last > 0) setSpot(quote.last);
       if (exps && exps.length) setExpiryId(exps[0].id);
-      if (hist && hist.bars && hist.bars.length) setLiveBars(hist.bars);
+      // K 棒交給下面的專屬 effect 抓（換週期會重抓，避免重複邏輯）。
       setLive({ quote, expiries: exps && exps.length ? exps : null, health });
     })();
     return () => { dead = true; };
@@ -249,6 +277,20 @@ function Obsidian3() {
     })();
     return () => { dead = true; };
   }, [live, expiryId]);
+
+  // IB live：K 線依所選週期抓歷史 K 棒。剛連上 + 每次換週期都會重抓；
+  // 換週期時不清舊 bars（留著顯示直到新資料到，避免閃回 mock）。
+  uE(() => {
+    let dead = false;
+    if (!live || !P.ib || !window.LiveData) return undefined;
+    const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
+    (async () => {
+      const hist = await window.LiveData.bars(P.id, { bar: per.bar, duration: per.duration });
+      if (dead || !hist || !hist.bars || !hist.bars.length) return;
+      setLiveBars(hist.bars);
+    })();
+    return () => { dead = true; };
+  }, [live, barPeriodId]);
 
   // live 報價可能落在預設 slider 範圍外 → 動態放寬邊界。
   const spotMin = Math.min(P.spotMin, Math.floor(spot * 0.9));
@@ -298,8 +340,9 @@ function Obsidian3() {
   // 刻意不依賴 spot — 拉 slider 屬於情境模擬，不該重繪歷史走勢。
   const bars = uM(() => {
     if (liveBars && liveBars.length) return liveBars;
-    return window.genBars ? window.genBars({ spot, n: 60, product: P }) : [];
-  }, [liveBars, productId]);
+    const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
+    return window.genBars ? window.genBars({ spot, n: per.n, volScale: per.volScale, product: P }) : [];
+  }, [liveBars, productId, barPeriodId]);
 
   // Add leg from chain
   function addLegFromChain(leg) {
@@ -315,6 +358,7 @@ function Obsidian3() {
         P={P} switchProduct={switchProduct} live={live}
         expiries={expiries} chainRows={chainRows}
         bars={bars} barsLive={!!liveBars}
+        barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
         spotMin={spotMin} spotMax={spotMax}
         expiryId={expiryId} setExpiryId={setExpiryId} expiry={expiry}
         legs={legs} setLegs={setLegs} addLegFromChain={addLegFromChain}
@@ -398,6 +442,7 @@ function Obsidian3() {
       {workspace === 'calc' && (
         <CalcWorkspace
           P={P} bars={bars} barsLive={!!liveBars}
+          barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
           legs={legs} setLegs={setLegs}
           spot={spot} setSpot={setSpot}
           spotMin={spotMin} spotMax={spotMax}
@@ -462,7 +507,7 @@ function Obsidian3() {
 }
 
 // ───────────────────────────────────────────────── CALCULATOR WORKSPACE
-function CalcWorkspace({ P, bars, barsLive, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
+function CalcWorkspace({ P, bars, barsLive, barPeriodId, setBarPeriodId, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
   const hoverInfo = uM(() => {
     if (!hover) return null;
     const spotAt = (spot * (1 + hover.xn * 0.18)).toFixed(0);
@@ -614,8 +659,8 @@ function CalcWorkspace({ P, bars, barsLive, legs, setLegs, spot, setSpot, spotMi
             </div>
           </>)}
           {view === 'kbar' && (<>
-            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{barsLive ? '近月期貨 · IB 日K' : '日K · mock'}</span>}>
-              K線 · {P.code}
+            <Eyebrow right={<KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} />}>
+              K線 · {P.code} <span style={{ color: 'rgba(255,255,255,0.5)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· {barsLive ? '近月期貨 · IB' : 'mock'}</span>
             </Eyebrow>
             <KBarChart bars={bars} theme="dark" height={150} width={304} />
           </>)}
@@ -1041,7 +1086,7 @@ function MobileApp({
   vp, workspace, setWorkspace,
   P, switchProduct, live,
   expiries, chainRows,
-  bars, barsLive,
+  bars, barsLive, barPeriodId, setBarPeriodId,
   spotMin, spotMax,
   expiryId, setExpiryId, expiry,
   legs, setLegs, addLegFromChain,
@@ -1154,6 +1199,7 @@ function MobileApp({
           <MobileCalc
             isFold={isFold} chartW={chartW}
             P={P} bars={bars} barsLive={barsLive}
+            barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
             legs={legs} setLegs={setLegs}
             spot={spot} setSpot={setSpot}
             iv={iv} setIv={setIv} dte={dte}
@@ -1210,7 +1256,7 @@ function MobileApp({
 
 function MobileCalc({
   isFold, chartW,
-  P, bars, barsLive,
+  P, bars, barsLive, barPeriodId, setBarPeriodId,
   legs, setLegs, spot, setSpot, iv, setIv, dte,
   view, setView, sliceFrac, setSliceFrac,
   pnlPts, pnlNTD, maxProfit, maxLoss,
@@ -1288,7 +1334,7 @@ function MobileCalc({
           </div>
         </>)}
         {view === 'kbar' && (<>
-          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{barsLive ? '近月期貨 · IB 日K' : '日K · mock'}</span>}>K線 · {P.code}</Eyebrow>
+          <Eyebrow right={<KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} />}>K線 · {P.code} <span style={{ color: 'rgba(255,255,255,0.5)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· {barsLive ? 'IB' : 'mock'}</span></Eyebrow>
           <KBarChart bars={bars} theme="dark" height={160} width={chartW} />
         </>)}
         {view === 'greeks' && (<>

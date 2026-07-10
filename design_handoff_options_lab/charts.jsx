@@ -702,11 +702,12 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// K 線（蠟燭圖）。mock 用 genBars 的隨機漫步；live 模式吃 IB /api/bars 的日 K。
+// K 線（蠟燭圖）。mock 用 genBars 的隨機漫步；live 模式吃 IB /api/bars 的歷史 K。
 // 台式配色：紅漲（收 >= 開）、綠跌 — 跟期權鏈同一套語意。
-function genBars({ spot, n = 60, product }) {
+// volScale：把每根的波動縮放到對應週期（日=1、4時≈0.5、1時≈0.4），日內 K 才不會過度誇張。
+function genBars({ spot, n = 60, volScale = 1, product }) {
   const ivPct = (product && product.defaultIv) || 24;
-  const dailyVol = (ivPct / 100) / Math.sqrt(252);
+  const dailyVol = (ivPct / 100) / Math.sqrt(252) * volScale;
   // 從現價往回走隨機漫步，最後一根收在 spot
   const closes = [spot];
   for (let i = 1; i < n; i++) {
