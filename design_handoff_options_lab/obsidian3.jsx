@@ -185,6 +185,7 @@ function Obsidian3() {
   const P = window.getProduct(productId);
   const [live, setLive] = uS(null);         // { quote, expiries, health } — IB proxy 抓到的
   const [liveRows, setLiveRows] = uS(null); // 當前到期日的 IB 期權鏈 rows
+  const [liveBars, setLiveBars] = uS(null); // 近月期貨的 IB 日 K
   const [expiryId, setExpiryId] = uS('m');
   const expiries = productExpiries(P, live && live.expiries);
   const expiry = expiries.find((e) => e.id === expiryId) || expiries[0];
@@ -206,6 +207,7 @@ function Obsidian3() {
     setProductId(id);
     setLive(null);
     setLiveRows(null);
+    setLiveBars(null);
     setExpiryId(e0.id);
     setSpot(p.defaultSpot);
     setIv(p.defaultIv);
@@ -220,13 +222,15 @@ function Obsidian3() {
     (async () => {
       const health = await window.LiveData.probe();
       if (dead || !health || !health.connected) return;
-      const [quote, exps] = await Promise.all([
+      const [quote, exps, hist] = await Promise.all([
         window.LiveData.quote(P.id),
         window.LiveData.expiries(P.id),
+        window.LiveData.bars(P.id),
       ]);
       if (dead) return;
       if (quote && quote.last > 0) setSpot(quote.last);
       if (exps && exps.length) setExpiryId(exps[0].id);
+      if (hist && hist.bars && hist.bars.length) setLiveBars(hist.bars);
       setLive({ quote, expiries: exps && exps.length ? exps : null, health });
     })();
     return () => { dead = true; };
@@ -290,6 +294,12 @@ function Obsidian3() {
     return window.genChain ? window.genChain({ spot, contract: expiry.type, dte, product: P }) : [];
   }, [liveRows, spot, expiry.type, dte, productId]);
   const quality = uM(() => dataQuality(legs, chainRows), [legs, chainRows]);
+  // K 線：live（IB 日K）優先，否則 mock 隨機漫步。
+  // 刻意不依賴 spot — 拉 slider 屬於情境模擬，不該重繪歷史走勢。
+  const bars = uM(() => {
+    if (liveBars && liveBars.length) return liveBars;
+    return window.genBars ? window.genBars({ spot, n: 60, product: P }) : [];
+  }, [liveBars, productId]);
 
   // Add leg from chain
   function addLegFromChain(leg) {
@@ -304,6 +314,7 @@ function Obsidian3() {
         workspace={workspace} setWorkspace={setWorkspace}
         P={P} switchProduct={switchProduct} live={live}
         expiries={expiries} chainRows={chainRows}
+        bars={bars} barsLive={!!liveBars}
         spotMin={spotMin} spotMax={spotMax}
         expiryId={expiryId} setExpiryId={setExpiryId} expiry={expiry}
         legs={legs} setLegs={setLegs} addLegFromChain={addLegFromChain}
@@ -386,7 +397,7 @@ function Obsidian3() {
       {/* WORKSPACE BODY */}
       {workspace === 'calc' && (
         <CalcWorkspace
-          P={P}
+          P={P} bars={bars} barsLive={!!liveBars}
           legs={legs} setLegs={setLegs}
           spot={spot} setSpot={setSpot}
           spotMin={spotMin} spotMax={spotMax}
@@ -451,7 +462,7 @@ function Obsidian3() {
 }
 
 // ───────────────────────────────────────────────── CALCULATOR WORKSPACE
-function CalcWorkspace({ P, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
+function CalcWorkspace({ P, bars, barsLive, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
   const hoverInfo = uM(() => {
     if (!hover) return null;
     const spotAt = (spot * (1 + hover.xn * 0.18)).toFixed(0);
@@ -567,6 +578,7 @@ function CalcWorkspace({ P, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, 
         <Glass2 tone="chip" padding={4} style={{ display: 'flex', gap: 2, overflowX: 'auto', scrollbarWidth: 'none' }}>
           {[
             { id: 'payoff', label: 'Payoff' },
+            { id: 'kbar', label: 'K線' },
             { id: 'cross', label: 'P&L' },
             { id: 'greeks', label: 'Greeks' },
             { id: 'dist', label: 'Dist' },
@@ -600,6 +612,12 @@ function CalcWorkspace({ P, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, 
               <input type="range" min="0" max="1" step="0.01" value={sliceFrac} onChange={(e) => setSliceFrac(parseFloat(e.target.value))}
                 style={{ width: '100%', accentColor: accent }} />
             </div>
+          </>)}
+          {view === 'kbar' && (<>
+            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{barsLive ? '近月期貨 · IB 日K' : '日K · mock'}</span>}>
+              K線 · {P.code}
+            </Eyebrow>
+            <KBarChart bars={bars} theme="dark" height={150} width={304} />
           </>)}
           {view === 'cross' && (<>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{dte}d</span>}>P&L vs spot</Eyebrow>
@@ -1023,6 +1041,7 @@ function MobileApp({
   vp, workspace, setWorkspace,
   P, switchProduct, live,
   expiries, chainRows,
+  bars, barsLive,
   spotMin, spotMax,
   expiryId, setExpiryId, expiry,
   legs, setLegs, addLegFromChain,
@@ -1134,7 +1153,7 @@ function MobileApp({
         {workspace === 'calc' && (
           <MobileCalc
             isFold={isFold} chartW={chartW}
-            P={P}
+            P={P} bars={bars} barsLive={barsLive}
             legs={legs} setLegs={setLegs}
             spot={spot} setSpot={setSpot}
             iv={iv} setIv={setIv} dte={dte}
@@ -1191,7 +1210,7 @@ function MobileApp({
 
 function MobileCalc({
   isFold, chartW,
-  P,
+  P, bars, barsLive,
   legs, setLegs, spot, setSpot, iv, setIv, dte,
   view, setView, sliceFrac, setSliceFrac,
   pnlPts, pnlNTD, maxProfit, maxLoss,
@@ -1234,6 +1253,7 @@ function MobileCalc({
       <Glass2 tone="chip" padding={3} style={{ display: 'flex', gap: 2, overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}>
         {[
           { id: 'payoff', label: 'Payoff' },
+          { id: 'kbar', label: 'K線' },
           { id: 'greeks', label: 'Greeks' },
           { id: 'dist', label: 'Dist' },
           { id: 'attr', label: 'Attr' },
@@ -1266,6 +1286,10 @@ function MobileCalc({
               <span>now</span><span>expiry</span>
             </div>
           </div>
+        </>)}
+        {view === 'kbar' && (<>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{barsLive ? '近月期貨 · IB 日K' : '日K · mock'}</span>}>K線 · {P.code}</Eyebrow>
+          <KBarChart bars={bars} theme="dark" height={160} width={chartW} />
         </>)}
         {view === 'greeks' && (<>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{dte}d</span>}>Greeks vs spot</Eyebrow>
