@@ -85,7 +85,7 @@ function Glass2({ tone = 'panel', radius = 18, padding = 18, style, children, ..
     },
   };
   return (
-    <div style={{
+    <div className={`g2 g2-${tone}`} style={{
       borderRadius: radius, padding, position: 'relative', overflow: 'hidden',
       backdropFilter: 'blur(36px) saturate(160%)', WebkitBackdropFilter: 'blur(36px) saturate(160%)',
       color: '#e8eaef', ...styles[tone], ...style,
@@ -109,7 +109,7 @@ function Eyebrow({ children, right }) {
 }
 
 // Workspace tabs
-function WorkspaceTabs({ value, onChange, accent }) {
+function WorkspaceTabs({ value, onChange, accent, light }) {
   const items = [
     { id: 'chain',  label: 'Chain',      icon: '☷' },
     { id: 'calc',   label: 'Calculator', icon: '◈' },
@@ -127,7 +127,7 @@ function WorkspaceTabs({ value, onChange, accent }) {
             fontSize: 12, fontWeight: 600, padding: '7px 14px', borderRadius: 999,
             border: 'none', cursor: 'pointer', transition: 'all .18s',
             background: active ? `linear-gradient(150deg, ${accent} 0%, oklch(0.55 0.18 240) 100%)` : 'transparent',
-            color: active ? '#fff' : 'rgba(255,255,255,0.65)',
+            color: active ? '#fff' : (light ? 'rgba(20,30,50,0.6)' : 'rgba(255,255,255,0.65)'),
             boxShadow: active ? '0 1px 0 rgba(255,255,255,0.18) inset, 0 4px 10px -4px rgba(0,0,0,0.5)' : 'none',
             fontFamily: 'inherit',
           }}>
@@ -142,7 +142,7 @@ function WorkspaceTabs({ value, onChange, accent }) {
 
 // Expiry strip — overflow scroll on narrow desktop windows, plain flex when
 // there's room. expiries 由商品決定（TXO 週/月選、穀物月份、或 IB 真實到期日）。
-function ExpiryStrip({ value, onChange, expiries = TXO_EXPIRIES }) {
+function ExpiryStrip({ value, onChange, expiries = TXO_EXPIRIES, light }) {
   return (
     <div style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
       {expiries.map((e) => {
@@ -151,9 +151,9 @@ function ExpiryStrip({ value, onChange, expiries = TXO_EXPIRIES }) {
         return (
           <button key={e.id} onClick={() => onChange(e.id)} style={{
             padding: '6px 11px', borderRadius: 8, border: '1px solid',
-            borderColor: active ? (isMonthly ? '#f0c068' : 'rgba(255,255,255,0.18)') : 'rgba(255,255,255,0.08)',
-            background: active ? (isMonthly ? 'rgba(240,192,104,0.16)' : 'rgba(255,255,255,0.10)') : 'rgba(255,255,255,0.02)',
-            color: active ? (isMonthly ? '#f7d394' : '#fff') : 'rgba(255,255,255,0.55)',
+            borderColor: active ? (isMonthly ? '#f0c068' : (light ? 'rgba(20,40,80,0.3)' : 'rgba(255,255,255,0.18)')) : (light ? 'rgba(25,40,70,0.14)' : 'rgba(255,255,255,0.08)'),
+            background: active ? (isMonthly ? 'rgba(240,192,104,0.16)' : (light ? 'rgba(20,40,80,0.10)' : 'rgba(255,255,255,0.10)')) : (light ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.02)'),
+            color: active ? (isMonthly ? (light ? '#8a6410' : '#f7d394') : (light ? '#1c2433' : '#fff')) : (light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)'),
             fontFamily: 'inherit', fontSize: 11, fontWeight: 600, cursor: 'pointer',
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, lineHeight: 1.1,
             position: 'relative', minWidth: 52, flexShrink: 0,
@@ -215,6 +215,10 @@ function Obsidian3() {
   const [liveRows, setLiveRows] = uS(null); // 當前到期日的 IB 期權鏈 rows
   const [liveBars, setLiveBars] = uS(null); // 近月期貨的 IB 歷史 K
   const [barPeriodId, setBarPeriodId] = uS('D'); // K 線週期：D / 4H / 1H
+  const [theme, setTheme] = uS('dark'); // 'dark' | 'light'（設計稿的 Light/Dark 切換）
+  const light = theme === 'light';
+  // 亮色靠 body.light 的 CSS 覆蓋（tokens.css），圖表等元件則吃 theme prop 的 light 分支。
+  uE(() => { document.body.classList.toggle('light', theme === 'light'); }, [theme]);
   const [expiryId, setExpiryId] = uS('m');
   const expiries = productExpiries(P, live && live.expiries);
   const expiry = expiries.find((e) => e.id === expiryId) || expiries[0];
@@ -377,8 +381,12 @@ function Obsidian3() {
   return (
     <div style={{
       width: '100%', minHeight: '100vh', position: 'relative', overflow: 'hidden',
-      fontFamily: 'var(--font-display)', color: '#e8eaef',
-      background: `
+      fontFamily: 'var(--font-display)', color: light ? '#1c2433' : '#e8eaef',
+      background: light ? `
+        radial-gradient(ellipse 60% 70% at 18% 30%, ${t.showAuroraBlobs ? `oklch(0.90 0.045 ${t.accentHue}) 0%` : 'transparent 0%'}, transparent 60%),
+        radial-gradient(ellipse 50% 50% at 82% 70%, ${t.showAuroraBlobs ? 'oklch(0.93 0.035 60) 0%' : 'transparent 0%'}, transparent 60%),
+        linear-gradient(180deg, #eef1f6 0%, #e4e9f2 100%)
+      ` : `
         radial-gradient(ellipse 60% 70% at 18% 30%, ${t.showAuroraBlobs ? `oklch(0.34 0.10 ${t.accentHue}) 0%` : 'transparent 0%'}, transparent 60%),
         radial-gradient(ellipse 50% 50% at 82% 70%, ${t.showAuroraBlobs ? 'oklch(0.30 0.08 30) 0%' : 'transparent 0%'}, transparent 60%),
         radial-gradient(ellipse 80% 60% at 50% 100%, ${t.showAuroraBlobs ? `oklch(0.26 0.06 ${(t.accentHue + 60) % 360}) 0%` : 'transparent 0%'}, transparent 65%),
@@ -388,7 +396,7 @@ function Obsidian3() {
       {/* texture grid */}
       <div aria-hidden style={{
         position: 'absolute', inset: 0, opacity: 0.35, pointerEvents: 'none',
-        backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.04) 1px, transparent 1px)',
+        backgroundImage: `radial-gradient(circle, ${light ? 'rgba(20,40,80,0.05)' : 'rgba(255,255,255,0.04)'} 1px, transparent 1px)`,
         backgroundSize: '32px 32px',
       }} />
 
@@ -399,7 +407,7 @@ function Obsidian3() {
           <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: -0.2 }}>Options Lab</span>
         </Glass2>
 
-        <WorkspaceTabs value={workspace} onChange={setWorkspace} accent={accent} />
+        <WorkspaceTabs value={workspace} onChange={setWorkspace} accent={accent} light={light} />
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
           <Glass2 tone="chip" radius={999} padding="8px 12px" style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
@@ -407,16 +415,17 @@ function Obsidian3() {
               value={productId}
               onChange={(e) => switchProduct(e.target.value)}
               title={P.name}
+              className="lt-prodsel"
               style={{
                 fontSize: 10, fontWeight: 700, padding: '2px 5px', borderRadius: 4,
-                background: 'rgba(255,255,255,0.06)', color: '#e8eaef',
+                background: 'rgba(255,255,255,0.06)', color: light ? '#1c2433' : '#e8eaef',
                 border: 'none', outline: 'none', cursor: 'pointer', fontFamily: 'inherit',
               }}>
               {window.PRODUCTS.map((p) => <option key={p.id} value={p.id}>{p.code}</option>)}
             </select>
             <span className="tnum" style={{ fontSize: 13, fontWeight: 600 }}>{spot.toLocaleString()}</span>
             {P.ib ? (
-              <span className="mono" title={live ? 'IB 已連線（延遲/即時依訂閱）' : '沒偵測到本機 IB proxy — mock 數據'} style={{
+              <span className={`mono ${live ? '' : 'lt-mock'}`} title={live ? 'IB 已連線（延遲/即時依訂閱）' : '沒偵測到本機 IB proxy — mock 數據'} style={{
                 fontSize: 9, fontWeight: 700, letterSpacing: 0.5,
                 color: live ? '#4dd0c8' : 'rgba(255,255,255,0.45)',
               }}>{live ? '● IB' : '○ MOCK'}</span>
@@ -425,12 +434,17 @@ function Obsidian3() {
             )}
           </Glass2>
           <SettlementCountdown dte={dte} note={P.settleNote} />
+          <Glass2 tone="chip" radius={999} padding="8px 13px" style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
+            onClick={() => setTheme(light ? 'dark' : 'light')} title="切換 亮色 / 深色">
+            <span style={{ fontSize: 13 }}>{light ? '☀' : '☾'}</span>
+            <span style={{ fontSize: 12, fontWeight: 600 }}>{light ? 'Light' : 'Dark'}</span>
+          </Glass2>
         </div>
       </div>
 
       {/* Expiry strip — second row */}
       <div style={{ position: 'absolute', top: 64, left: 24, right: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 10, gap: 12 }}>
-        <ExpiryStrip value={expiryId} onChange={setExpiryId} expiries={expiries} />
+        <ExpiryStrip value={expiryId} onChange={setExpiryId} expiries={expiries} light={light} />
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <Glass2 tone="chip" radius={8} padding="5px 10px" style={{ fontSize: 10, opacity: 0.7, fontFamily: 'ui-monospace, SF Mono, monospace', whiteSpace: 'nowrap' }}>
             {P.unitLabel}
@@ -441,7 +455,7 @@ function Obsidian3() {
       {/* WORKSPACE BODY */}
       {workspace === 'calc' && (
         <CalcWorkspace
-          P={P} bars={bars} barsLive={!!liveBars}
+          P={P} bars={bars} barsLive={!!liveBars} theme={theme} light={light}
           barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
           legs={legs} setLegs={setLegs}
           spot={spot} setSpot={setSpot}
@@ -459,7 +473,7 @@ function Obsidian3() {
       )}
       {workspace === 'chain' && (
         <ChainWorkspace
-          P={P} rows={chainRows}
+          P={P} rows={chainRows} theme={theme} light={light}
           spot={spot} expiry={expiry}
           onAddLeg={addLegFromChain}
           legs={legs} setLegs={setLegs}
@@ -468,13 +482,13 @@ function Obsidian3() {
         />
       )}
       {workspace === 'pricer' && (
-        <PricerWorkspace D={D} P={P} spot={spot} iv={iv} dte={dte} accent={accent} />
+        <PricerWorkspace D={D} P={P} spot={spot} iv={iv} dte={dte} accent={accent} theme={theme} />
       )}
       {workspace === 'iv' && (
-        <IVWorkspace D={D} P={P} expiry={expiry} expiries={expiries} />
+        <IVWorkspace D={D} P={P} expiry={expiry} expiries={expiries} light={light} />
       )}
       {workspace === 'compare' && (
-        <CompareWorkspace D={D} P={P} spot={spot} iv={iv} dte={dte} />
+        <CompareWorkspace D={D} P={P} spot={spot} iv={iv} dte={dte} theme={theme} light={light} />
       )}
 
       {/* Tweaks panel */}
@@ -507,7 +521,8 @@ function Obsidian3() {
 }
 
 // ───────────────────────────────────────────────── CALCULATOR WORKSPACE
-function CalcWorkspace({ P, bars, barsLive, barPeriodId, setBarPeriodId, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
+function CalcWorkspace({ P, bars, barsLive, theme = 'dark', barPeriodId, setBarPeriodId, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
+  const light = theme === 'light';
   const hoverInfo = uM(() => {
     if (!hover) return null;
     const spotAt = (spot * (1 + hover.xn * 0.18)).toFixed(0);
@@ -520,7 +535,7 @@ function CalcWorkspace({ P, bars, barsLive, barPeriodId, setBarPeriodId, legs, s
     <>
       {/* 3D background fills middle */}
       <div style={{ position: 'absolute', inset: '110px 0 0 0' }}>
-        <Surface3DMount theme="dark" height="100%" scheme={t.scheme} onHover={setHover} />
+        <Surface3DMount theme={theme} height="100%" scheme={t.scheme} onHover={setHover} />
       </div>
 
       {/* hover tooltip */}
@@ -553,7 +568,7 @@ function CalcWorkspace({ P, bars, barsLive, barPeriodId, setBarPeriodId, legs, s
           <Eyebrow right={
             <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 2 * P.strikeStep) / P.strikeStep) * P.strikeStep, iv, dte, P)])}>+ leg</button>
           }>Legs</Eyebrow>
-          <LegEditor legs={legs} onChange={setLegs} theme="dark" />
+          <LegEditor legs={legs} onChange={setLegs} theme={theme} />
         </Glass2>
 
         <Glass2 tone="panel" padding={D.panelPad}>
@@ -573,8 +588,8 @@ function CalcWorkspace({ P, bars, barsLive, barPeriodId, setBarPeriodId, legs, s
                 setIv(Math.max(P.ivMin, Math.min(P.ivMax, P.defaultIv + s.iv)));
               }} style={{
                 padding: '8px 6px', borderRadius: 8, fontSize: 10, fontWeight: 600,
-                border: '1px solid rgba(255,255,255,0.10)', cursor: 'pointer',
-                background: 'rgba(255,255,255,0.03)', color: '#e8eaef', fontFamily: 'inherit',
+                border: '1px solid rgba(128,140,170,0.28)', cursor: 'pointer',
+                background: 'rgba(128,140,170,0.12)', color: 'inherit', fontFamily: 'inherit',
               }}>{s.label}</button>
             ))}
           </div>
@@ -582,7 +597,7 @@ function CalcWorkspace({ P, bars, barsLive, barPeriodId, setBarPeriodId, legs, s
 
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow>Saved scenarios</Eyebrow>
-          <ScenarioTimeline theme="dark" items={SAVED_SCENARIOS} current={SAVED_SCENARIOS.length - 1} />
+          <ScenarioTimeline theme={theme} items={SAVED_SCENARIOS} current={SAVED_SCENARIOS.length - 1} />
         </Glass2>
       </div>
 
@@ -598,7 +613,7 @@ function CalcWorkspace({ P, bars, barsLive, barPeriodId, setBarPeriodId, legs, s
               <Eyebrow>P&L now</Eyebrow>
               <div className="tnum" style={{
                 fontSize: 32, fontWeight: 600, letterSpacing: -0.6,
-                color: pnlNTD >= 0 ? 'oklch(0.84 0.14 75)' : 'oklch(0.74 0.12 220)',
+                color: pnlNTD >= 0 ? (light ? 'oklch(0.60 0.13 75)' : 'oklch(0.84 0.14 75)') : (light ? 'oklch(0.50 0.10 220)' : 'oklch(0.74 0.12 220)'),
                 fontFamily: 'ui-monospace, SF Mono, monospace', lineHeight: 1,
               }}>
                 {pnlNTD >= 0 ? '+' : ''}{P.cur}{Math.abs(Math.round(pnlNTD)).toLocaleString()}
@@ -614,7 +629,7 @@ function CalcWorkspace({ P, bars, barsLive, barPeriodId, setBarPeriodId, legs, s
             </div>
             <div style={{ width: 110 }}>
               <div style={{ fontSize: 10, letterSpacing: 0.8, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600, textAlign: 'center' }}>POP</div>
-              <POPGauge theme="dark" size={110} value={popValue} />
+              <POPGauge theme={theme} size={110} value={popValue} />
             </div>
           </div>
         </Glass2>
@@ -634,8 +649,8 @@ function CalcWorkspace({ P, bars, barsLive, barPeriodId, setBarPeriodId, legs, s
             <button key={tab.id} onClick={() => setView(tab.id)} style={{
               flex: '1 0 auto', minWidth: 56, fontSize: 11, fontWeight: 600, padding: '7px 10px', borderRadius: 999,
               border: 'none', cursor: 'pointer', transition: 'all .18s',
-              background: view === tab.id ? 'rgba(255,255,255,0.10)' : 'transparent',
-              color: view === tab.id ? '#fff' : 'rgba(255,255,255,0.55)',
+              background: view === tab.id ? (light ? 'rgba(20,40,80,0.10)' : 'rgba(255,255,255,0.10)') : 'transparent',
+              color: view === tab.id ? 'inherit' : (light ? 'rgba(20,30,50,0.5)' : 'rgba(255,255,255,0.55)'),
               fontFamily: 'inherit', whiteSpace: 'nowrap',
             }}>{tab.label}</button>
           ))}
@@ -648,7 +663,7 @@ function CalcWorkspace({ P, bars, barsLive, barPeriodId, setBarPeriodId, legs, s
                 {sliceFrac >= 0.99 ? 'at expiry' : sliceFrac <= 0.01 ? 'now' : `t = ${(sliceFrac * 100).toFixed(0)}%`}
               </span>
             }>Payoff {t.showProbCone && <span style={{ color: '#a78bfa', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· 1σ/2σ cone</span>}</Eyebrow>
-            <PayoffChart legs={legs} spot={spot} theme="dark" height={140} width={304} iv={iv} dte={dte} showCone={t.showProbCone} sliceFrac={sliceFrac} rangePct={0.08} showKeyNumbers={true} model={P.model} r={P.r / 100} strikeStep={P.strikeStep} />
+            <PayoffChart legs={legs} spot={spot} theme={theme} height={140} width={304} iv={iv} dte={dte} showCone={t.showProbCone} sliceFrac={sliceFrac} rangePct={0.08} showKeyNumbers={true} model={P.model} r={P.r / 100} strikeStep={P.strikeStep} />
             <div style={{ marginTop: 10 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, opacity: 0.55, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 4 }}>
                 <span>Time slice</span>
@@ -662,48 +677,48 @@ function CalcWorkspace({ P, bars, barsLive, barPeriodId, setBarPeriodId, legs, s
             <Eyebrow right={<KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} />}>
               K線 · {P.code} <span style={{ color: 'rgba(255,255,255,0.5)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· {barsLive ? '近月期貨 · IB' : 'mock'}</span>
             </Eyebrow>
-            <KBarChart bars={bars} theme="dark" height={150} width={304} />
+            <KBarChart bars={bars} theme={theme} height={150} width={304} />
           </>)}
           {view === 'cross' && (<>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{dte}d</span>}>P&L vs spot</Eyebrow>
-            <CrossSection theme="dark" dte={dte} height={140} width={304} />
+            <CrossSection theme={theme} dte={dte} height={140} width={304} />
           </>)}
           {view === 'greeks' && (<>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{dte}d · IV {iv}%</span>}>
               Greeks <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· Δ Γ Θ V vs spot</span>
             </Eyebrow>
-            <GreeksProfile legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={140} width={304} model={P.model} r={P.r / 100} />
+            <GreeksProfile legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={140} width={304} model={P.model} r={P.r / 100} />
           </>)}
           {view === 'dist' && (<>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>at expiry</span>}>
               P&L distribution <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· lognormal</span>
             </Eyebrow>
-            <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={140} width={304} ntdMult={P.mult} cur={P.cur} />
+            <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={140} width={304} ntdMult={P.mult} cur={P.cur} />
           </>)}
           {view === 'attr' && (<>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>vs baseline</span>}>
               P&L attribution <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· why up / down</span>
             </Eyebrow>
-            <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={150} width={304} baseSpot={P.defaultSpot} baseIv={P.defaultIv} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />
+            <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={150} width={304} baseSpot={P.defaultSpot} baseIv={P.defaultIv} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />
           </>)}
           {view === 'theta' && (<>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>θ decay</span>}>Time decay</Eyebrow>
-            <ThetaDecay theme="dark" dte={dte} height={140} width={304} />
+            <ThetaDecay theme={theme} dte={dte} height={140} width={304} />
             <div style={{ marginTop: 6, fontSize: 11, opacity: 0.6 }}>−{P.cur}{(0.12 * P.mult * 100).toFixed(0)} / day at current DTE</div>
           </>)}
           {view === 'iv' && (<>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{iv}% ATM</span>}>IV smile</Eyebrow>
-            <IVSmile theme="dark" iv={iv} height={140} width={304} />
+            <IVSmile theme={theme} iv={iv} height={140} width={304} />
           </>)}
         </Glass2>
 
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow right={<DataQualityPill quality={quality} />}>Greeks</Eyebrow>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <GreekChip label="Delta · Δ" value={(portfolioG.delta >= 0 ? '+' : '') + portfolioG.delta.toFixed(2)} theme="dark" emphasis={portfolioG.delta >= 0 ? 'up' : 'down'} />
-            <GreekChip label="Gamma · Γ" value={portfolioG.gamma.toFixed(4)} theme="dark" />
-            <GreekChip label="Theta · Θ" value={(portfolioG.theta >= 0 ? '+' : '') + portfolioG.theta.toFixed(2)} theme="dark" emphasis={portfolioG.theta >= 0 ? 'up' : 'down'} />
-            <GreekChip label="Vega · V" value={(portfolioG.vega >= 0 ? '+' : '') + portfolioG.vega.toFixed(2)} theme="dark" emphasis={portfolioG.vega >= 0 ? 'up' : 'down'} />
+            <GreekChip label="Delta · Δ" value={(portfolioG.delta >= 0 ? '+' : '') + portfolioG.delta.toFixed(2)} theme={theme} emphasis={portfolioG.delta >= 0 ? 'up' : 'down'} />
+            <GreekChip label="Gamma · Γ" value={portfolioG.gamma.toFixed(4)} theme={theme} />
+            <GreekChip label="Theta · Θ" value={(portfolioG.theta >= 0 ? '+' : '') + portfolioG.theta.toFixed(2)} theme={theme} emphasis={portfolioG.theta >= 0 ? 'up' : 'down'} />
+            <GreekChip label="Vega · V" value={(portfolioG.vega >= 0 ? '+' : '') + portfolioG.vega.toFixed(2)} theme={theme} emphasis={portfolioG.vega >= 0 ? 'up' : 'down'} />
           </div>
         </Glass2>
       </div>
@@ -715,8 +730,8 @@ function CalcWorkspace({ P, bars, barsLive, barPeriodId, setBarPeriodId, legs, s
       }}>
         <Glass2 tone="raised" padding="16px 22px">
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28 }}>
-            <Slider label="Spot" value={spot} min={spotMin} max={spotMax} step={P.spotStep} onChange={setSpot} format={(v) => v.toLocaleString()} theme="dark" />
-            <Slider label="IV" value={iv} min={P.ivMin} max={P.ivMax} step={0.5} suffix="%" onChange={setIv} theme="dark" />
+            <Slider label="Spot" value={spot} min={spotMin} max={spotMax} step={P.spotStep} onChange={setSpot} format={(v) => v.toLocaleString()} theme={theme} />
+            <Slider label="IV" value={iv} min={P.ivMin} max={P.ivMax} step={0.5} suffix="%" onChange={setIv} theme={theme} />
           </div>
         </Glass2>
       </div>
@@ -744,7 +759,8 @@ function CalcWorkspace({ P, bars, barsLive, barPeriodId, setBarPeriodId, legs, s
 }
 
 // ───────────────────────────────────────────────── CHAIN WORKSPACE
-function ChainWorkspace({ P, rows, spot, expiry, onAddLeg, legs, setLegs, D, quality }) {
+function ChainWorkspace({ P, rows, theme = 'dark', spot, expiry, onAddLeg, legs, setLegs, D, quality }) {
+  const light = theme === 'light';
   return (
     <div style={{ position: 'absolute', top: 110, left: 24, right: 24, bottom: 24, zIndex: 5, display: 'flex', gap: D.gap }}>
       <div style={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
@@ -752,7 +768,7 @@ function ChainWorkspace({ P, rows, spot, expiry, onAddLeg, legs, setLegs, D, qua
           <Eyebrow right={
             <span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>
           }>Option Chain · {P.code}</Eyebrow>
-          <OptionChain spot={spot} contract={expiry.type} dte={expiry.dte} product={P} rows={rows} onAddLeg={onAddLeg} theme="dark" />
+          <OptionChain spot={spot} contract={expiry.type} dte={expiry.dte} product={P} rows={rows} onAddLeg={onAddLeg} theme={theme} />
         </Glass2>
       </div>
       <div style={{ width: 320, display: 'flex', flexDirection: 'column', gap: D.gap, maxHeight: '100%', overflow: 'auto', paddingBottom: 4 }}>
@@ -763,7 +779,7 @@ function ChainWorkspace({ P, rows, spot, expiry, onAddLeg, legs, setLegs, D, qua
           {legs.length === 0 ? (
             <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 11, opacity: 0.5 }}>Click any chain row to add a leg</div>
           ) : (
-            <LegEditor legs={legs} onChange={setLegs} theme="dark" />
+            <LegEditor legs={legs} onChange={setLegs} theme={theme} />
           )}
         </Glass2>
         <Glass2 tone="raised" padding={D.panelPad}>
@@ -777,11 +793,11 @@ function ChainWorkspace({ P, rows, spot, expiry, onAddLeg, legs, setLegs, D, qua
         </Glass2>
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>}>OI profile</Eyebrow>
-          <OIProfile spot={spot} contract={expiry.type} rows={rows} theme="dark" maxRows={11} />
+          <OIProfile spot={spot} contract={expiry.type} rows={rows} theme={theme} maxRows={11} />
         </Glass2>
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>結算指標</span>}>Max pain</Eyebrow>
-          <MaxPain spot={spot} contract={expiry.type} rows={rows} ntdMult={P.mult} cur={P.cur} theme="dark" height={150} width={280} />
+          <MaxPain spot={spot} contract={expiry.type} rows={rows} ntdMult={P.mult} cur={P.cur} theme={theme} height={150} width={280} />
         </Glass2>
       </div>
     </div>
@@ -789,7 +805,7 @@ function ChainWorkspace({ P, rows, spot, expiry, onAddLeg, legs, setLegs, D, qua
 }
 
 // ───────────────────────────────────────────────── PRICER WORKSPACE
-function PricerWorkspace({ D, P, spot, iv, dte, accent }) {
+function PricerWorkspace({ D, P, spot, iv, dte, accent, theme = 'dark' }) {
   return (
     <div style={{ position: 'absolute', top: 110, left: 0, right: 0, bottom: 0, zIndex: 5, padding: '0 24px 24px', overflowY: 'auto' }}>
       <div style={{ maxWidth: 540, margin: '0 auto' }}>
@@ -797,7 +813,7 @@ function PricerWorkspace({ D, P, spot, iv, dte, accent }) {
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{P.model === 'b76' ? 'Black-76 · 期貨選擇權' : 'Black-Scholes · 歐式'}</span>}>
             Option Pricer <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· 單張合約理論定價</span>
           </Eyebrow>
-          <OptionPricer key={P.id} product={P} spot={spot} iv={iv} dte={dte} theme="dark" accent={accent} />
+          <OptionPricer key={P.id} product={P} spot={spot} iv={iv} dte={dte} theme={theme} accent={accent} />
         </Glass2>
       </div>
     </div>
@@ -805,7 +821,7 @@ function PricerWorkspace({ D, P, spot, iv, dte, accent }) {
 }
 
 // ───────────────────────────────────────────────── IV SURFACE WORKSPACE
-function IVWorkspace({ D, P, expiry, expiries = TXO_EXPIRIES }) {
+function IVWorkspace({ D, P, expiry, expiries = TXO_EXPIRIES, light = false, theme = 'dark' }) {
   const ref = uR(null);
   uE(() => {
     if (!ref.current || !window.IVSurface3D) return;
@@ -889,7 +905,7 @@ const STRATEGY_LIBRARY = [
     build: (s, iv, dte, P) => [_mkLeg('long','put',s,s,iv,dte,P)] },
 ];
 
-function CompareWorkspace({ D, P, spot, iv, dte }) {
+function CompareWorkspace({ D, P, spot, iv, dte, theme = 'dark' }) {
   const [picked, setPicked] = uS(['bull-call', 'iron-condor', 'straddle']);
   const [showPicker, setShowPicker] = uS(false);
 
@@ -943,6 +959,7 @@ function CompareWorkspace({ D, P, spot, iv, dte }) {
             iv={iv}
             dte={dte}
             D={D}
+            theme={theme}
             biasColor={biasColor}
             onRemove={() => toggle(id)}
           />
@@ -952,7 +969,7 @@ function CompareWorkspace({ D, P, spot, iv, dte }) {
   );
 }
 
-function CompareCard({ strategy: s, P, spot, iv, dte, D, biasColor, onRemove }) {
+function CompareCard({ strategy: s, P, spot, iv, dte, D, theme = 'dark', biasColor, onRemove }) {
   // Local editable legs — initialize from strategy's build() at current iv/dte.
   const [legs, setLegs] = uS(() => s.build(Math.round(spot / P.strikeStep) * P.strikeStep, iv, dte, P));
   const c = biasColor[s.bias];
@@ -1003,7 +1020,7 @@ function CompareCard({ strategy: s, P, spot, iv, dte, D, biasColor, onRemove }) 
         }}>×</button>
       </div>
 
-      <PayoffChart legs={legs} spot={spot} theme="dark" height={170} width={300} iv={iv} dte={dte} showCone={true} sliceFrac={1} rangePct={0.06} showKeyNumbers={true} model={P.model} r={P.r / 100} strikeStep={P.strikeStep} />
+      <PayoffChart legs={legs} spot={spot} theme={theme} height={170} width={300} iv={iv} dte={dte} showCone={true} sliceFrac={1} rangePct={0.06} showKeyNumbers={true} model={P.model} r={P.r / 100} strikeStep={P.strikeStep} />
 
       {/* Editable strikes */}
       <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
@@ -1075,8 +1092,8 @@ function CompareCard({ strategy: s, P, spot, iv, dte, D, biasColor, onRemove }) 
 
 const miniBtn = {
   fontSize: 10, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase',
-  padding: '4px 8px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.10)',
-  background: 'rgba(255,255,255,0.04)', color: '#e8eaef', cursor: 'pointer', whiteSpace: 'nowrap',
+  padding: '4px 8px', borderRadius: 6, border: '1px solid rgba(128,140,170,0.28)',
+  background: 'rgba(128,140,170,0.12)', color: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap',
 };
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1084,6 +1101,7 @@ const miniBtn = {
 // ═════════════════════════════════════════════════════════════════════════════
 function MobileApp({
   vp, workspace, setWorkspace,
+  theme = 'dark',
   P, switchProduct, live,
   expiries, chainRows,
   bars, barsLive, barPeriodId, setBarPeriodId,
@@ -1223,7 +1241,7 @@ function MobileApp({
         {workspace === 'pricer' && (
           <Glass2 tone="panel" padding={14}>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>單張定價</span>}>Option Pricer</Eyebrow>
-            <OptionPricer key={P.id} product={P} spot={spot} iv={iv} dte={dte} theme="dark" accent={accent} />
+            <OptionPricer key={P.id} product={P} spot={spot} iv={iv} dte={dte} theme={theme} accent={accent} />
           </Glass2>
         )}
         {workspace === 'iv' && (
@@ -1244,9 +1262,9 @@ function MobileApp({
         borderTop: '1px solid rgba(255,255,255,0.06)',
       }}>
         <div style={{ display: 'grid', gridTemplateColumns: workspace !== 'chain' ? '1fr 1fr' : '1fr', gap: 16 }}>
-          <Slider label="Spot" value={spot} min={spotMin} max={spotMax} step={P.spotStep} onChange={setSpot} format={(v) => v.toLocaleString()} theme="dark" />
+          <Slider label="Spot" value={spot} min={spotMin} max={spotMax} step={P.spotStep} onChange={setSpot} format={(v) => v.toLocaleString()} theme={theme} />
           {workspace !== 'chain' && (
-            <Slider label="IV" value={iv} min={P.ivMin} max={P.ivMax} step={0.5} suffix="%" onChange={setIv} theme="dark" />
+            <Slider label="IV" value={iv} min={P.ivMin} max={P.ivMax} step={0.5} suffix="%" onChange={setIv} theme={theme} />
           )}
         </div>
       </div>
@@ -1255,7 +1273,7 @@ function MobileApp({
 }
 
 function MobileCalc({
-  isFold, chartW,
+  isFold, chartW, theme = 'dark',
   P, bars, barsLive, barPeriodId, setBarPeriodId,
   legs, setLegs, spot, setSpot, iv, setIv, dte,
   view, setView, sliceFrac, setSliceFrac,
@@ -1285,14 +1303,14 @@ function MobileCalc({
           </div>
           <div style={{ width: 84, flexShrink: 0 }}>
             <div style={{ fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600, textAlign: 'center', marginBottom: 2 }}>POP</div>
-            <POPGauge theme="dark" size={84} value={popValue} />
+            <POPGauge theme={theme} size={84} value={popValue} />
           </div>
         </div>
       </Glass2>
 
       {/* 3D surface — small but present */}
       <Glass2 tone="panel" padding={6} style={{ position: 'relative', height: isFold ? 320 : 220 }}>
-        <Surface3DMount theme="dark" height="100%" scheme={t.scheme} />
+        <Surface3DMount theme={theme} height="100%" scheme={t.scheme} />
       </Glass2>
 
       {/* Chart tabs */}
@@ -1324,7 +1342,7 @@ function MobileCalc({
               {sliceFrac >= 0.99 ? 'expiry' : sliceFrac <= 0.01 ? 'now' : `${(sliceFrac * 100).toFixed(0)}%`}
             </span>
           }>Payoff</Eyebrow>
-          <PayoffChart legs={legs} spot={spot} theme="dark" height={150} width={chartW} iv={iv} dte={dte} showCone={t.showProbCone} sliceFrac={sliceFrac} rangePct={0.08} showKeyNumbers={true} model={P.model} r={P.r / 100} strikeStep={P.strikeStep} />
+          <PayoffChart legs={legs} spot={spot} theme={theme} height={150} width={chartW} iv={iv} dte={dte} showCone={t.showProbCone} sliceFrac={sliceFrac} rangePct={0.08} showKeyNumbers={true} model={P.model} r={P.r / 100} strikeStep={P.strikeStep} />
           <div style={{ marginTop: 10 }}>
             <input type="range" min="0" max="1" step="0.01" value={sliceFrac} onChange={(e) => setSliceFrac(parseFloat(e.target.value))}
               style={{ width: '100%', accentColor: accent }} />
@@ -1335,27 +1353,27 @@ function MobileCalc({
         </>)}
         {view === 'kbar' && (<>
           <Eyebrow right={<KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} />}>K線 · {P.code} <span style={{ color: 'rgba(255,255,255,0.5)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· {barsLive ? 'IB' : 'mock'}</span></Eyebrow>
-          <KBarChart bars={bars} theme="dark" height={160} width={chartW} />
+          <KBarChart bars={bars} theme={theme} height={160} width={chartW} />
         </>)}
         {view === 'greeks' && (<>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{dte}d</span>}>Greeks vs spot</Eyebrow>
-          <GreeksProfile legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={150} width={chartW} model={P.model} r={P.r / 100} />
+          <GreeksProfile legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={150} width={chartW} model={P.model} r={P.r / 100} />
         </>)}
         {view === 'dist' && (<>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>at expiry</span>}>P&L distribution</Eyebrow>
-          <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={150} width={chartW} ntdMult={P.mult} cur={P.cur} />
+          <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={150} width={chartW} ntdMult={P.mult} cur={P.cur} />
         </>)}
         {view === 'attr' && (<>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>vs baseline</span>}>P&L attribution</Eyebrow>
-          <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={155} width={chartW} baseSpot={P.defaultSpot} baseIv={P.defaultIv} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />
+          <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={155} width={chartW} baseSpot={P.defaultSpot} baseIv={P.defaultIv} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />
         </>)}
         {view === 'theta' && (<>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>θ decay</span>}>Time decay</Eyebrow>
-          <ThetaDecay theme="dark" dte={dte} height={150} width={chartW} />
+          <ThetaDecay theme={theme} dte={dte} height={150} width={chartW} />
         </>)}
         {view === 'iv' && (<>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{iv}% ATM</span>}>IV smile</Eyebrow>
-          <IVSmile theme="dark" iv={iv} height={150} width={chartW} />
+          <IVSmile theme={theme} iv={iv} height={150} width={chartW} />
         </>)}
       </Glass2>
 
@@ -1363,10 +1381,10 @@ function MobileCalc({
       <Glass2 tone="panel" padding={12}>
         <Eyebrow>Greeks at current spot</Eyebrow>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 6 }}>
-          <GreekChip label="Δ" value={(portfolioG.delta >= 0 ? '+' : '') + portfolioG.delta.toFixed(2)} theme="dark" emphasis={portfolioG.delta >= 0 ? 'up' : 'down'} />
-          <GreekChip label="Γ" value={portfolioG.gamma.toFixed(4)} theme="dark" />
-          <GreekChip label="Θ" value={(portfolioG.theta >= 0 ? '+' : '') + portfolioG.theta.toFixed(2)} theme="dark" emphasis={portfolioG.theta >= 0 ? 'up' : 'down'} />
-          <GreekChip label="V" value={(portfolioG.vega >= 0 ? '+' : '') + portfolioG.vega.toFixed(2)} theme="dark" emphasis={portfolioG.vega >= 0 ? 'up' : 'down'} />
+          <GreekChip label="Δ" value={(portfolioG.delta >= 0 ? '+' : '') + portfolioG.delta.toFixed(2)} theme={theme} emphasis={portfolioG.delta >= 0 ? 'up' : 'down'} />
+          <GreekChip label="Γ" value={portfolioG.gamma.toFixed(4)} theme={theme} />
+          <GreekChip label="Θ" value={(portfolioG.theta >= 0 ? '+' : '') + portfolioG.theta.toFixed(2)} theme={theme} emphasis={portfolioG.theta >= 0 ? 'up' : 'down'} />
+          <GreekChip label="V" value={(portfolioG.vega >= 0 ? '+' : '') + portfolioG.vega.toFixed(2)} theme={theme} emphasis={portfolioG.vega >= 0 ? 'up' : 'down'} />
         </div>
       </Glass2>
 
@@ -1411,7 +1429,7 @@ function MobileCalc({
             No legs yet · pick a strategy above or go to Chain
           </div>
         ) : (
-          <LegEditor legs={legs} onChange={setLegs} theme="dark" />
+          <LegEditor legs={legs} onChange={setLegs} theme={theme} />
         )}
       </Glass2>
 
@@ -1441,7 +1459,7 @@ function MobileCalc({
   );
 }
 
-function MobileIV({ expiry, expiries = TXO_EXPIRIES, P }) {
+function MobileIV({ expiry, expiries = TXO_EXPIRIES, P, theme = 'dark' }) {
   const ref = uR(null);
   uE(() => {
     if (!ref.current || !window.IVSurface3D) return;
@@ -1482,7 +1500,7 @@ function MobileIV({ expiry, expiries = TXO_EXPIRIES, P }) {
   );
 }
 
-function MobileChain({ isFold, chartW, P, rows, spot, expiry, legs, setLegs, addLegFromChain, quality }) {
+function MobileChain({ isFold, chartW, P, rows, spot, expiry, legs, setLegs, addLegFromChain, quality, theme = 'dark' }) {
   return (
     <>
       {/* Net premium card */}
@@ -1516,20 +1534,20 @@ function MobileChain({ isFold, chartW, P, rows, spot, expiry, legs, setLegs, add
       {/* OI Profile */}
       <Glass2 tone="panel" padding={12}>
         <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label}</span>}>OI profile</Eyebrow>
-        <OIProfile spot={spot} contract={expiry.type} rows={rows} theme="dark" maxRows={9} />
+        <OIProfile spot={spot} contract={expiry.type} rows={rows} theme={theme} maxRows={9} />
       </Glass2>
 
       {/* Max Pain */}
       <Glass2 tone="panel" padding={12}>
         <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>結算指標</span>}>Max pain</Eyebrow>
-        <MaxPain spot={spot} contract={expiry.type} rows={rows} ntdMult={P.mult} cur={P.cur} theme="dark" height={150} width={chartW} />
+        <MaxPain spot={spot} contract={expiry.type} rows={rows} ntdMult={P.mult} cur={P.cur} theme={theme} height={150} width={chartW} />
       </Glass2>
 
       {/* Current legs */}
       {legs.length > 0 && (
         <Glass2 tone="panel" padding={12}>
           <Eyebrow>Current legs</Eyebrow>
-          <LegEditor legs={legs} onChange={setLegs} theme="dark" />
+          <LegEditor legs={legs} onChange={setLegs} theme={theme} />
         </Glass2>
       )}
     </>
