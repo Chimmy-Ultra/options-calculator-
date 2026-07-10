@@ -16,16 +16,28 @@ const DENSITY = {
   spacious:   { gap: 18, panelPad: 22 },
 };
 
-// TXO market state
+// TXO market state（其他商品的合約規格在 products.js 的 window.PRODUCTS）
 const TXO_SPOT = 21850;
 const STRIKE_STEP = 50;
-// Default legs: a TXO bull-call spread, premiums priced by Black-Scholes
-// at the default spot/iv/dte (21850 / 24% / 17d ≈ monthly settlement).
-const _bsRound = (type, S, K, iv, dte) => Math.round(window.bsPrice(type, S, K, iv, dte) * 100) / 100;
-const TXO_DEFAULT_LEGS = [
-  { side: 'long',  type: 'call', strike: 21900, premium: _bsRound('call', 21850, 21900, 24, 17), qty: 1 },
-  { side: 'short', type: 'call', strike: 22100, premium: _bsRound('call', 21850, 22100, 24, 17), qty: 1 },
-];
+// Default legs: a bull-call spread（ATM+1 檔 / ATM+5 檔），premium 用該商品的
+// 定價模型（TXO=BS、穀物=Black-76）在 default spot/iv 與預設到期日算出。
+function defaultLegsFor(P, dte) {
+  const st = P.strikeStep;
+  const k1 = Math.round((P.defaultSpot + st) / st) * st;
+  return [
+    _mkLeg('long',  'call', P.defaultSpot, k1, P.defaultIv, dte, P),
+    _mkLeg('short', 'call', P.defaultSpot, k1 + 4 * st, P.defaultIv, dte, P),
+  ];
+}
+// 商品的到期日清單：live（IB 真實到期日）> 商品 mock > TXO 週/月選。
+function productExpiries(P, liveExpiries) {
+  if (liveExpiries && liveExpiries.length) return liveExpiries;
+  return P.mockExpiries || TXO_EXPIRIES;
+}
+function defaultExpiryFor(P) {
+  const exps = P.mockExpiries || TXO_EXPIRIES;
+  return (P.id === 'txo' && exps.find((e) => e.id === 'm')) || exps[0];
+}
 
 // TXO 週選/月選到期。台指 2022 起加了週五週選（之前漏掉），所以現在是
 // W (週三) + F (週五) 雙軌。第三個禮拜三 = 月選結算 (M, 金點)。
@@ -120,12 +132,12 @@ function WorkspaceTabs({ value, onChange, accent }) {
   );
 }
 
-// Expiry strip (TXO weekly/monthly). 7 chips (Wed + Fri) — overflow scroll on
-// narrow desktop windows, plain flex when there's room.
-function ExpiryStrip({ value, onChange }) {
+// Expiry strip — overflow scroll on narrow desktop windows, plain flex when
+// there's room. expiries 由商品決定（TXO 週/月選、穀物月份、或 IB 真實到期日）。
+function ExpiryStrip({ value, onChange, expiries = TXO_EXPIRIES }) {
   return (
     <div style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
-      {TXO_EXPIRIES.map((e) => {
+      {expiries.map((e) => {
         const active = e.id === value;
         const isMonthly = e.type === 'monthly';
         return (
@@ -149,7 +161,7 @@ function ExpiryStrip({ value, onChange }) {
 }
 
 // Settlement countdown
-function SettlementCountdown({ dte }) {
+function SettlementCountdown({ dte, note = '13:30' }) {
   const isSettleDay = dte <= 0;
   return (
     <Glass2 tone="chip" radius={10} padding="6px 12px" style={{
@@ -160,7 +172,7 @@ function SettlementCountdown({ dte }) {
       <span style={{ width: 6, height: 6, borderRadius: 3, background: isSettleDay ? '#ef4444' : '#f0c068', boxShadow: `0 0 8px ${isSettleDay ? '#ef4444' : '#f0c068'}` }} />
       <span style={{ fontSize: 10, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.6, fontWeight: 600 }}>Settle</span>
       <span className="mono" style={{ fontSize: 12, fontWeight: 600, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
-        {dte}d · 13:30
+        {dte}d · {note}
       </span>
     </Glass2>
   );
@@ -169,10 +181,15 @@ function SettlementCountdown({ dte }) {
 function Obsidian3() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [workspace, setWorkspace] = uS('calc');
+  const [productId, setProductId] = uS('txo');
+  const P = window.getProduct(productId);
+  const [live, setLive] = uS(null);         // { quote, expiries, health } — IB proxy 抓到的
+  const [liveRows, setLiveRows] = uS(null); // 當前到期日的 IB 期權鏈 rows
   const [expiryId, setExpiryId] = uS('m');
-  const expiry = TXO_EXPIRIES.find((e) => e.id === expiryId) || TXO_EXPIRIES[2];
+  const expiries = productExpiries(P, live && live.expiries);
+  const expiry = expiries.find((e) => e.id === expiryId) || expiries[0];
 
-  const [legs, setLegs] = uS(TXO_DEFAULT_LEGS);
+  const [legs, setLegs] = uS(() => defaultLegsFor(window.getProduct('txo'), defaultExpiryFor(window.getProduct('txo')).dte));
   const [spot, setSpot] = uS(TXO_SPOT);
   const [iv, setIv] = uS(24);
   const [view, setView] = uS('payoff');
@@ -180,6 +197,58 @@ function Obsidian3() {
   const [sliceFrac, setSliceFrac] = uS(1); // 0 = now, 1 = expiry
 
   const dte = expiry.dte;
+
+  // 切商品：重設市場狀態 + 預設策略；live 數據下面的 effect 會重新抓。
+  function switchProduct(id) {
+    if (id === productId) return;
+    const p = window.getProduct(id);
+    const e0 = defaultExpiryFor(p);
+    setProductId(id);
+    setLive(null);
+    setLiveRows(null);
+    setExpiryId(e0.id);
+    setSpot(p.defaultSpot);
+    setIv(p.defaultIv);
+    setLegs(defaultLegsFor(p, e0.dte));
+  }
+
+  // IB live：商品有 ib 設定且本機 proxy（server/）活著 → 抓期貨報價 + 真實到期日。
+  // proxy 不在 / IB 沒連線 → 安靜留在 mock。
+  uE(() => {
+    let dead = false;
+    if (!P.ib || !window.LiveData) return undefined;
+    (async () => {
+      const health = await window.LiveData.probe();
+      if (dead || !health || !health.connected) return;
+      const [quote, exps] = await Promise.all([
+        window.LiveData.quote(P.id),
+        window.LiveData.expiries(P.id),
+      ]);
+      if (dead) return;
+      if (quote && quote.last > 0) setSpot(quote.last);
+      if (exps && exps.length) setExpiryId(exps[0].id);
+      setLive({ quote, expiries: exps && exps.length ? exps : null, health });
+    })();
+    return () => { dead = true; };
+  }, [productId]);
+
+  // IB live：換到期日時抓該到期日的期權鏈；spot 跟著換成該鏈的標的期貨月份價。
+  uE(() => {
+    let dead = false;
+    setLiveRows(null);
+    if (!live || !P.ib || !window.LiveData) return undefined;
+    (async () => {
+      const chain = await window.LiveData.chain(P.id, expiryId);
+      if (dead || !chain || !chain.rows || !chain.rows.length) return;
+      setLiveRows(chain.rows);
+      if (chain.underlying && chain.underlying.price > 0) setSpot(chain.underlying.price);
+    })();
+    return () => { dead = true; };
+  }, [live, expiryId]);
+
+  // live 報價可能落在預設 slider 範圍外 → 動態放寬邊界。
+  const spotMin = Math.min(P.spotMin, Math.floor(spot * 0.9));
+  const spotMax = Math.max(P.spotMax, Math.ceil(spot * 1.1));
   const D = DENSITY[t.density] || DENSITY.comfortable;
   const accent = `oklch(0.66 0.16 ${t.accentHue})`;
   const vp = useViewport();
@@ -189,34 +258,37 @@ function Obsidian3() {
     if (vp.layout !== 'desk' && workspace === 'compare') setWorkspace('calc');
   }, [vp.layout]);
 
-  // P&L numbers (×50 NTD per point). BS-valued at the same daysRem as PayoffChart
+  // P&L numbers（點數 × 商品乘數）。Valued at the same daysRem as PayoffChart
   // so the displayed number always matches the curve.
   const pnlPts = uM(() => {
     const daysRem = Math.max(0, dte * (1 - sliceFrac));
     return legs.reduce((acc, l) => {
       const sign = l.side === 'long' ? 1 : -1;
-      const v = bsPrice(l.type, spot, l.strike, iv, daysRem);
+      const v = bsPrice(l.type, spot, l.strike, iv, daysRem, P.r / 100, P.model);
       return acc + sign * l.qty * (v - l.premium);
     }, 0);
-  }, [legs, spot, iv, dte, sliceFrac]);
-  const pnlNTD = pnlPts * 50;
+  }, [legs, spot, iv, dte, sliceFrac, productId]);
+  const pnlNTD = pnlPts * P.mult;
   const maxProfit = uM(() => {
     let m = -Infinity;
-    for (let s = spot * 0.7; s <= spot * 1.3; s += 25) m = Math.max(m, legs.reduce((a, l) => a + legPayoff(l, s), 0));
-    return m * 50;
-  }, [legs, spot]);
+    for (let s = spot * 0.7; s <= spot * 1.3; s += P.strikeStep / 2) m = Math.max(m, legs.reduce((a, l) => a + legPayoff(l, s), 0));
+    return m * P.mult;
+  }, [legs, spot, productId]);
   const maxLoss = uM(() => {
     let m = Infinity;
-    for (let s = spot * 0.7; s <= spot * 1.3; s += 25) m = Math.min(m, legs.reduce((a, l) => a + legPayoff(l, s), 0));
-    return m * 50;
-  }, [legs, spot]);
+    for (let s = spot * 0.7; s <= spot * 1.3; s += P.strikeStep / 2) m = Math.min(m, legs.reduce((a, l) => a + legPayoff(l, s), 0));
+    return m * P.mult;
+  }, [legs, spot, productId]);
 
   // Live Greeks for the current portfolio (replaces hardcoded chips).
-  const portfolioG = uM(() => portfolioGreeks(legs, spot, iv, dte), [legs, spot, iv, dte]);
+  const portfolioG = uM(() => portfolioGreeks(legs, spot, iv, dte, P.r / 100, P.model), [legs, spot, iv, dte, productId]);
   // Real POP from lognormal P&L distribution (replaces hardcoded 0.68).
   const popValue = uM(() => pnlDistribution(legs, spot, iv, dte).pop, [legs, spot, iv, dte]);
-  // Data quality of legs against current chain.
-  const chainRows = uM(() => (window.genChain ? window.genChain({ spot, contract: expiry.type }) : []), [spot, expiry.type]);
+  // 期權鏈 rows：live（IB）優先，否則 mock。所有吃 chain 的元件都從這裡拿。
+  const chainRows = uM(() => {
+    if (liveRows && liveRows.length) return liveRows;
+    return window.genChain ? window.genChain({ spot, contract: expiry.type, dte, product: P }) : [];
+  }, [liveRows, spot, expiry.type, dte, productId]);
   const quality = uM(() => dataQuality(legs, chainRows), [legs, chainRows]);
 
   // Add leg from chain
@@ -230,6 +302,9 @@ function Obsidian3() {
       <MobileApp
         vp={vp}
         workspace={workspace} setWorkspace={setWorkspace}
+        P={P} switchProduct={switchProduct} live={live}
+        expiries={expiries} chainRows={chainRows}
+        spotMin={spotMin} spotMax={spotMax}
         expiryId={expiryId} setExpiryId={setExpiryId} expiry={expiry}
         legs={legs} setLegs={setLegs} addLegFromChain={addLegFromChain}
         spot={spot} setSpot={setSpot}
@@ -273,20 +348,37 @@ function Obsidian3() {
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
           <Glass2 tone="chip" radius={999} padding="8px 12px" style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
-            <span className="mono" style={{ fontSize: 10, opacity: 0.6, padding: '2px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)' }}>TXO</span>
+            <select
+              value={productId}
+              onChange={(e) => switchProduct(e.target.value)}
+              title={P.name}
+              style={{
+                fontSize: 10, fontWeight: 700, padding: '2px 5px', borderRadius: 4,
+                background: 'rgba(255,255,255,0.06)', color: '#e8eaef',
+                border: 'none', outline: 'none', cursor: 'pointer', fontFamily: 'inherit',
+              }}>
+              {window.PRODUCTS.map((p) => <option key={p.id} value={p.id}>{p.code}</option>)}
+            </select>
             <span className="tnum" style={{ fontSize: 13, fontWeight: 600 }}>{spot.toLocaleString()}</span>
-            <span className="tnum" style={{ fontSize: 11, color: 'oklch(0.78 0.14 145)' }}>+0.84%</span>
+            {P.ib ? (
+              <span className="mono" title={live ? 'IB 已連線（延遲/即時依訂閱）' : '沒偵測到本機 IB proxy — mock 數據'} style={{
+                fontSize: 9, fontWeight: 700, letterSpacing: 0.5,
+                color: live ? '#4dd0c8' : 'rgba(255,255,255,0.45)',
+              }}>{live ? '● IB' : '○ MOCK'}</span>
+            ) : (
+              <span className="tnum" style={{ fontSize: 11, color: 'oklch(0.78 0.14 145)' }}>+0.84%</span>
+            )}
           </Glass2>
-          <SettlementCountdown dte={dte} />
+          <SettlementCountdown dte={dte} note={P.settleNote} />
         </div>
       </div>
 
       {/* Expiry strip — second row */}
       <div style={{ position: 'absolute', top: 64, left: 24, right: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 10, gap: 12 }}>
-        <ExpiryStrip value={expiryId} onChange={setExpiryId} />
+        <ExpiryStrip value={expiryId} onChange={setExpiryId} expiries={expiries} />
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <Glass2 tone="chip" radius={8} padding="5px 10px" style={{ fontSize: 10, opacity: 0.7, fontFamily: 'ui-monospace, SF Mono, monospace', whiteSpace: 'nowrap' }}>
-            ×50 NTD/pt
+            {P.unitLabel}
           </Glass2>
         </div>
       </div>
@@ -294,8 +386,10 @@ function Obsidian3() {
       {/* WORKSPACE BODY */}
       {workspace === 'calc' && (
         <CalcWorkspace
+          P={P}
           legs={legs} setLegs={setLegs}
           spot={spot} setSpot={setSpot}
+          spotMin={spotMin} spotMax={spotMax}
           iv={iv} setIv={setIv}
           dte={dte}
           sliceFrac={sliceFrac} setSliceFrac={setSliceFrac}
@@ -309,6 +403,7 @@ function Obsidian3() {
       )}
       {workspace === 'chain' && (
         <ChainWorkspace
+          P={P} rows={chainRows}
           spot={spot} expiry={expiry}
           onAddLeg={addLegFromChain}
           legs={legs} setLegs={setLegs}
@@ -317,13 +412,13 @@ function Obsidian3() {
         />
       )}
       {workspace === 'pricer' && (
-        <PricerWorkspace D={D} spot={spot} iv={iv} dte={dte} accent={accent} />
+        <PricerWorkspace D={D} P={P} spot={spot} iv={iv} dte={dte} accent={accent} />
       )}
       {workspace === 'iv' && (
-        <IVWorkspace D={D} expiry={expiry} />
+        <IVWorkspace D={D} P={P} expiry={expiry} expiries={expiries} />
       )}
       {workspace === 'compare' && (
-        <CompareWorkspace D={D} spot={spot} iv={iv} dte={dte} />
+        <CompareWorkspace D={D} P={P} spot={spot} iv={iv} dte={dte} />
       )}
 
       {/* Tweaks panel */}
@@ -356,14 +451,14 @@ function Obsidian3() {
 }
 
 // ───────────────────────────────────────────────── CALCULATOR WORKSPACE
-function CalcWorkspace({ legs, setLegs, spot, setSpot, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
+function CalcWorkspace({ P, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
   const hoverInfo = uM(() => {
     if (!hover) return null;
     const spotAt = (spot * (1 + hover.xn * 0.18)).toFixed(0);
     const dteAt = (dte * (1 - hover.yn)).toFixed(0);
-    const pnlAt = (hover.v * 1000 * 50).toFixed(0); // approx points × 50
+    const pnlAt = (hover.v * 1000 * P.mult).toFixed(0); // approx points × mult
     return { spotAt, dteAt, pnlAt };
-  }, [hover, spot, dte]);
+  }, [hover, spot, dte, P]);
 
   return (
     <>
@@ -387,7 +482,7 @@ function CalcWorkspace({ legs, setLegs, spot, setSpot, iv, setIv, dte, sliceFrac
           <span><span style={{ opacity: 0.55 }}>DTE </span>{hoverInfo.dteAt}d</span>
           <span style={{ opacity: 0.3 }}>·</span>
           <span style={{ color: parseFloat(hoverInfo.pnlAt) >= 0 ? '#f0c068' : '#5fa3d4', fontWeight: 600 }}>
-            NT${parseFloat(hoverInfo.pnlAt) >= 0 ? '+' : ''}{Math.round(parseFloat(hoverInfo.pnlAt)).toLocaleString()}
+            {P.cur}{parseFloat(hoverInfo.pnlAt) >= 0 ? '+' : ''}{Math.round(parseFloat(hoverInfo.pnlAt)).toLocaleString()}
           </span>
         </div>
       )}
@@ -400,7 +495,7 @@ function CalcWorkspace({ legs, setLegs, spot, setSpot, iv, setIv, dte, sliceFrac
       }}>
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow right={
-            <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 100) / 50) * 50, iv, dte)])}>+ leg</button>
+            <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 2 * P.strikeStep) / P.strikeStep) * P.strikeStep, iv, dte, P)])}>+ leg</button>
           }>Legs</Eyebrow>
           <LegEditor legs={legs} onChange={setLegs} theme="dark" />
         </Glass2>
@@ -417,9 +512,9 @@ function CalcWorkspace({ legs, setLegs, spot, setSpot, iv, setIv, dte, sliceFrac
               { label: 'Reset',        spot: 0,  iv: 0,  reset: true },
             ].map((s, i) => (
               <button key={i} onClick={() => {
-                if (s.reset) { setSpot(TXO_SPOT); setIv(24); return; }
-                setSpot(Math.round(TXO_SPOT * (1 + s.spot/100)));
-                setIv(Math.max(10, Math.min(50, 24 + s.iv)));
+                if (s.reset) { setSpot(P.defaultSpot); setIv(P.defaultIv); return; }
+                setSpot(Math.round(P.defaultSpot * (1 + s.spot/100)));
+                setIv(Math.max(P.ivMin, Math.min(P.ivMax, P.defaultIv + s.iv)));
               }} style={{
                 padding: '8px 6px', borderRadius: 8, fontSize: 10, fontWeight: 600,
                 border: '1px solid rgba(255,255,255,0.10)', cursor: 'pointer',
@@ -450,15 +545,15 @@ function CalcWorkspace({ legs, setLegs, spot, setSpot, iv, setIv, dte, sliceFrac
                 color: pnlNTD >= 0 ? 'oklch(0.84 0.14 75)' : 'oklch(0.74 0.12 220)',
                 fontFamily: 'ui-monospace, SF Mono, monospace', lineHeight: 1,
               }}>
-                {pnlNTD >= 0 ? '+' : ''}NT${Math.abs(Math.round(pnlNTD)).toLocaleString()}
+                {pnlNTD >= 0 ? '+' : ''}{P.cur}{Math.abs(Math.round(pnlNTD)).toLocaleString()}
               </div>
               <div className="tnum" style={{ fontSize: 10, opacity: 0.5, marginTop: 4 }}>
-                {pnlPts >= 0 ? '+' : ''}{pnlPts.toFixed(1)} pts × 50 NTD
+                {pnlPts >= 0 ? '+' : ''}{pnlPts.toFixed(1)} pts {P.unitLabel}
               </div>
               <div className="tnum" style={{ fontSize: 11, opacity: 0.55, marginTop: 8 }}>
-                Max profit <span style={{ color: '#f0c068' }}>+NT${Math.round(maxProfit).toLocaleString()}</span>
+                Max profit <span style={{ color: '#f0c068' }}>+{P.cur}{Math.round(maxProfit).toLocaleString()}</span>
                 <span style={{ opacity: 0.4 }}> · </span>
-                Max loss <span style={{ color: '#5fa3d4' }}>NT${Math.round(maxLoss).toLocaleString()}</span>
+                Max loss <span style={{ color: '#5fa3d4' }}>{P.cur}{Math.round(maxLoss).toLocaleString()}</span>
               </div>
             </div>
             <div style={{ width: 110 }}>
@@ -496,7 +591,7 @@ function CalcWorkspace({ legs, setLegs, spot, setSpot, iv, setIv, dte, sliceFrac
                 {sliceFrac >= 0.99 ? 'at expiry' : sliceFrac <= 0.01 ? 'now' : `t = ${(sliceFrac * 100).toFixed(0)}%`}
               </span>
             }>Payoff {t.showProbCone && <span style={{ color: '#a78bfa', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· 1σ/2σ cone</span>}</Eyebrow>
-            <PayoffChart legs={legs} spot={spot} theme="dark" height={140} width={304} iv={iv} dte={dte} showCone={t.showProbCone} sliceFrac={sliceFrac} rangePct={0.08} showKeyNumbers={true} />
+            <PayoffChart legs={legs} spot={spot} theme="dark" height={140} width={304} iv={iv} dte={dte} showCone={t.showProbCone} sliceFrac={sliceFrac} rangePct={0.08} showKeyNumbers={true} model={P.model} r={P.r / 100} strikeStep={P.strikeStep} />
             <div style={{ marginTop: 10 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, opacity: 0.55, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 4 }}>
                 <span>Time slice</span>
@@ -514,24 +609,24 @@ function CalcWorkspace({ legs, setLegs, spot, setSpot, iv, setIv, dte, sliceFrac
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{dte}d · IV {iv}%</span>}>
               Greeks <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· Δ Γ Θ V vs spot</span>
             </Eyebrow>
-            <GreeksProfile legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={140} width={304} />
+            <GreeksProfile legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={140} width={304} model={P.model} r={P.r / 100} />
           </>)}
           {view === 'dist' && (<>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>at expiry</span>}>
               P&L distribution <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· lognormal</span>
             </Eyebrow>
-            <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={140} width={304} />
+            <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={140} width={304} ntdMult={P.mult} cur={P.cur} />
           </>)}
           {view === 'attr' && (<>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>vs baseline</span>}>
               P&L attribution <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· why up / down</span>
             </Eyebrow>
-            <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={150} width={304} />
+            <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={150} width={304} baseSpot={P.defaultSpot} baseIv={P.defaultIv} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />
           </>)}
           {view === 'theta' && (<>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>θ decay</span>}>Time decay</Eyebrow>
             <ThetaDecay theme="dark" dte={dte} height={140} width={304} />
-            <div style={{ marginTop: 6, fontSize: 11, opacity: 0.6 }}>−NT${(0.12 * 50 * 100).toFixed(0)} / day at current DTE</div>
+            <div style={{ marginTop: 6, fontSize: 11, opacity: 0.6 }}>−{P.cur}{(0.12 * P.mult * 100).toFixed(0)} / day at current DTE</div>
           </>)}
           {view === 'iv' && (<>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{iv}% ATM</span>}>IV smile</Eyebrow>
@@ -557,8 +652,8 @@ function CalcWorkspace({ legs, setLegs, spot, setSpot, iv, setIv, dte, sliceFrac
       }}>
         <Glass2 tone="raised" padding="16px 22px">
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28 }}>
-            <Slider label="Spot" value={spot} min={20000} max={23500} step={10} onChange={setSpot} format={(v) => v.toLocaleString()} theme="dark" />
-            <Slider label="IV" value={iv} min={10} max={50} step={0.5} suffix="%" onChange={setIv} theme="dark" />
+            <Slider label="Spot" value={spot} min={spotMin} max={spotMax} step={P.spotStep} onChange={setSpot} format={(v) => v.toLocaleString()} theme="dark" />
+            <Slider label="IV" value={iv} min={P.ivMin} max={P.ivMax} step={0.5} suffix="%" onChange={setIv} theme="dark" />
           </div>
         </Glass2>
       </div>
@@ -586,15 +681,15 @@ function CalcWorkspace({ legs, setLegs, spot, setSpot, iv, setIv, dte, sliceFrac
 }
 
 // ───────────────────────────────────────────────── CHAIN WORKSPACE
-function ChainWorkspace({ spot, expiry, onAddLeg, legs, setLegs, D, quality }) {
+function ChainWorkspace({ P, rows, spot, expiry, onAddLeg, legs, setLegs, D, quality }) {
   return (
     <div style={{ position: 'absolute', top: 110, left: 24, right: 24, bottom: 24, zIndex: 5, display: 'flex', gap: D.gap }}>
       <div style={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
         <Glass2 tone="panel" padding={D.panelPad} style={{ maxHeight: '100%', overflow: 'auto' }}>
           <Eyebrow right={
             <span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>
-          }>Option Chain · TXO</Eyebrow>
-          <OptionChain spot={spot} contract={expiry.type} onAddLeg={onAddLeg} theme="dark" />
+          }>Option Chain · {P.code}</Eyebrow>
+          <OptionChain spot={spot} contract={expiry.type} dte={expiry.dte} product={P} rows={rows} onAddLeg={onAddLeg} theme="dark" />
         </Glass2>
       </div>
       <div style={{ width: 320, display: 'flex', flexDirection: 'column', gap: D.gap, maxHeight: '100%', overflow: 'auto', paddingBottom: 4 }}>
@@ -611,7 +706,7 @@ function ChainWorkspace({ spot, expiry, onAddLeg, legs, setLegs, D, quality }) {
         <Glass2 tone="raised" padding={D.panelPad}>
           <Eyebrow right={<DataQualityPill quality={quality} />}>Net premium</Eyebrow>
           <div className="tnum" style={{ fontSize: 28, fontWeight: 600, fontFamily: 'ui-monospace, SF Mono, monospace', letterSpacing: -0.4 }}>
-            NT${Math.round(legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0) * 50).toLocaleString()}
+            {P.cur}{Math.round(legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0) * P.mult).toLocaleString()}
           </div>
           <div style={{ fontSize: 11, opacity: 0.55, marginTop: 6 }}>
             {legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0) >= 0 ? 'credit received' : 'debit paid'}
@@ -619,11 +714,11 @@ function ChainWorkspace({ spot, expiry, onAddLeg, legs, setLegs, D, quality }) {
         </Glass2>
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>}>OI profile</Eyebrow>
-          <OIProfile spot={spot} contract={expiry.type} theme="dark" maxRows={11} />
+          <OIProfile spot={spot} contract={expiry.type} rows={rows} theme="dark" maxRows={11} />
         </Glass2>
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>結算指標</span>}>Max pain</Eyebrow>
-          <MaxPain spot={spot} contract={expiry.type} theme="dark" height={150} width={280} />
+          <MaxPain spot={spot} contract={expiry.type} rows={rows} ntdMult={P.mult} cur={P.cur} theme="dark" height={150} width={280} />
         </Glass2>
       </div>
     </div>
@@ -631,15 +726,15 @@ function ChainWorkspace({ spot, expiry, onAddLeg, legs, setLegs, D, quality }) {
 }
 
 // ───────────────────────────────────────────────── PRICER WORKSPACE
-function PricerWorkspace({ D, spot, iv, dte, accent }) {
+function PricerWorkspace({ D, P, spot, iv, dte, accent }) {
   return (
     <div style={{ position: 'absolute', top: 110, left: 0, right: 0, bottom: 0, zIndex: 5, padding: '0 24px 24px', overflowY: 'auto' }}>
       <div style={{ maxWidth: 540, margin: '0 auto' }}>
         <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>Black-Scholes · 歐式</span>}>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{P.model === 'b76' ? 'Black-76 · 期貨選擇權' : 'Black-Scholes · 歐式'}</span>}>
             Option Pricer <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· 單張合約理論定價</span>
           </Eyebrow>
-          <OptionPricer spot={spot} iv={iv} dte={dte} theme="dark" accent={accent} />
+          <OptionPricer key={P.id} product={P} spot={spot} iv={iv} dte={dte} theme="dark" accent={accent} />
         </Glass2>
       </div>
     </div>
@@ -647,7 +742,7 @@ function PricerWorkspace({ D, spot, iv, dte, accent }) {
 }
 
 // ───────────────────────────────────────────────── IV SURFACE WORKSPACE
-function IVWorkspace({ D, expiry }) {
+function IVWorkspace({ D, P, expiry, expiries = TXO_EXPIRIES }) {
   const ref = uR(null);
   uE(() => {
     if (!ref.current || !window.IVSurface3D) return;
@@ -664,8 +759,8 @@ function IVWorkspace({ D, expiry }) {
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow>Term structure</Eyebrow>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {TXO_EXPIRIES.map((e) => {
-              const ivAtm = 22 + (1 - e.dte / 60) * 6;
+            {expiries.map((e) => {
+              const ivAtm = ((P ? P.defaultIv : 24) - 2) + (1 - e.dte / 60) * 6;
               return (
                 <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                   <span style={{ opacity: 0.7 }}>{e.label} · {e.dte}d</span>
@@ -693,42 +788,45 @@ function IVWorkspace({ D, expiry }) {
 }
 
 // ───────────────────────────────────────────────── COMPARE WORKSPACE
-// Strategy templates. Premium is computed by Black-Scholes at the current
-// spot/iv/dte so the numbers actually reflect the underlying TXO regime
-// (previously these were hardcoded for spot≈480 and made the calc nonsense
-// at TXO 21850). Strikes snap to the 50pt TXO grid.
-function _bs(type, S, K, iv, dte) {
-  return Math.round(window.bsPrice(type, S, K, iv, dte) * 100) / 100;
+// Strategy templates. Premium is computed by the product's pricing model
+// (TXO=Black-Scholes、穀物=Black-76) at the current spot/iv/dte so the numbers
+// actually reflect the underlying regime. Strike offsets are in "檔" (multiples
+// of the product's strikeStep — TXO 50pt、ZC/ZW 10¢、ZS 20¢)，跟原本 TXO 的
+// 200/300/500 點對應 4/6/10 檔一致。
+function _bs(type, S, K, iv, dte, r, model) {
+  return Math.round(window.bsPrice(type, S, K, iv, dte, r, model) * 100) / 100;
 }
-function _mkLeg(side, type, S, K, iv, dte, qty = 1) {
-  return { side, type, strike: K, premium: _bs(type, S, K, iv, dte), qty };
+function _mkLeg(side, type, S, K, iv, dte, P, qty = 1) {
+  const model = (P && P.model) || 'bs';
+  const r = ((P && P.r != null) ? P.r : 1.5) / 100;
+  return { side, type, strike: K, premium: _bs(type, S, K, iv, dte, r, model), qty };
 }
 const STRATEGY_LIBRARY = [
   { id: 'bull-call',  name: 'Bull Call Spread',  bias: 'bullish', tag: '看小漲',
-    build: (s, iv, dte) => [_mkLeg('long','call',s,s,iv,dte), _mkLeg('short','call',s,s+200,iv,dte)] },
+    build: (s, iv, dte, P, st = P.strikeStep) => [_mkLeg('long','call',s,s,iv,dte,P), _mkLeg('short','call',s,s+4*st,iv,dte,P)] },
   { id: 'bear-put',   name: 'Bear Put Spread',   bias: 'bearish', tag: '看小跌',
-    build: (s, iv, dte) => [_mkLeg('long','put',s,s,iv,dte), _mkLeg('short','put',s,s-200,iv,dte)] },
+    build: (s, iv, dte, P, st = P.strikeStep) => [_mkLeg('long','put',s,s,iv,dte,P), _mkLeg('short','put',s,s-4*st,iv,dte,P)] },
   { id: 'iron-condor',name: 'Iron Condor',       bias: 'neutral', tag: '盤整收租',
-    build: (s, iv, dte) => [_mkLeg('short','put',s,s-300,iv,dte), _mkLeg('long','put',s,s-500,iv,dte), _mkLeg('short','call',s,s+300,iv,dte), _mkLeg('long','call',s,s+500,iv,dte)] },
+    build: (s, iv, dte, P, st = P.strikeStep) => [_mkLeg('short','put',s,s-6*st,iv,dte,P), _mkLeg('long','put',s,s-10*st,iv,dte,P), _mkLeg('short','call',s,s+6*st,iv,dte,P), _mkLeg('long','call',s,s+10*st,iv,dte,P)] },
   { id: 'straddle',   name: 'Long Straddle',     bias: 'volatile',tag: '大波動',
-    build: (s, iv, dte) => [_mkLeg('long','call',s,s,iv,dte), _mkLeg('long','put',s,s,iv,dte)] },
+    build: (s, iv, dte, P) => [_mkLeg('long','call',s,s,iv,dte,P), _mkLeg('long','put',s,s,iv,dte,P)] },
   { id: 'strangle',   name: 'Long Strangle',     bias: 'volatile',tag: '大波動(便宜)',
-    build: (s, iv, dte) => [_mkLeg('long','call',s,s+150,iv,dte), _mkLeg('long','put',s,s-150,iv,dte)] },
+    build: (s, iv, dte, P, st = P.strikeStep) => [_mkLeg('long','call',s,s+3*st,iv,dte,P), _mkLeg('long','put',s,s-3*st,iv,dte,P)] },
   { id: 'short-strangle', name: 'Short Strangle',bias: 'neutral', tag: '盤整裸賣',
-    build: (s, iv, dte) => [_mkLeg('short','call',s,s+200,iv,dte), _mkLeg('short','put',s,s-200,iv,dte)] },
+    build: (s, iv, dte, P, st = P.strikeStep) => [_mkLeg('short','call',s,s+4*st,iv,dte,P), _mkLeg('short','put',s,s-4*st,iv,dte,P)] },
   { id: 'put-credit', name: 'Put Credit Spread', bias: 'bullish', tag: '看不跌',
-    build: (s, iv, dte) => [_mkLeg('short','put',s,s-100,iv,dte), _mkLeg('long','put',s,s-300,iv,dte)] },
+    build: (s, iv, dte, P, st = P.strikeStep) => [_mkLeg('short','put',s,s-2*st,iv,dte,P), _mkLeg('long','put',s,s-6*st,iv,dte,P)] },
   { id: 'call-credit',name: 'Call Credit Spread',bias: 'bearish', tag: '看不漲',
-    build: (s, iv, dte) => [_mkLeg('short','call',s,s+100,iv,dte), _mkLeg('long','call',s,s+300,iv,dte)] },
+    build: (s, iv, dte, P, st = P.strikeStep) => [_mkLeg('short','call',s,s+2*st,iv,dte,P), _mkLeg('long','call',s,s+6*st,iv,dte,P)] },
   { id: 'butterfly',  name: 'Long Butterfly',    bias: 'neutral', tag: '精準錨點',
-    build: (s, iv, dte) => [_mkLeg('long','call',s,s-150,iv,dte), _mkLeg('short','call',s,s,iv,dte,2), _mkLeg('long','call',s,s+150,iv,dte)] },
+    build: (s, iv, dte, P, st = P.strikeStep) => [_mkLeg('long','call',s,s-3*st,iv,dte,P), _mkLeg('short','call',s,s,iv,dte,P,2), _mkLeg('long','call',s,s+3*st,iv,dte,P)] },
   { id: 'long-call',  name: 'Long Call',         bias: 'bullish', tag: '純多單',
-    build: (s, iv, dte) => [_mkLeg('long','call',s,s,iv,dte)] },
+    build: (s, iv, dte, P) => [_mkLeg('long','call',s,s,iv,dte,P)] },
   { id: 'long-put',   name: 'Long Put',          bias: 'bearish', tag: '純空單',
-    build: (s, iv, dte) => [_mkLeg('long','put',s,s,iv,dte)] },
+    build: (s, iv, dte, P) => [_mkLeg('long','put',s,s,iv,dte,P)] },
 ];
 
-function CompareWorkspace({ D, spot, iv, dte }) {
+function CompareWorkspace({ D, P, spot, iv, dte }) {
   const [picked, setPicked] = uS(['bull-call', 'iron-condor', 'straddle']);
   const [showPicker, setShowPicker] = uS(false);
 
@@ -775,8 +873,9 @@ function CompareWorkspace({ D, spot, iv, dte }) {
       <div style={{ flex: 1, display: 'grid', gridTemplateColumns: cardW, gap: D.gap, minHeight: 0, alignItems: 'start', overflowY: 'auto', overflowX: 'hidden', paddingBottom: 4 }}>
         {picked.map((id) => (
           <CompareCard
-            key={id}
+            key={`${P.id}:${id}`}
             strategy={STRATEGY_LIBRARY.find((x) => x.id === id)}
+            P={P}
             spot={spot}
             iv={iv}
             dte={dte}
@@ -790,20 +889,21 @@ function CompareWorkspace({ D, spot, iv, dte }) {
   );
 }
 
-function CompareCard({ strategy: s, spot, iv, dte, D, biasColor, onRemove }) {
+function CompareCard({ strategy: s, P, spot, iv, dte, D, biasColor, onRemove }) {
   // Local editable legs — initialize from strategy's build() at current iv/dte.
-  const [legs, setLegs] = uS(() => s.build(Math.round(spot / 50) * 50, iv, dte));
+  const [legs, setLegs] = uS(() => s.build(Math.round(spot / P.strikeStep) * P.strikeStep, iv, dte, P));
   const c = biasColor[s.bias];
 
   const credit = legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0);
+  const scanStep = Math.max(P.strikeStep / 2, spot * 0.001);
   let mp = -Infinity, ml = Infinity;
-  for (let st = spot * 0.92; st <= spot * 1.08; st += 25) {
+  for (let st = spot * 0.92; st <= spot * 1.08; st += scanStep) {
     const v = legs.reduce((a, l) => a + legPayoff(l, st), 0);
     mp = Math.max(mp, v); ml = Math.min(ml, v);
   }
   const bes = [];
   let prev = null;
-  for (let st = spot * 0.92; st <= spot * 1.08; st += 10) {
+  for (let st = spot * 0.92; st <= spot * 1.08; st += scanStep / 2.5) {
     const v = legs.reduce((a, l) => a + legPayoff(l, st), 0);
     if (prev !== null && (prev.v >= 0) !== (v >= 0)) {
       const t = Math.abs(prev.v) / (Math.abs(prev.v) + Math.abs(v));
@@ -835,7 +935,7 @@ function CompareCard({ strategy: s, spot, iv, dte, D, biasColor, onRemove }) {
         }}>×</button>
       </div>
 
-      <PayoffChart legs={legs} spot={spot} theme="dark" height={170} width={300} iv={24} dte={17} showCone={true} sliceFrac={1} rangePct={0.06} showKeyNumbers={true} />
+      <PayoffChart legs={legs} spot={spot} theme="dark" height={170} width={300} iv={iv} dte={dte} showCone={true} sliceFrac={1} rangePct={0.06} showKeyNumbers={true} model={P.model} r={P.r / 100} strikeStep={P.strikeStep} />
 
       {/* Editable strikes */}
       <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
@@ -857,7 +957,7 @@ function CompareCard({ strategy: s, spot, iv, dte, D, biasColor, onRemove }) {
                 minWidth: 30, textAlign: 'center', letterSpacing: 0.3,
               }}>{l.type === 'call' ? 'C' : 'P'}</span>
               <input
-                type="number" step="50" value={l.strike}
+                type="number" step={P.strikeStep} value={l.strike}
                 onChange={(e) => setStrike(i, parseInt(e.target.value) || 0)}
                 style={{
                   flex: 1, padding: '3px 6px', borderRadius: 4,
@@ -879,13 +979,13 @@ function CompareCard({ strategy: s, spot, iv, dte, D, biasColor, onRemove }) {
         <div style={{ padding: '6px 8px', borderRadius: 6, background: 'rgba(239,83,80,0.10)', border: '1px solid rgba(239,83,80,0.18)' }}>
           <div style={{ fontSize: 9, letterSpacing: 0.4, opacity: 0.7, fontWeight: 600 }}>MAX PROFIT</div>
           <div className="tnum" style={{ fontFamily: 'ui-monospace, SF Mono, monospace', fontWeight: 700, color: '#ef5350', fontSize: 13 }}>
-            +NT${Math.round(mp * 50).toLocaleString()}
+            +{P.cur}{Math.round(mp * P.mult).toLocaleString()}
           </div>
         </div>
         <div style={{ padding: '6px 8px', borderRadius: 6, background: 'rgba(38,166,154,0.10)', border: '1px solid rgba(38,166,154,0.18)' }}>
           <div style={{ fontSize: 9, letterSpacing: 0.4, opacity: 0.7, fontWeight: 600 }}>MAX LOSS</div>
           <div className="tnum" style={{ fontFamily: 'ui-monospace, SF Mono, monospace', fontWeight: 700, color: '#26a69a', fontSize: 13 }}>
-            NT${Math.round(ml * 50).toLocaleString()}
+            {P.cur}{Math.round(ml * P.mult).toLocaleString()}
           </div>
         </div>
         <div style={{ padding: '6px 8px', borderRadius: 6, background: 'rgba(167,139,250,0.10)', border: '1px solid rgba(167,139,250,0.18)' }}>
@@ -897,7 +997,7 @@ function CompareCard({ strategy: s, spot, iv, dte, D, biasColor, onRemove }) {
         <div style={{ padding: '6px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
           <div style={{ fontSize: 9, letterSpacing: 0.4, opacity: 0.7, fontWeight: 600 }}>{credit >= 0 ? 'NET CREDIT' : 'NET DEBIT'}</div>
           <div className="tnum" style={{ fontFamily: 'ui-monospace, SF Mono, monospace', fontWeight: 700, fontSize: 12, color: credit >= 0 ? '#ef5350' : '#cdd3df' }}>
-            {credit >= 0 ? '+' : ''}NT${Math.round(credit * 50).toLocaleString()}
+            {credit >= 0 ? '+' : ''}{P.cur}{Math.round(credit * P.mult).toLocaleString()}
           </div>
         </div>
       </div>
@@ -916,6 +1016,9 @@ const miniBtn = {
 // ═════════════════════════════════════════════════════════════════════════════
 function MobileApp({
   vp, workspace, setWorkspace,
+  P, switchProduct, live,
+  expiries, chainRows,
+  spotMin, spotMax,
   expiryId, setExpiryId, expiry,
   legs, setLegs, addLegFromChain,
   spot, setSpot, iv, setIv, dte,
@@ -950,9 +1053,24 @@ function MobileApp({
             <span style={{ fontSize: 11, fontWeight: 600 }}>Options Lab</span>
           </Glass2>
           <Glass2 tone="chip" radius={999} padding="6px 10px" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <span className="mono" style={{ fontSize: 9, opacity: 0.6 }}>TXO</span>
+            <select
+              value={P.id}
+              onChange={(e) => switchProduct(e.target.value)}
+              title={P.name}
+              style={{
+                fontSize: 9, fontWeight: 700, padding: '1px 3px', borderRadius: 3,
+                background: 'rgba(255,255,255,0.06)', color: '#e8eaef',
+                border: 'none', outline: 'none', cursor: 'pointer', fontFamily: 'inherit',
+              }}>
+              {window.PRODUCTS.map((p) => <option key={p.id} value={p.id}>{p.code}</option>)}
+            </select>
             <span className="tnum" style={{ fontSize: 12, fontWeight: 600 }}>{spot.toLocaleString()}</span>
             <span style={{ fontSize: 9, color: '#f0c068' }}>{dte}d</span>
+            {P.ib && (
+              <span className="mono" style={{ fontSize: 8, fontWeight: 700, letterSpacing: 0.4, color: live ? '#4dd0c8' : 'rgba(255,255,255,0.45)' }}>
+                {live ? '●IB' : '○MOCK'}
+              </span>
+            )}
           </Glass2>
         </div>
 
@@ -983,7 +1101,7 @@ function MobileApp({
           display: 'flex', gap: 6, marginTop: 8, overflowX: 'auto', paddingBottom: 2,
           scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch',
         }}>
-          {TXO_EXPIRIES.map((e) => {
+          {expiries.map((e) => {
             const active = e.id === expiryId;
             const isMonthly = e.type === 'monthly';
             return (
@@ -1011,6 +1129,7 @@ function MobileApp({
         {workspace === 'calc' && (
           <MobileCalc
             isFold={isFold} chartW={chartW}
+            P={P}
             legs={legs} setLegs={setLegs}
             spot={spot} setSpot={setSpot}
             iv={iv} setIv={setIv} dte={dte}
@@ -1024,6 +1143,7 @@ function MobileApp({
         {workspace === 'chain' && (
           <MobileChain
             isFold={isFold} chartW={chartW}
+            P={P} rows={chainRows}
             spot={spot} expiry={expiry}
             legs={legs} setLegs={setLegs}
             addLegFromChain={addLegFromChain}
@@ -1033,11 +1153,11 @@ function MobileApp({
         {workspace === 'pricer' && (
           <Glass2 tone="panel" padding={14}>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>單張定價</span>}>Option Pricer</Eyebrow>
-            <OptionPricer spot={spot} iv={iv} dte={dte} theme="dark" accent={accent} />
+            <OptionPricer key={P.id} product={P} spot={spot} iv={iv} dte={dte} theme="dark" accent={accent} />
           </Glass2>
         )}
         {workspace === 'iv' && (
-          <MobileIV expiry={expiry} />
+          <MobileIV expiry={expiry} expiries={expiries} P={P} />
         )}
       </div>
 
@@ -1054,9 +1174,9 @@ function MobileApp({
         borderTop: '1px solid rgba(255,255,255,0.06)',
       }}>
         <div style={{ display: 'grid', gridTemplateColumns: workspace !== 'chain' ? '1fr 1fr' : '1fr', gap: 16 }}>
-          <Slider label="Spot" value={spot} min={20000} max={23500} step={10} onChange={setSpot} format={(v) => v.toLocaleString()} theme="dark" />
+          <Slider label="Spot" value={spot} min={spotMin} max={spotMax} step={P.spotStep} onChange={setSpot} format={(v) => v.toLocaleString()} theme="dark" />
           {workspace !== 'chain' && (
-            <Slider label="IV" value={iv} min={10} max={50} step={0.5} suffix="%" onChange={setIv} theme="dark" />
+            <Slider label="IV" value={iv} min={P.ivMin} max={P.ivMax} step={0.5} suffix="%" onChange={setIv} theme="dark" />
           )}
         </div>
       </div>
@@ -1066,6 +1186,7 @@ function MobileApp({
 
 function MobileCalc({
   isFold, chartW,
+  P,
   legs, setLegs, spot, setSpot, iv, setIv, dte,
   view, setView, sliceFrac, setSliceFrac,
   pnlPts, pnlNTD, maxProfit, maxLoss,
@@ -1084,12 +1205,12 @@ function MobileCalc({
               color: pnlNTD >= 0 ? 'oklch(0.84 0.14 75)' : 'oklch(0.74 0.12 220)',
               fontFamily: 'ui-monospace, SF Mono, monospace', lineHeight: 1.05,
             }}>
-              {pnlNTD >= 0 ? '+' : ''}NT${Math.abs(Math.round(pnlNTD)).toLocaleString()}
+              {pnlNTD >= 0 ? '+' : ''}{P.cur}{Math.abs(Math.round(pnlNTD)).toLocaleString()}
             </div>
             <div className="tnum" style={{ fontSize: 10, opacity: 0.55, marginTop: 4 }}>
-              Max <span style={{ color: '#f0c068' }}>+NT${Math.round(maxProfit).toLocaleString()}</span>
+              Max <span style={{ color: '#f0c068' }}>+{P.cur}{Math.round(maxProfit).toLocaleString()}</span>
               <span style={{ opacity: 0.4 }}> · </span>
-              Min <span style={{ color: '#5fa3d4' }}>NT${Math.round(maxLoss).toLocaleString()}</span>
+              Min <span style={{ color: '#5fa3d4' }}>{P.cur}{Math.round(maxLoss).toLocaleString()}</span>
             </div>
           </div>
           <div style={{ width: 84, flexShrink: 0 }}>
@@ -1132,7 +1253,7 @@ function MobileCalc({
               {sliceFrac >= 0.99 ? 'expiry' : sliceFrac <= 0.01 ? 'now' : `${(sliceFrac * 100).toFixed(0)}%`}
             </span>
           }>Payoff</Eyebrow>
-          <PayoffChart legs={legs} spot={spot} theme="dark" height={150} width={chartW} iv={iv} dte={dte} showCone={t.showProbCone} sliceFrac={sliceFrac} rangePct={0.08} showKeyNumbers={true} />
+          <PayoffChart legs={legs} spot={spot} theme="dark" height={150} width={chartW} iv={iv} dte={dte} showCone={t.showProbCone} sliceFrac={sliceFrac} rangePct={0.08} showKeyNumbers={true} model={P.model} r={P.r / 100} strikeStep={P.strikeStep} />
           <div style={{ marginTop: 10 }}>
             <input type="range" min="0" max="1" step="0.01" value={sliceFrac} onChange={(e) => setSliceFrac(parseFloat(e.target.value))}
               style={{ width: '100%', accentColor: accent }} />
@@ -1143,15 +1264,15 @@ function MobileCalc({
         </>)}
         {view === 'greeks' && (<>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{dte}d</span>}>Greeks vs spot</Eyebrow>
-          <GreeksProfile legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={150} width={chartW} />
+          <GreeksProfile legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={150} width={chartW} model={P.model} r={P.r / 100} />
         </>)}
         {view === 'dist' && (<>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>at expiry</span>}>P&L distribution</Eyebrow>
-          <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={150} width={chartW} />
+          <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={150} width={chartW} ntdMult={P.mult} cur={P.cur} />
         </>)}
         {view === 'attr' && (<>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>vs baseline</span>}>P&L attribution</Eyebrow>
-          <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={155} width={chartW} />
+          <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme="dark" height={155} width={chartW} baseSpot={P.defaultSpot} baseIv={P.defaultIv} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />
         </>)}
         {view === 'theta' && (<>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>θ decay</span>}>Time decay</Eyebrow>
@@ -1178,7 +1299,7 @@ function MobileCalc({
       <Glass2 tone="panel" padding={12}>
         <Eyebrow right={
           <div style={{ display: 'flex', gap: 4 }}>
-            <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 100) / 50) * 50, iv, dte)])}>+ leg</button>
+            <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 2 * P.strikeStep) / P.strikeStep) * P.strikeStep, iv, dte, P)])}>+ leg</button>
             {legs.length > 0 && <button style={miniBtn} onClick={() => setLegs([])}>clear</button>}
           </div>
         }>Legs · {legs.length}</Eyebrow>
@@ -1193,7 +1314,7 @@ function MobileCalc({
             const c = { bullish: '#ef5350', bearish: '#26a69a', neutral: '#a78bfa', volatile: '#f0c068' }[s.bias];
             return (
               <button key={s.id}
-                onClick={() => setLegs(s.build(Math.round(spot / 50) * 50, iv, dte))}
+                onClick={() => setLegs(s.build(Math.round(spot / P.strikeStep) * P.strikeStep, iv, dte, P))}
                 style={{
                   flexShrink: 0,
                   padding: '5px 9px', borderRadius: 999,
@@ -1230,9 +1351,9 @@ function MobileCalc({
             { label: 'Reset',        spot: 0, iv: 0, reset: true },
           ].map((s, i) => (
             <button key={i} onClick={() => {
-              if (s.reset) { setSpot(TXO_SPOT); setIv(24); return; }
-              setSpot(Math.round(TXO_SPOT * (1 + s.spot / 100)));
-              setIv(Math.max(10, Math.min(50, 24 + s.iv)));
+              if (s.reset) { setSpot(P.defaultSpot); setIv(P.defaultIv); return; }
+              setSpot(Math.round(P.defaultSpot * (1 + s.spot / 100)));
+              setIv(Math.max(P.ivMin, Math.min(P.ivMax, P.defaultIv + s.iv)));
             }} style={{
               padding: '10px 6px', borderRadius: 8, fontSize: 11, fontWeight: 600,
               border: '1px solid rgba(255,255,255,0.10)', cursor: 'pointer',
@@ -1245,7 +1366,7 @@ function MobileCalc({
   );
 }
 
-function MobileIV({ expiry }) {
+function MobileIV({ expiry, expiries = TXO_EXPIRIES, P }) {
   const ref = uR(null);
   uE(() => {
     if (!ref.current || !window.IVSurface3D) return;
@@ -1264,8 +1385,8 @@ function MobileIV({ expiry }) {
       <Glass2 tone="panel" padding={14}>
         <Eyebrow>Term structure</Eyebrow>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {TXO_EXPIRIES.map((e) => {
-            const ivAtm = 22 + (1 - e.dte / 60) * 6;
+          {expiries.map((e) => {
+            const ivAtm = ((P ? P.defaultIv : 24) - 2) + (1 - e.dte / 60) * 6;
             return (
               <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                 <span style={{ opacity: 0.7 }}>{e.label} · {e.dte}d</span>
@@ -1286,7 +1407,7 @@ function MobileIV({ expiry }) {
   );
 }
 
-function MobileChain({ isFold, chartW, spot, expiry, legs, setLegs, addLegFromChain, quality }) {
+function MobileChain({ isFold, chartW, P, rows, spot, expiry, legs, setLegs, addLegFromChain, quality }) {
   return (
     <>
       {/* Net premium card */}
@@ -1295,7 +1416,7 @@ function MobileChain({ isFold, chartW, spot, expiry, legs, setLegs, addLegFromCh
           <div>
             <Eyebrow right={<DataQualityPill quality={quality} />}>Net premium</Eyebrow>
             <div className="tnum" style={{ fontSize: 22, fontWeight: 700, fontFamily: 'ui-monospace, SF Mono, monospace', letterSpacing: -0.3 }}>
-              NT${Math.round(legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0) * 50).toLocaleString()}
+              {P.cur}{Math.round(legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0) * P.mult).toLocaleString()}
             </div>
             <div style={{ fontSize: 10, opacity: 0.55, marginTop: 3 }}>
               {legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0) >= 0 ? 'credit received' : 'debit paid'}
@@ -1314,19 +1435,19 @@ function MobileChain({ isFold, chartW, spot, expiry, legs, setLegs, addLegFromCh
         <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>}>
           Option chain
         </Eyebrow>
-        <MobileChainTable spot={spot} contract={expiry.type} onAddLeg={addLegFromChain} />
+        <MobileChainTable spot={spot} contract={expiry.type} rows={rows} onAddLeg={addLegFromChain} />
       </Glass2>
 
       {/* OI Profile */}
       <Glass2 tone="panel" padding={12}>
         <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label}</span>}>OI profile</Eyebrow>
-        <OIProfile spot={spot} contract={expiry.type} theme="dark" maxRows={9} />
+        <OIProfile spot={spot} contract={expiry.type} rows={rows} theme="dark" maxRows={9} />
       </Glass2>
 
       {/* Max Pain */}
       <Glass2 tone="panel" padding={12}>
         <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>結算指標</span>}>Max pain</Eyebrow>
-        <MaxPain spot={spot} contract={expiry.type} theme="dark" height={150} width={chartW} />
+        <MaxPain spot={spot} contract={expiry.type} rows={rows} ntdMult={P.mult} cur={P.cur} theme="dark" height={150} width={chartW} />
       </Glass2>
 
       {/* Current legs */}
@@ -1341,8 +1462,12 @@ function MobileChain({ isFold, chartW, spot, expiry, legs, setLegs, addLegFromCh
 }
 
 // Compact chain table for phone — drops OI/Vol columns, keeps IV / BID-ASK / Strike.
-function MobileChainTable({ spot, contract, onAddLeg }) {
-  const rows = uM(() => (window.genChain ? window.genChain({ spot, contract }) : []), [spot, contract]);
+function MobileChainTable({ spot, contract, rows: rowsProp, onAddLeg }) {
+  const genRows = uM(() => {
+    if (rowsProp && rowsProp.length) return [];
+    return window.genChain ? window.genChain({ spot, contract }) : [];
+  }, [spot, contract, rowsProp]);
+  const rows = (rowsProp && rowsProp.length) ? rowsProp : genRows;
   return (
     <div style={{
       display: 'grid',
