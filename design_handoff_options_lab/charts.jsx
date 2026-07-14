@@ -784,4 +784,125 @@ function KBarChart({ bars, theme = 'dark', height = 160, width = 304 }) {
   );
 }
 
-Object.assign(window, { ThetaDecay, IVSmile, POPGauge, ScenarioTimeline, GreeksProfile, PnLDistribution, OIProfile, DataQualityPill, PnLAttribution, MaxPain, OptionPricer, genBars, KBarChart });
+// ─────────────────────────────────────────────────────────────────────────────
+// PriceChart — full-width chart for the top-level Chart tab (from the design
+// mockup): candles + MA5/MA20 overlays + volume + RSI(14) subchart + OHLC
+// readout. Taiwan colors: red = up, teal = down. Renders from the same `bars`
+// array as KBarChart (live IB history or genBars mock).
+function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceLabel = '' }) {
+  const dark = theme === 'dark';
+  if (!bars || bars.length < 2) return null;
+  const W = 768, H = 282, plotW = 720, pTop = 12, pBot = 196, vTop = 210, vBot = 274;
+  const n = bars.length;
+  const closes = bars.map((b) => b.c);
+  const pMin = Math.min(...bars.map((b) => b.l)) * 0.998;
+  const pMax = Math.max(...bars.map((b) => b.h)) * 1.002;
+  const y = (p) => pTop + ((pMax - p) / (pMax - pMin)) * (pBot - pTop);
+  const xw = plotW / n;
+  const cx = (i) => i * xw + xw / 2;
+  const bw = Math.min(7, Math.max(2, xw * 0.62));
+  const vMax = Math.max(...bars.map((b) => b.v), 1);
+  const up = '#ef5350', down = '#26a69a';
+  const txt = dark ? 'rgba(255,255,255,0.55)' : 'rgba(20,30,50,0.55)';
+  const grid = dark ? 'rgba(255,255,255,0.10)' : 'rgba(20,30,50,0.12)';
+  const dec = pMax >= 5000 ? 0 : pMax >= 100 ? 1 : 2;
+  const fmt = (p) => p.toFixed(dec);
+
+  // simple moving average polyline (starts at bar k-1)
+  const maPts = (k) => {
+    const pts = [];
+    for (let i = k - 1; i < n; i++) {
+      let s = 0;
+      for (let j = i - k + 1; j <= i; j++) s += closes[j];
+      pts.push(cx(i).toFixed(1) + ',' + y(s / k).toFixed(1));
+    }
+    return pts.join(' ');
+  };
+
+  // RSI(14), Wilder smoothing; mapped into the 66px-high subchart
+  const rsiPts = [];
+  let ag = 0, al = 0;
+  for (let i = 1; i < n; i++) {
+    const d = closes[i] - closes[i - 1];
+    const g = Math.max(d, 0), lo = Math.max(-d, 0);
+    if (i <= 14) { ag += g / 14; al += lo / 14; }
+    else { ag = (ag * 13 + g) / 14; al = (al * 13 + lo) / 14; }
+    if (i >= 14) {
+      const rsi = al === 0 ? 100 : 100 - 100 / (1 + ag / al);
+      rsiPts.push(cx(i).toFixed(1) + ',' + (8 + ((100 - rsi) / 100) * 52).toFixed(1));
+    }
+  }
+  const rsiY = (v) => 8 + ((100 - v) / 100) * 52;
+
+  const gridLines = [0.12, 0.37, 0.62, 0.87].map((f) => {
+    const p = pMin + f * (pMax - pMin);
+    return { y: y(p), lab: fmt(p) };
+  });
+
+  const last = bars[n - 1];
+  const lastUp = last.c >= last.o;
+
+  return (
+    <div>
+      {/* OHLC readout + overlay legend */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+        <span style={{ fontSize: 10, letterSpacing: 0.8, textTransform: 'uppercase', opacity: 0.6, fontWeight: 600 }}>
+          {code}{periodLabel ? ` · ${periodLabel}` : ''}
+        </span>
+        <span className="tnum" style={{ fontSize: 11, fontFamily: 'ui-monospace, SF Mono, monospace', opacity: 0.85, display: 'inline-flex', gap: 12 }}>
+          <span><span style={{ opacity: 0.5 }}>O</span> {fmt(last.o)}</span>
+          <span><span style={{ opacity: 0.5 }}>H</span> {fmt(last.h)}</span>
+          <span><span style={{ opacity: 0.5 }}>L</span> {fmt(last.l)}</span>
+          <span><span style={{ opacity: 0.5 }}>C</span> <b style={{ color: lastUp ? up : down }}>{fmt(last.c)}</b></span>
+        </span>
+        <span style={{ display: 'inline-flex', gap: 10, fontSize: 10, fontFamily: 'ui-monospace, Menlo, monospace', opacity: 0.8 }}>
+          <span><i style={{ display: 'inline-block', width: 14, height: 2, background: '#f0c068', verticalAlign: 'middle', marginRight: 4 }} />MA5</span>
+          <span><i style={{ display: 'inline-block', width: 14, height: 2, background: '#5fa3d4', verticalAlign: 'middle', marginRight: 4 }} />MA20</span>
+          <span><i style={{ display: 'inline-block', width: 14, height: 2, background: '#a78bfa', verticalAlign: 'middle', marginRight: 4 }} />RSI 14</span>
+        </span>
+      </div>
+
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: 'block', fontFamily: 'ui-monospace, Menlo, monospace' }}>
+        {gridLines.map((g, i) => (
+          <g key={i}>
+            <line x1="0" x2={plotW} y1={g.y} y2={g.y} stroke={grid} strokeDasharray="2 4" />
+            <text x={plotW + 6} y={g.y + 3} fontSize="9" fill={txt}>{g.lab}</text>
+          </g>
+        ))}
+        {bars.map((b, i) => {
+          const isUp = b.c >= b.o;
+          const col = isUp ? up : down;
+          const top = y(Math.max(b.o, b.c));
+          const bh = Math.max(1.2, Math.abs(y(b.o) - y(b.c)));
+          const vh = (b.v / vMax) * (vBot - vTop);
+          return (
+            <g key={i}>
+              <line x1={cx(i)} x2={cx(i)} y1={y(b.h)} y2={y(b.l)} stroke={col} strokeWidth="1" />
+              <rect x={cx(i) - bw / 2} y={top} width={bw} height={bh} fill={col} rx="1" />
+              <rect x={cx(i) - bw / 2} y={vBot - vh} width={bw} height={Math.max(0.5, vh)} fill={col} fillOpacity="0.45" />
+            </g>
+          );
+        })}
+        <polyline points={maPts(5)} fill="none" stroke="#f0c068" strokeWidth="1.4" strokeLinejoin="round" />
+        <polyline points={maPts(20)} fill="none" stroke="#5fa3d4" strokeWidth="1.4" strokeLinejoin="round" />
+        <line x1="0" x2={plotW} y1={y(last.c)} y2={y(last.c)} stroke="#f0c068" strokeWidth="0.8" strokeDasharray="4 3" strokeOpacity="0.7" />
+        <text x={plotW + 6} y={y(last.c) + 3.5} fontSize="10" fontWeight="700" fill="#f0c068">{fmt(last.c)}</text>
+      </svg>
+
+      <div style={{ fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600, margin: '10px 0 4px' }}>RSI · 14</div>
+      <svg viewBox={`0 0 ${W} 66`} width="100%" style={{ display: 'block', fontFamily: 'ui-monospace, Menlo, monospace' }}>
+        <line x1="0" x2={plotW} y1={rsiY(70)} y2={rsiY(70)} stroke={grid} strokeDasharray="2 4" />
+        <line x1="0" x2={plotW} y1={rsiY(30)} y2={rsiY(30)} stroke={grid} strokeDasharray="2 4" />
+        <text x={plotW + 6} y={rsiY(70) + 3} fontSize="9" fill={txt}>70</text>
+        <text x={plotW + 6} y={rsiY(30) + 3} fontSize="9" fill={txt}>30</text>
+        <polyline points={rsiPts.join(' ')} fill="none" stroke="#a78bfa" strokeWidth="1.4" strokeLinejoin="round" />
+      </svg>
+
+      {sourceLabel && (
+        <div style={{ marginTop: 12, fontSize: 10, opacity: 0.5, fontFamily: 'ui-monospace, Menlo, monospace' }}>{sourceLabel}</div>
+      )}
+    </div>
+  );
+}
+
+Object.assign(window, { ThetaDecay, IVSmile, POPGauge, ScenarioTimeline, GreeksProfile, PnLDistribution, OIProfile, DataQualityPill, PnLAttribution, MaxPain, OptionPricer, genBars, KBarChart, PriceChart });

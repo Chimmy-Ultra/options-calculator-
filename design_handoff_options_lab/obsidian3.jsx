@@ -112,6 +112,7 @@ function Eyebrow({ children, right }) {
 function WorkspaceTabs({ value, onChange, accent, light }) {
   const items = [
     { id: 'chain',  label: 'Chain',      icon: '☷' },
+    { id: 'chart',  label: 'Chart',      icon: '☵' },
     { id: 'calc',   label: 'Calculator', icon: '◈' },
     { id: 'pricer', label: 'Pricer',     icon: '$' },
     { id: 'iv',     label: 'IV Surface', icon: '◬' },
@@ -168,8 +169,8 @@ function ExpiryStrip({ value, onChange, expiries = TXO_EXPIRIES, light }) {
   );
 }
 
-// K 線週期切換（日 / 4H / 1H）— 小型 segmented。
-function KPeriodToggle({ value, onChange }) {
+// K-line period toggle (Daily / 4H / 1H) — small segmented control.
+function KPeriodToggle({ value, onChange, light = false }) {
   return (
     <div style={{ display: 'flex', gap: 2 }}>
       {K_PERIODS.map((p) => {
@@ -177,9 +178,9 @@ function KPeriodToggle({ value, onChange }) {
         return (
           <button key={p.id} onClick={() => onChange(p.id)} style={{
             fontSize: 9, fontWeight: 700, padding: '3px 8px', borderRadius: 6, minWidth: 26,
-            border: '1px solid ' + (active ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.08)'),
-            background: active ? 'rgba(255,255,255,0.10)' : 'transparent',
-            color: active ? '#fff' : 'rgba(255,255,255,0.5)',
+            border: '1px solid ' + (active ? (light ? 'rgba(20,40,80,0.3)' : 'rgba(255,255,255,0.22)') : (light ? 'rgba(25,40,70,0.14)' : 'rgba(255,255,255,0.08)')),
+            background: active ? (light ? 'rgba(20,40,80,0.10)' : 'rgba(255,255,255,0.10)') : 'transparent',
+            color: active ? 'inherit' : (light ? 'rgba(20,30,50,0.5)' : 'rgba(255,255,255,0.5)'),
             cursor: 'pointer', fontFamily: 'inherit',
           }}>{p.label}</button>
         );
@@ -208,7 +209,7 @@ function SettlementCountdown({ dte, note = '13:30' }) {
 
 function Obsidian3() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
-  const [workspace, setWorkspace] = uS('calc');
+  const [workspace, setWorkspace] = uS('chain'); // design opens on Chain
   const [productId, setProductId] = uS('txo');
   const P = window.getProduct(productId);
   const [live, setLive] = uS(null);         // { quote, expiries, health } — IB proxy 抓到的
@@ -305,7 +306,7 @@ function Obsidian3() {
   // On phone/fold, Compare is the only desktop-exclusive workspace (it needs the
   // multi-card grid to be useful). IV Surface is now mobile-friendly so it stays.
   uE(() => {
-    if (vp.layout !== 'desk' && workspace === 'compare') setWorkspace('calc');
+    if (vp.layout !== 'desk' && (workspace === 'compare' || workspace === 'chart')) setWorkspace('calc');
   }, [vp.layout]);
 
   // P&L numbers（點數 × 商品乘數）。Valued at the same daysRem as PayoffChart
@@ -455,8 +456,7 @@ function Obsidian3() {
       {/* WORKSPACE BODY */}
       {workspace === 'calc' && (
         <CalcWorkspace
-          P={P} bars={bars} barsLive={!!liveBars} theme={theme} light={light}
-          barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
+          P={P} theme={theme} light={light}
           legs={legs} setLegs={setLegs}
           spot={spot} setSpot={setSpot}
           spotMin={spotMin} spotMax={spotMax}
@@ -479,6 +479,13 @@ function Obsidian3() {
           legs={legs} setLegs={setLegs}
           D={D}
           quality={quality}
+        />
+      )}
+      {workspace === 'chart' && (
+        <ChartWorkspace
+          P={P} bars={bars} barsLive={!!liveBars} theme={theme} light={light}
+          barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
+          D={D}
         />
       )}
       {workspace === 'pricer' && (
@@ -521,7 +528,7 @@ function Obsidian3() {
 }
 
 // ───────────────────────────────────────────────── CALCULATOR WORKSPACE
-function CalcWorkspace({ P, bars, barsLive, theme = 'dark', barPeriodId, setBarPeriodId, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
+function CalcWorkspace({ P, theme = 'dark', legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
   const light = theme === 'light';
   const hoverInfo = uM(() => {
     if (!hover) return null;
@@ -638,7 +645,6 @@ function CalcWorkspace({ P, bars, barsLive, theme = 'dark', barPeriodId, setBarP
         <Glass2 tone="chip" padding={4} style={{ display: 'flex', gap: 2, overflowX: 'auto', scrollbarWidth: 'none' }}>
           {[
             { id: 'payoff', label: 'Payoff' },
-            { id: 'kbar', label: 'K線' },
             { id: 'cross', label: 'P&L' },
             { id: 'greeks', label: 'Greeks' },
             { id: 'dist', label: 'Dist' },
@@ -672,12 +678,6 @@ function CalcWorkspace({ P, bars, barsLive, theme = 'dark', barPeriodId, setBarP
               <input type="range" min="0" max="1" step="0.01" value={sliceFrac} onChange={(e) => setSliceFrac(parseFloat(e.target.value))}
                 style={{ width: '100%', accentColor: accent }} />
             </div>
-          </>)}
-          {view === 'kbar' && (<>
-            <Eyebrow right={<KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} />}>
-              K線 · {P.code} <span style={{ color: 'rgba(255,255,255,0.5)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· {barsLive ? '近月期貨 · IB' : 'mock'}</span>
-            </Eyebrow>
-            <KBarChart bars={bars} theme={theme} height={150} width={304} />
           </>)}
           {view === 'cross' && (<>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{dte}d</span>}>P&L vs spot</Eyebrow>
@@ -800,6 +800,32 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, expiry, onAddLeg, legs,
           <MaxPain spot={spot} contract={expiry.type} rows={rows} ntdMult={P.mult} cur={P.cur} theme={theme} height={150} width={280} />
         </Glass2>
       </div>
+    </div>
+  );
+}
+
+// ───────────────────────────────────────────────── CHART WORKSPACE
+// Top-level Chart tab (from the design): full-width candles + MA + RSI.
+// Desktop only — mobile keeps the K線 sub-tab inside Calc.
+function ChartWorkspace({ P, bars, barsLive, theme, light, barPeriodId, setBarPeriodId, D }) {
+  const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
+  return (
+    <div style={{ position: 'absolute', top: 110, left: 24, right: 24, bottom: 24, zIndex: 5, overflowY: 'auto' }}>
+      <Glass2 tone="panel" padding={D.panelPad}>
+        <Eyebrow right={<KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} light={light} />}>
+          Chart · {P.code}
+          <span style={{ color: light ? 'rgba(20,30,50,0.5)' : 'rgba(255,255,255,0.5)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>
+            · {barsLive ? '近月期貨 · IB' : 'mock'}
+          </span>
+        </Eyebrow>
+        <PriceChart
+          bars={bars} theme={theme} code={P.code}
+          periodLabel={per.label === '日' ? 'Daily' : per.label}
+          sourceLabel={barsLive
+            ? '● IB feed — front-month futures via server/ proxy (TWS / Gateway)'
+            : '○ MOCK OHLC — random walk; connect the IB proxy (server/) for real bars'}
+        />
+      </Glass2>
     </div>
   );
 }
