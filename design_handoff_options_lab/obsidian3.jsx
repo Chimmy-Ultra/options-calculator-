@@ -232,6 +232,31 @@ function KPeriodToggle({ value, onChange, light = false }) {
   );
 }
 
+// Collapsible global What-if rail (design ⑦, owner-revised to be tucked away).
+// Collapsed = a small pill with a spot/IV readout; expanded = Spot + IV sliders.
+function WhatIfRail({ P, spot, setSpot, spotMin, spotMax, iv, setIv, open, setOpen, theme, light }) {
+  if (!open) {
+    return (
+      <Glass2 tone="chip" radius={999} padding="8px 14px" onClick={() => setOpen(true)}
+        style={{ position: 'fixed', bottom: 20, right: 24, zIndex: 15, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.3 }}>⇅ What-if</span>
+        <span className="tnum" style={{ fontSize: 11, opacity: 0.7, fontFamily: 'ui-monospace, Menlo, monospace' }}>{P.code} {spot.toLocaleString()} · IV {iv}%</span>
+      </Glass2>
+    );
+  }
+  return (
+    <Glass2 tone="raised" radius={14} padding="10px 16px"
+      style={{ position: 'fixed', bottom: 20, right: 24, zIndex: 15, width: 520, maxWidth: 'calc(100vw - 48px)', display: 'grid', gridTemplateColumns: 'auto 1fr 1fr', gap: 18, alignItems: 'center' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
+        <span style={{ fontSize: 9, letterSpacing: 0.7, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600 }}>What-if</span>
+        <button onClick={() => setOpen(false)} title="collapse" style={{ fontSize: 13, lineHeight: 1, padding: '2px 7px', borderRadius: 6, border: '1px solid rgba(128,140,170,0.3)', background: 'rgba(128,140,170,0.12)', color: 'inherit', cursor: 'pointer', fontFamily: 'inherit' }}>×</button>
+      </div>
+      <Slider label={`Spot · ${P.code}`} value={spot} min={spotMin} max={spotMax} step={P.spotStep} onChange={setSpot} format={(v) => v.toLocaleString()} theme={theme} />
+      <Slider label="IV" value={iv} min={P.ivMin} max={P.ivMax} step={0.5} suffix="%" onChange={setIv} theme={theme} />
+    </Glass2>
+  );
+}
+
 // Settlement countdown
 function SettlementCountdown({ dte, note = '13:30' }) {
   const isSettleDay = dte <= 0;
@@ -261,6 +286,7 @@ function Obsidian3() {
   const [barPeriodId, setBarPeriodId] = uS('D'); // K 線週期：D / 4H / 1H
   const [theme, setTheme] = uS('dark'); // 'dark' | 'light'（設計稿的 Light/Dark 切換）
   const [prodMenuOpen, setProdMenuOpen] = uS(false);
+  const [whatIfOpen, setWhatIfOpen] = uS(false); // collapsible What-if rail (owner: rarely used)
   const light = theme === 'light';
   // 亮色靠 body.light 的 CSS 覆蓋（tokens.css），圖表等元件則吃 theme prop 的 light 分支。
   uE(() => { document.body.classList.toggle('light', theme === 'light'); }, [theme]);
@@ -528,6 +554,12 @@ function Obsidian3() {
         <IVWorkspace D={D} P={P} spot={spot} iv={iv} expiry={expiry} expiries={expiries} light={light} theme={theme} />
       )}
 
+      {/* Global collapsible What-if rail — on every tab */}
+      <WhatIfRail
+        P={P} spot={spot} setSpot={setSpot} spotMin={spotMin} spotMax={spotMax}
+        iv={iv} setIv={setIv} open={whatIfOpen} setOpen={setWhatIfOpen} theme={theme} light={light}
+      />
+
       {/* Tweaks panel */}
       <TweaksPanel title="Tweaks">
         <TweakSection title="Surface">
@@ -759,18 +791,7 @@ function CalcWorkspace({ P, theme = 'dark', legs, setLegs, spot, setSpot, spotMi
         </Glass2>
       </div>
 
-      {/* Bottom command rail */}
-      <div style={{
-        position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)',
-        width: 'min(720px, calc(100vw - 720px))', zIndex: 5,
-      }}>
-        <Glass2 tone="raised" padding="16px 22px">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28 }}>
-            <Slider label="Spot" value={spot} min={spotMin} max={spotMax} step={P.spotStep} onChange={setSpot} format={(v) => v.toLocaleString()} theme={theme} />
-            <Slider label="IV" value={iv} min={P.ivMin} max={P.ivMax} step={0.5} suffix="%" onChange={setIv} theme={theme} />
-          </div>
-        </Glass2>
-      </div>
+      {/* Spot / IV live in the global What-if rail (shell) now. */}
 
       {/* Surface legend */}
       <div style={{
