@@ -110,13 +110,13 @@ function Eyebrow({ children, right }) {
 
 // Workspace tabs
 function WorkspaceTabs({ value, onChange, accent, light }) {
+  // Desktop tabs (design): Compare is shelved and Pricer is folded into
+  // Calculator, so the top bar shows four workspaces.
   const items = [
     { id: 'chain',  label: 'Chain',      icon: '☷' },
     { id: 'chart',  label: 'Chart',      icon: '☵' },
     { id: 'calc',   label: 'Calculator', icon: '◈' },
-    { id: 'pricer', label: 'Pricer',     icon: '$' },
     { id: 'iv',     label: 'IV Surface', icon: '◬' },
-    { id: 'compare',label: 'Compare',    icon: '◫' },
   ];
   return (
     <Glass2 tone="chip" radius={999} padding={4} style={{ display: 'flex', gap: 2 }}>
@@ -308,6 +308,10 @@ function Obsidian3() {
   uE(() => {
     if (vp.layout !== 'desk' && (workspace === 'compare' || workspace === 'chart')) setWorkspace('calc');
   }, [vp.layout]);
+  // Desktop: Pricer/Compare tabs removed — redirect stale state to Chain.
+  uE(() => {
+    if (vp.layout === 'desk' && (workspace === 'pricer' || workspace === 'compare')) setWorkspace('chain');
+  }, [vp.layout, workspace]);
 
   // P&L numbers（點數 × 商品乘數）。Valued at the same daysRem as PayoffChart
   // so the displayed number always matches the curve.
@@ -491,14 +495,8 @@ function Obsidian3() {
           D={D}
         />
       )}
-      {workspace === 'pricer' && (
-        <PricerWorkspace D={D} P={P} spot={spot} iv={iv} dte={dte} accent={accent} theme={theme} />
-      )}
       {workspace === 'iv' && (
-        <IVWorkspace D={D} P={P} expiry={expiry} expiries={expiries} light={light} />
-      )}
-      {workspace === 'compare' && (
-        <CompareWorkspace D={D} P={P} spot={spot} iv={iv} dte={dte} theme={theme} light={light} />
+        <IVWorkspace D={D} P={P} spot={spot} iv={iv} expiry={expiry} expiries={expiries} light={light} theme={theme} />
       )}
 
       {/* Tweaks panel */}
@@ -608,6 +606,12 @@ function CalcWorkspace({ P, theme = 'dark', legs, setLegs, spot, setSpot, spotMi
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow>Saved scenarios</Eyebrow>
           <ScenarioTimeline theme={theme} items={SAVED_SCENARIOS} current={SAVED_SCENARIOS.length - 1} />
+        </Glass2>
+
+        {/* Single-contract pricer — folded in from the removed Pricer tab. */}
+        <Glass2 tone="panel" padding={D.panelPad}>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{P.model === 'b76' ? 'Black-76' : 'Black-Scholes'}</span>}>Option Pricer</Eyebrow>
+          <OptionPricer key={P.id} product={P} spot={spot} iv={iv} dte={dte} theme={theme} accent={accent} />
         </Glass2>
       </div>
 
@@ -944,22 +948,6 @@ function ChartWorkspace({ P, bars, barsLive, theme, light, barPeriodId, setBarPe
   );
 }
 
-// ───────────────────────────────────────────────── PRICER WORKSPACE
-function PricerWorkspace({ D, P, spot, iv, dte, accent, theme = 'dark' }) {
-  return (
-    <div style={{ position: 'absolute', top: 110, left: 0, right: 0, bottom: 0, zIndex: 5, padding: '0 24px 24px', overflowY: 'auto' }}>
-      <div style={{ maxWidth: 540, margin: '0 auto' }}>
-        <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{P.model === 'b76' ? 'Black-76 · 期貨選擇權' : 'Black-Scholes · 歐式'}</span>}>
-            Option Pricer <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· 單張合約理論定價</span>
-          </Eyebrow>
-          <OptionPricer key={P.id} product={P} spot={spot} iv={iv} dte={dte} theme={theme} accent={accent} />
-        </Glass2>
-      </div>
-    </div>
-  );
-}
-
 // ───────────────────────────────────────────────── IV SURFACE WORKSPACE
 function IVWorkspace({ D, P, expiry, expiries = TXO_EXPIRIES, light = false, theme = 'dark' }) {
   const ref = uR(null);
@@ -1045,6 +1033,9 @@ const STRATEGY_LIBRARY = [
     build: (s, iv, dte, P) => [_mkLeg('long','put',s,s,iv,dte,P)] },
 ];
 
+// Shelved: the Compare tab was removed per owner decision (2026-07-10).
+// Kept intact — re-enable by adding a 'compare' entry back to WorkspaceTabs and
+// its route. STRATEGY_LIBRARY above is still used by the mobile strategy chips.
 function CompareWorkspace({ D, P, spot, iv, dte, theme = 'dark' }) {
   const [picked, setPicked] = uS(['bull-call', 'iron-condor', 'straddle']);
   const [showPicker, setShowPicker] = uS(false);
