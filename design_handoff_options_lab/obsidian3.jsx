@@ -473,11 +473,14 @@ function Obsidian3() {
       )}
       {workspace === 'chain' && (
         <ChainWorkspace
-          P={P} rows={chainRows} theme={theme} light={light}
-          spot={spot} expiry={expiry}
+          P={P} rows={chainRows} theme={theme}
+          spot={spot} setSpot={setSpot} expiry={expiry}
           onAddLeg={addLegFromChain}
           legs={legs} setLegs={setLegs}
-          D={D}
+          iv={iv} setIv={setIv} dte={dte}
+          pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss}
+          popValue={popValue} portfolioG={portfolioG}
+          accent={accent} t={t} D={D}
           quality={quality}
         />
       )}
@@ -759,45 +762,156 @@ function CalcWorkspace({ P, theme = 'dark', legs, setLegs, spot, setSpot, spotMi
 }
 
 // ───────────────────────────────────────────────── CHAIN WORKSPACE
-function ChainWorkspace({ P, rows, theme = 'dark', spot, expiry, onAddLeg, legs, setLegs, D, quality }) {
-  const light = theme === 'light';
+// P&L what-if card (design ⑤) — compact hero + POP gauge + max profit/loss tiles.
+function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, quality, theme, light, D }) {
+  const profit = pnlNTD >= 0;
+  const heroColor = profit
+    ? (light ? 'oklch(0.60 0.13 75)' : 'oklch(0.84 0.14 75)')
+    : (light ? 'oklch(0.50 0.10 220)' : 'oklch(0.74 0.12 220)');
+  const tile = { padding: '7px 10px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' };
   return (
-    <div style={{ position: 'absolute', top: 110, left: 24, right: 24, bottom: 24, zIndex: 5, display: 'flex', gap: D.gap }}>
-      <div style={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
-        <Glass2 tone="panel" padding={D.panelPad} style={{ maxHeight: '100%', overflow: 'auto' }}>
-          <Eyebrow right={
-            <span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>
-          }>Option Chain · {P.code}</Eyebrow>
-          <OptionChain spot={spot} contract={expiry.type} dte={expiry.dte} product={P} rows={rows} onAddLeg={onAddLeg} theme={theme} />
-        </Glass2>
+    <Glass2 tone="raised" padding="14px 14px 12px" radius={16}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+        <div style={{ minWidth: 0 }}>
+          <Eyebrow right={<DataQualityPill quality={quality} />}>P&L what-if · {P.code}</Eyebrow>
+          <div className="tnum" style={{ fontSize: 24, fontWeight: 600, letterSpacing: -0.4, lineHeight: 1.05, marginTop: 3, fontFamily: 'ui-monospace, SF Mono, monospace', color: heroColor }}>
+            {profit ? '+' : ''}{P.cur}{Math.abs(Math.round(pnlNTD)).toLocaleString()}
+          </div>
+          <div className="tnum" style={{ fontSize: 9, opacity: 0.5, marginTop: 3 }}>{pnlPts >= 0 ? '+' : ''}{pnlPts.toFixed(1)} pts {P.unitLabel}</div>
+        </div>
+        <div style={{ width: 74, flexShrink: 0 }}>
+          <POPGauge theme={theme} size={74} value={popValue} />
+          <div style={{ textAlign: 'center', fontSize: 7, opacity: 0.5, marginTop: 3, letterSpacing: 0.5, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>prob. of profit</div>
+        </div>
       </div>
-      <div style={{ width: 320, display: 'flex', flexDirection: 'column', gap: D.gap, maxHeight: '100%', overflow: 'auto', paddingBottom: 4 }}>
-        <Glass2 tone="panel" padding={D.panelPad}>
+      <div style={{ height: 1, background: light ? 'rgba(20,30,50,0.10)' : 'rgba(255,255,255,0.10)', margin: '10px 0 9px' }} />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <div className="lt-tile" style={tile}>
+          <div style={{ fontSize: 9, letterSpacing: 0.5, textTransform: 'uppercase', opacity: 0.6 }}>Max profit</div>
+          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'ui-monospace, Menlo, monospace', color: '#f0c068' }}>+{P.cur}{Math.round(maxProfit).toLocaleString()}</div>
+        </div>
+        <div className="lt-tile" style={tile}>
+          <div style={{ fontSize: 9, letterSpacing: 0.5, textTransform: 'uppercase', opacity: 0.6 }}>Max loss</div>
+          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'ui-monospace, Menlo, monospace', color: '#5fa3d4' }}>{P.cur}{Math.round(maxLoss).toLocaleString()}</div>
+        </div>
+      </div>
+    </Glass2>
+  );
+}
+
+// Chain-tab layout switcher (design ③): SIDE / WIDE / SPLIT.
+const CHAIN_LAYOUTS = {
+  a: { label: 'SIDE',  cols: 'minmax(460px,1fr) minmax(340px,392px)', areas: "'chain pnl' 'chain payoff' 'chain greeks' 'chain legs'" },
+  b: { label: 'WIDE',  cols: '1fr 1fr',            areas: "'chain chain' 'pnl payoff' 'greeks legs'" },
+  c: { label: 'SPLIT', cols: '1.1fr 1fr 1fr',      areas: "'chain chain chain' 'payoff pnl legs' 'greeks greeks greeks'" },
+};
+function LayoutToggle({ value, onChange, light }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <span style={{ fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.45, fontWeight: 600 }}>Layout</span>
+      {Object.keys(CHAIN_LAYOUTS).map((k) => {
+        const active = k === value;
+        return (
+          <button key={k} onClick={() => onChange(k)} style={{
+            fontSize: 9, fontWeight: 700, letterSpacing: 0.5, padding: '3px 10px', borderRadius: 999,
+            border: '1px solid ' + (light ? 'rgba(25,40,70,0.14)' : 'rgba(255,255,255,0.14)'),
+            background: active ? 'linear-gradient(150deg,oklch(0.66 0.16 250),oklch(0.55 0.18 240))' : 'transparent',
+            color: active ? '#fff' : (light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)'),
+            cursor: 'pointer', fontFamily: 'inherit',
+          }}>{CHAIN_LAYOUTS[k].label}</button>
+        );
+      })}
+    </div>
+  );
+}
+
+function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, onAddLeg, legs, setLegs,
+  iv, setIv, dte, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, portfolioG, accent, t, D, quality }) {
+  const light = theme === 'light';
+  const [layout, setLayout] = uS('a');
+  const lay = CHAIN_LAYOUTS[layout];
+  const credit = legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0);
+  const glassArea = (area, children, pad = D.panelPad) => (
+    <Glass2 tone="panel" padding={pad} style={{ gridArea: area, minWidth: 0 }}>{children}</Glass2>
+  );
+  return (
+    <div style={{ position: 'absolute', top: 110, left: 24, right: 24, bottom: 24, zIndex: 5, overflowY: 'auto', paddingBottom: 4 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+        <LayoutToggle value={layout} onChange={setLayout} light={light} />
+      </div>
+
+      <div style={{ display: 'grid', gap: D.gap, alignItems: 'start', gridTemplateColumns: lay.cols, gridTemplateAreas: lay.areas }}>
+        {/* chain */}
+        <Glass2 tone="panel" padding={D.panelPad} style={{ gridArea: 'chain', minWidth: 0 }}>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>}>Option Chain · {P.code}</Eyebrow>
+          <OptionChain spot={spot} contract={expiry.type} dte={expiry.dte} product={P} rows={rows} legs={legs} onAddLeg={onAddLeg} theme={theme} />
+        </Glass2>
+
+        {/* pnl what-if */}
+        <div style={{ gridArea: 'pnl', minWidth: 0 }}>
+          <WhatIfCard P={P} pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss} popValue={popValue} quality={quality} theme={theme} light={light} D={D} />
+        </div>
+
+        {/* payoff */}
+        {glassArea('payoff', (<>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>at expiry</span>}>
+            Payoff {t.showProbCone && <span style={{ color: '#a78bfa', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· 1σ/2σ cone</span>}
+          </Eyebrow>
+          <PayoffChart legs={legs} spot={spot} theme={theme} height={150} width={304} iv={iv} dte={dte} showCone={t.showProbCone} sliceFrac={1} rangePct={0.08} showKeyNumbers={true} model={P.model} r={P.r / 100} strikeStep={P.strikeStep} />
+        </>))}
+
+        {/* greeks */}
+        <div style={{ gridArea: 'greeks', minWidth: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 8 }}>
+          <GreekChip label="Delta · Δ" value={(portfolioG.delta >= 0 ? '+' : '') + portfolioG.delta.toFixed(2)} theme={theme} emphasis={portfolioG.delta >= 0 ? 'up' : 'down'} />
+          <GreekChip label="Gamma · Γ" value={portfolioG.gamma.toFixed(4)} theme={theme} />
+          <GreekChip label="Theta · Θ" value={(portfolioG.theta >= 0 ? '+' : '') + portfolioG.theta.toFixed(2)} theme={theme} emphasis={portfolioG.theta >= 0 ? 'up' : 'down'} />
+          <GreekChip label="Vega · V" value={(portfolioG.vega >= 0 ? '+' : '') + portfolioG.vega.toFixed(2)} theme={theme} emphasis={portfolioG.vega >= 0 ? 'up' : 'down'} />
+        </div>
+
+        {/* legs */}
+        {glassArea('legs', (<>
           <Eyebrow right={
-            <button style={miniBtn} onClick={() => setLegs([])}>clear</button>
-          }>Current legs · {legs.length}</Eyebrow>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 2 * P.strikeStep) / P.strikeStep) * P.strikeStep, iv, dte, P)])}>+ leg</button>
+              {legs.length > 0 && <button style={miniBtn} onClick={() => setLegs([])}>clear</button>}
+            </div>
+          }>Legs · {legs.length}</Eyebrow>
           {legs.length === 0 ? (
-            <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 11, opacity: 0.5 }}>Click any chain row to add a leg</div>
+            <div style={{ padding: '20px 0', textAlign: 'center', fontSize: 11, opacity: 0.5 }}>Click any chain row to add a leg</div>
           ) : (
             <LegEditor legs={legs} onChange={setLegs} theme={theme} />
           )}
-        </Glass2>
-        <Glass2 tone="raised" padding={D.panelPad}>
-          <Eyebrow right={<DataQualityPill quality={quality} />}>Net premium</Eyebrow>
-          <div className="tnum" style={{ fontSize: 28, fontWeight: 600, fontFamily: 'ui-monospace, SF Mono, monospace', letterSpacing: -0.4 }}>
-            {P.cur}{Math.round(legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0) * P.mult).toLocaleString()}
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, opacity: 0.6, marginTop: 8, fontFamily: 'ui-monospace, Menlo, monospace' }}>
+            <span>{credit >= 0 ? 'Net credit' : 'Net debit'}</span>
+            <span>{credit >= 0 ? '+' : ''}{P.cur}{Math.round(credit * P.mult).toLocaleString()}</span>
           </div>
-          <div style={{ fontSize: 11, opacity: 0.55, marginTop: 6 }}>
-            {legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0) >= 0 ? 'credit received' : 'debit paid'}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 10 }}>
+            {[
+              { label: '−5% & IV+15%', spot: -5, iv: 15 },
+              { label: '−10% crash', spot: -10, iv: 21 },
+            ].map((s, i) => (
+              <button key={i} onClick={() => {
+                setSpot(Math.round(P.defaultSpot * (1 + s.spot / 100) / P.spotStep) * P.spotStep);
+                setIv(Math.max(P.ivMin, Math.min(P.ivMax, P.defaultIv + s.iv)));
+              }} style={{
+                padding: '8px 6px', borderRadius: 8, fontSize: 10, fontWeight: 600,
+                border: '1px solid rgba(128,140,170,0.28)', cursor: 'pointer',
+                background: 'rgba(128,140,170,0.12)', color: 'inherit', fontFamily: 'inherit',
+              }}>{s.label}</button>
+            ))}
           </div>
-        </Glass2>
+        </>))}
+      </div>
+
+      {/* OI Profile + Max Pain — kept, below the grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: D.gap, marginTop: D.gap }}>
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>}>OI profile</Eyebrow>
           <OIProfile spot={spot} contract={expiry.type} rows={rows} theme={theme} maxRows={11} />
         </Glass2>
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>結算指標</span>}>Max pain</Eyebrow>
-          <MaxPain spot={spot} contract={expiry.type} rows={rows} ntdMult={P.mult} cur={P.cur} theme={theme} height={150} width={280} />
+          <MaxPain spot={spot} contract={expiry.type} rows={rows} ntdMult={P.mult} cur={P.cur} theme={theme} height={150} width={520} />
         </Glass2>
       </div>
     </div>
