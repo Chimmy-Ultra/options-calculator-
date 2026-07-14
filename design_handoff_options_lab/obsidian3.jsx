@@ -628,7 +628,7 @@ function CalcWorkspace({ P, theme = 'dark', legs, setLegs, spot, setSpot, spotMi
       )}
 
       {/* Left column */}
-      <div style={{
+      <div className="calc-col" style={{
         position: 'absolute', top: 110, left: 24, width: 320, zIndex: 5,
         display: 'flex', flexDirection: 'column', gap: D.gap,
         maxHeight: 'calc(100vh - 200px)', overflow: 'auto', paddingBottom: 4,
@@ -677,7 +677,7 @@ function CalcWorkspace({ P, theme = 'dark', legs, setLegs, spot, setSpot, spotMi
       </div>
 
       {/* Right column */}
-      <div style={{
+      <div className="calc-col" style={{
         position: 'absolute', top: 110, right: 24, width: 340, zIndex: 5,
         display: 'flex', flexDirection: 'column', gap: D.gap,
         maxHeight: 'calc(100vh - 200px)', overflow: 'auto', paddingBottom: 4,
@@ -964,7 +964,7 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, onAddL
           <OIProfile spot={spot} contract={expiry.type} rows={rows} theme={theme} maxRows={11} />
         </Glass2>
         <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>結算指標</span>}>Max pain</Eyebrow>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>settlement</span>}>Max pain</Eyebrow>
           <MaxPain spot={spot} contract={expiry.type} rows={rows} ntdMult={P.mult} cur={P.cur} theme={theme} height={150} width={520} />
         </Glass2>
       </div>
@@ -983,7 +983,7 @@ function ChartWorkspace({ P, bars, barsLive, theme, light, barPeriodId, setBarPe
         <Eyebrow right={<KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} light={light} />}>
           Chart · {P.code}
           <span style={{ color: light ? 'rgba(20,30,50,0.5)' : 'rgba(255,255,255,0.5)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>
-            · {barsLive ? '近月期貨 · IB' : 'mock'}
+            · {barsLive ? 'front-month · IB' : 'mock'}
           </span>
         </Eyebrow>
         <PriceChart
@@ -1781,7 +1781,7 @@ function MobileChain({ isFold, chartW, P, rows, spot, expiry, legs, setLegs, add
 
       {/* Max Pain */}
       <Glass2 tone="panel" padding={12}>
-        <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>結算指標</span>}>Max pain</Eyebrow>
+        <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>settlement</span>}>Max pain</Eyebrow>
         <MaxPain spot={spot} contract={expiry.type} rows={rows} ntdMult={P.mult} cur={P.cur} theme={theme} height={150} width={chartW} />
       </Glass2>
 
