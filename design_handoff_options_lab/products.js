@@ -5,7 +5,7 @@
 (function () {
   const PRODUCTS = [
     {
-      id: 'txo', code: 'TXO', name: '台指選擇權',
+      id: 'txo', code: 'TXO', name: 'TAIEX Options',
       cur: 'NT$', mult: 50, unitLabel: '×50 NTD/pt',
       strikeStep: 50,
       model: 'bs', r: 1.5, skew: 'put',
@@ -18,7 +18,7 @@
       mockExpiries: null, // null → 用 obsidian3.jsx 的 TXO_EXPIRIES
     },
     {
-      id: 'zc', code: 'ZC', name: '玉米 Corn',
+      id: 'zc', code: 'ZC', name: 'Corn',
       cur: 'US$', mult: 50, unitLabel: '×$50/¢ · 5,000 bu',
       strikeStep: 10, eighth: true,
       model: 'b76', r: 4.0, skew: 'call',
@@ -35,7 +35,7 @@
       ],
     },
     {
-      id: 'zs', code: 'ZS', name: '黃豆 Soybeans',
+      id: 'zs', code: 'ZS', name: 'Soybeans',
       cur: 'US$', mult: 50, unitLabel: '×$50/¢ · 5,000 bu',
       strikeStep: 20, eighth: true,
       model: 'b76', r: 4.0, skew: 'call',
@@ -53,7 +53,7 @@
       ],
     },
     {
-      id: 'zw', code: 'ZW', name: '小麥 Wheat',
+      id: 'zw', code: 'ZW', name: 'Wheat',
       cur: 'US$', mult: 50, unitLabel: '×$50/¢ · 5,000 bu',
       strikeStep: 10, eighth: true,
       model: 'b76', r: 4.0, skew: 'call',
@@ -90,7 +90,7 @@
       ],
     },
     {
-      id: 'gc', code: 'GC', name: '黃金 Gold',
+      id: 'gc', code: 'GC', name: 'Gold',
       cur: 'US$', mult: 100, unitLabel: '×US$100 / oz',
       strikeStep: 25,
       model: 'b76', r: 4.0, skew: 'call',
@@ -107,7 +107,7 @@
       ],
     },
     {
-      id: 'cl', code: 'CL', name: '原油 WTI Crude',
+      id: 'cl', code: 'CL', name: 'WTI Crude',
       cur: 'US$', mult: 1000, unitLabel: '×US$1,000 / bbl',
       strikeStep: 1,
       model: 'b76', r: 4.0, skew: 'call',
@@ -124,7 +124,7 @@
       ],
     },
     {
-      id: 'ng', code: 'NG', name: '天然氣 Nat Gas',
+      id: 'ng', code: 'NG', name: 'Natural Gas',
       cur: 'US$', mult: 10000, unitLabel: '×US$10,000 / pt',
       strikeStep: 0.1,
       model: 'b76', r: 4.0, skew: 'call',

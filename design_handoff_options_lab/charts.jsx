@@ -577,7 +577,7 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
   };
   const upColor = '#ef5350', downColor = '#26a69a';
 
-  function field(label, value, onChange, sub = null, snap = null, snapLabel = '最新') {
+  function field(label, value, onChange, sub = null, snap = null, snapLabel = 'now') {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         <span style={labelStyle}>{label}</span>
@@ -598,11 +598,11 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
       {/* Type toggle + Strike row */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={labelStyle}>類型</span>
+          <span style={labelStyle}>Type</span>
           <div style={{ display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden', border: `1px solid ${fieldBorder}` }}>
             {[
-              { id: 'call', label: 'CALL 買權', color: upColor },
-              { id: 'put',  label: 'PUT 賣權',  color: downColor },
+              { id: 'call', label: 'CALL', color: upColor },
+              { id: 'put',  label: 'PUT',  color: downColor },
             ].map((opt) => {
               const active = type === opt.id;
               return (
@@ -616,20 +616,20 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
             })}
           </div>
         </div>
-        {field('履約價', strike, (v) => setStrike(v || 0), null,
+        {field('Strike', strike, (v) => setStrike(v || 0), null,
           () => setStrike(Math.round(pricerSpot / P.strikeStep) * P.strikeStep), 'ATM')}
       </div>
 
       {/* Spot + IV row */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        {field('標的價', pricerSpot, setPricerSpot, null, () => setPricerSpot(spot))}
-        {field('引伸波幅 %', pricerIv, setPricerIv, null, () => setPricerIv(iv))}
+        {field('Underlying', pricerSpot, setPricerSpot, null, () => setPricerSpot(spot))}
+        {field('IV %', pricerIv, setPricerIv, null, () => setPricerIv(iv))}
       </div>
 
       {/* DTE + Risk-free rate row */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        {field('距到期 (天)', pricerDte, setPricerDte, null, () => setPricerDte(dte))}
-        {field('無風險利率 %', r, setR, null, () => setR(baseR), '預設')}
+        {field('Days to expiry', pricerDte, setPricerDte, null, () => setPricerDte(dte), 'sync')}
+        {field('Risk-free %', r, setR, null, () => setR(baseR), 'default')}
       </div>
 
       {/* Big theoretical price card */}
@@ -640,7 +640,7 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
-            <div style={labelStyle}>理論價格</div>
+            <div style={labelStyle}>Theoretical price</div>
             <div className="tnum" style={{
               fontSize: 30, fontWeight: 700, letterSpacing: -0.6,
               fontFamily: 'ui-monospace, SF Mono, monospace', lineHeight: 1.05,
@@ -652,13 +652,13 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
           </div>
           {hasMarket && (
             <div style={{ textAlign: 'right' }}>
-              <div style={labelStyle}>vs 市價</div>
+              <div style={labelStyle}>vs market</div>
               <div className="tnum" style={{
                 fontSize: 18, fontWeight: 700, fontFamily: 'ui-monospace, SF Mono, monospace',
                 color: mispricingPct >= 0 ? upColor : downColor,
               }}>{mispricingPct >= 0 ? '+' : ''}{mispricingPct.toFixed(2)}%</div>
               <div style={{ fontSize: 9, opacity: 0.45, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
-                {mispricingPct >= 0 ? '理論 > 市價（可能低估）' : '理論 < 市價（可能高估）'}
+                {mispricingPct >= 0 ? 'model > market (maybe cheap)' : 'model < market (maybe rich)'}
               </div>
             </div>
           )}
@@ -667,9 +667,9 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
 
       {/* Optional market price comparison */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <span style={labelStyle}>市價（選填，比對是否便宜）</span>
+        <span style={labelStyle}>Market price (optional — check cheap / rich)</span>
         <input type="number" value={marketPx} onChange={(e) => setMarketPx(e.target.value)}
-          placeholder="輸入市場成交價..." style={fieldStyle} step="0.01" />
+          placeholder="Enter market price…" style={fieldStyle} step="0.01" />
       </div>
 
       {/* Greeks row */}
@@ -695,7 +695,7 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
       </div>
 
       <div style={{ fontSize: 9, opacity: 0.4, fontFamily: 'ui-monospace, SF Mono, monospace', textAlign: 'right' }}>
-        {P.model === 'b76' ? 'Black-76 · 期貨選擇權' : 'Black-Scholes · 歐式期權'} · {P.unitLabel}
+        {P.model === 'b76' ? 'Black-76 · futures option' : 'Black-Scholes · European'} · {P.unitLabel}
       </div>
     </div>
   );
@@ -834,13 +834,15 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
   }
   const rsiY = (v) => 8 + ((100 - v) / 100) * 52;
 
-  const gridLines = [0.12, 0.37, 0.62, 0.87].map((f) => {
-    const p = pMin + f * (pMax - pMin);
-    return { y: y(p), lab: fmt(p) };
-  });
-
   const last = bars[n - 1];
   const lastUp = last.c >= last.o;
+  const lastY = y(last.c);
+  // Hide a grid price label if it would collide with the gold last-price label.
+  const gridLines = [0.12, 0.37, 0.62, 0.87].map((f) => {
+    const p = pMin + f * (pMax - pMin);
+    const gy = y(p);
+    return { y: gy, lab: fmt(p), hideLabel: Math.abs(gy - lastY) < 11 };
+  });
 
   return (
     <div>
@@ -866,7 +868,7 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
         {gridLines.map((g, i) => (
           <g key={i}>
             <line x1="0" x2={plotW} y1={g.y} y2={g.y} stroke={grid} strokeDasharray="2 4" />
-            <text x={plotW + 6} y={g.y + 3} fontSize="9" fill={txt}>{g.lab}</text>
+            {!g.hideLabel && <text x={plotW + 6} y={g.y + 3} fontSize="9" fill={txt}>{g.lab}</text>}
           </g>
         ))}
         {bars.map((b, i) => {

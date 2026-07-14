@@ -61,3 +61,7 @@ body.light .lt-tile { background: rgba(20,40,80,0.05) !important; border-color: 
 body.light .lt-prodsel { background: rgba(20,40,80,0.08) !important; color: #1c2433 !important; }
 body.light .lt-mock { color: rgba(20,30,50,0.45) !important; }
 body.light .lt-chainbg { background: rgba(255,255,255,0.55) !important; border-color: rgba(25,40,70,0.10) !important; }
+
+/* Calculator side columns: children keep their natural height and the column
+   scrolls, instead of flex-shrinking and clipping/overlapping when tall. */
+.calc-col > * { flex-shrink: 0; }

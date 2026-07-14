@@ -189,14 +189,16 @@ function OptionChain({ spot, contract = 'monthly', dte, product, rows: rowsProp,
             );
           })}
 
-          {/* Spot line + pill overlay */}
-          <div className="spotline" style={{ position: 'absolute', left: 0, right: 0, height: 1, background: dark ? 'rgba(255,255,255,0.35)' : 'rgba(20,30,50,0.4)', top: `calc(28px + (100% - 28px) * ${spotFrac})`, pointerEvents: 'none' }} />
+          {/* Spot line + pill overlay. The pill floats to the LEFT edge (over the
+              call OI column) and just above the line, so it never covers the
+              centered strike / ATM badge. */}
+          <div className="spotline" style={{ position: 'absolute', left: 0, right: 0, height: 2, background: dark ? 'rgba(95,163,212,0.55)' : 'rgba(51,113,159,0.6)', top: `calc(28px + (100% - 28px) * ${spotFrac})`, pointerEvents: 'none' }} />
           <div className="spotpill" style={{
-            position: 'absolute', left: '50%', transform: 'translate(-50%,-50%)', top: `calc(28px + (100% - 28px) * ${spotFrac})`,
-            background: dark ? '#10141d' : '#1c2433', border: `1px solid ${dark ? 'rgba(255,255,255,0.3)' : 'rgba(20,30,50,0.5)'}`,
+            position: 'absolute', left: 8, transform: 'translateY(-50%)', top: `calc(28px + (100% - 28px) * ${spotFrac})`,
+            background: dark ? '#10141d' : '#1c2433', border: `1px solid ${dark ? 'rgba(95,163,212,0.6)' : 'rgba(51,113,159,0.7)'}`,
             color: '#fff', fontVariantNumeric: 'tabular-nums', fontSize: 9.5, fontWeight: 700, padding: '2px 8px', borderRadius: 999,
-            boxShadow: '0 4px 12px rgba(0,0,0,0.5)', pointerEvents: 'none', whiteSpace: 'nowrap',
-          }}>{spotTxt}</div>
+            boxShadow: '0 4px 12px rgba(0,0,0,0.4)', pointerEvents: 'none', whiteSpace: 'nowrap',
+          }}>spot {spotTxt}</div>
         </div>
       </div>
     </div>
