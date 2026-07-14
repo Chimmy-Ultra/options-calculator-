@@ -999,18 +999,77 @@ function ChartWorkspace({ P, bars, barsLive, theme, light, barPeriodId, setBarPe
 }
 
 // ───────────────────────────────────────────────── IV SURFACE WORKSPACE
-function IVWorkspace({ D, P, expiry, expiries = TXO_EXPIRIES, light = false, theme = 'dark' }) {
+function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, light = false, theme = 'dark' }) {
   const ref = uR(null);
+  const [ivView, setIvView] = uS('3d'); // '3d' | 'heat'
   uE(() => {
-    if (!ref.current || !window.IVSurface3D) return;
+    if (ivView !== '3d' || !ref.current || !window.IVSurface3D) return;
     const inst = window.IVSurface3D.make({ container: ref.current });
     return () => inst && inst.destroy && inst.destroy();
-  }, []);
+  }, [ivView]);
+
+  // Heatmap: IV across expiry (rows) × strike (cols). Every 2nd strike, 10 cols.
+  const heat = uM(() => {
+    const atmIv = iv || (P ? P.defaultIv : 24);
+    const cols = (e) => (window.genChain
+      ? window.genChain({ spot, contract: e.type, dte: e.dte, product: P }).filter((_, i) => i % 2 === 0).slice(0, 10)
+      : []);
+    const header = cols(expiry).map((r) => window.fmtStrike(r.strike, (P && P.strikeStep) || 50));
+    const rows = expiries.map((e) => ({
+      exp: e.label,
+      cells: cols(e).map((r) => {
+        const a = Math.max(0.05, Math.min(0.6, ((r.call.iv - (atmIv - 1.8)) / 4.5) * 0.55));
+        return { v: r.call.iv.toFixed(1), bg: `rgba(240,192,104,${a.toFixed(2)})` };
+      }),
+    }));
+    return { header, rows };
+  }, [spot, iv, expiries, expiry, P]);
+
+  const viewChip = (id, label) => {
+    const active = ivView === id;
+    return (
+      <button onClick={() => setIvView(id)} style={{
+        fontSize: 9, fontWeight: 700, letterSpacing: 0.5, padding: '3px 10px', borderRadius: 999,
+        border: '1px solid ' + (light ? 'rgba(25,40,70,0.14)' : 'rgba(255,255,255,0.14)'),
+        background: active ? 'linear-gradient(150deg,oklch(0.66 0.16 250),oklch(0.55 0.18 240))' : 'transparent',
+        color: active ? '#fff' : (light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)'),
+        cursor: 'pointer', fontFamily: 'inherit',
+      }}>{label}</button>
+    );
+  };
+  const cellBorder = light ? 'rgba(25,40,70,0.08)' : 'rgba(255,255,255,0.06)';
+
   return (
     <div style={{ position: 'absolute', top: 110, left: 24, right: 24, bottom: 24, zIndex: 5, display: 'flex', gap: D.gap }}>
       <Glass2 tone="panel" padding={D.panelPad} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>strike × DTE × IV</span>}>IV Surface</Eyebrow>
-        <div ref={ref} style={{ flex: 1, minHeight: 360, borderRadius: 14, overflow: 'hidden', background: 'radial-gradient(ellipse at 30% 30%, rgba(167,139,250,0.10), transparent 60%)' }} />
+        <Eyebrow right={<span style={{ display: 'inline-flex', gap: 4 }}>{viewChip('3d', '3D')}{viewChip('heat', 'HEATMAP')}</span>}>IV Surface · {P.code}</Eyebrow>
+        {ivView === '3d' ? (
+          <div ref={ref} style={{ flex: 1, minHeight: 360, borderRadius: 14, overflow: 'hidden', background: 'radial-gradient(ellipse at 30% 30%, rgba(167,139,250,0.10), transparent 60%)' }} />
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <div style={{ minWidth: 640, fontFamily: 'ui-monospace, SF Mono, monospace', fontVariantNumeric: 'tabular-nums', fontSize: 11 }}>
+              <div style={{ display: 'flex' }}>
+                <div style={{ width: 64, flexShrink: 0, fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600, padding: '8px 10px' }}>EXP</div>
+                {heat.header.map((h, i) => (
+                  <div key={i} style={{ flex: 1, textAlign: 'center', fontSize: 9, letterSpacing: 0.4, opacity: 0.5, fontWeight: 600, padding: '8px 0' }}>{h}</div>
+                ))}
+              </div>
+              {heat.rows.map((row) => (
+                <div key={row.exp} style={{ display: 'flex' }}>
+                  <div style={{ width: 64, flexShrink: 0, padding: '9px 10px', borderTop: `1px solid ${cellBorder}`, fontWeight: 600 }}>{row.exp}</div>
+                  {row.cells.map((c, i) => (
+                    <div key={i} style={{ flex: 1, textAlign: 'center', padding: '9px 0', borderTop: `1px solid ${cellBorder}`, background: c.bg }}>{c.v}</div>
+                  ))}
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: 12, fontSize: 10, opacity: 0.5, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>low</span>
+              <span style={{ display: 'inline-block', width: 120, height: 8, borderRadius: 4, background: 'linear-gradient(90deg,rgba(240,192,104,0.06),rgba(240,192,104,0.6))' }} />
+              <span>high · rows = expiry · cols = strike · value = IV %</span>
+            </div>
+          </div>
+        )}
       </Glass2>
       <div style={{ width: 280, display: 'flex', flexDirection: 'column', gap: D.gap }}>
         <Glass2 tone="panel" padding={D.panelPad}>
@@ -1036,7 +1095,9 @@ function IVWorkspace({ D, P, expiry, expiries = TXO_EXPIRIES, light = false, the
         </Glass2>
         <Glass2 tone="chip" padding={D.panelPad}>
           <div style={{ fontSize: 11, opacity: 0.65, lineHeight: 1.55 }}>
-            <strong style={{ color: '#fff' }}>Drag</strong> to orbit · <strong style={{ color: '#fff' }}>scroll</strong> to zoom. Surface shows IV across all listed strikes & expiries — lower-left = short-dated puts (highest IV); upper-right = long-dated calls.
+            {ivView === '3d'
+              ? <><strong>Drag</strong> to orbit · <strong>scroll</strong> to zoom. Surface shows IV across all listed strikes & expiries — lower-left = short-dated puts (highest IV); upper-right = long-dated calls.</>
+              : <>Heatmap: each cell is the call IV at that strike (columns) and expiry (rows). Warmer = higher IV. Mock IV for expiries other than the loaded live chain.</>}
           </div>
         </Glass2>
       </div>
