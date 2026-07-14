@@ -1,5 +1,13 @@
 # Design Port Plan — execution spec
 
+> **Status (2026-07-10): ALL DONE.** ① Light/Dark ✅ ② Chart tab ✅ ③ Chain
+> SIDE/WIDE/SPLIT ✅ ④ chain Δ/spot-line/badges ✅ ⑤ P&L what-if card ✅
+> ⑥ product dropdown + liquidity pill ✅ ⑦ collapsible What-if rail ✅
+> ⑧ IV 3D/HEATMAP ✅ ⑨ eighth ticks ✅ · new products ES/GC/CL/NG ✅ ·
+> Pricer folded into Calculator, Compare shelved ✅. Verified in-browser
+> (dark+light, all tabs, grains + NG, zero console errors). On PR #17.
+
+
 Port the owner's claude.ai/design mockup to the real app. The mockup is committed
 at `docs/design-reference/trading-main-screen.dc.html` — **consult it for exact
 styles**; all pixel values, colors, and grid specs below were extracted from it.
@@ -109,16 +117,25 @@ Calc workspace keeps its existing big "P&L now" card — this card is Chain-tab 
 - Move the liquidity `DataQualityPill` into the top bar (after tabs, before
   product capsule) — pass `quality` — matching the mockup's `2/2 liquid` chip.
 
-## Increment ⑦ — global What-if rail (desktop)
+## Increment ⑦ — global What-if rail, COLLAPSIBLE (desktop)
 
-Move the Spot/IV slider rail out of `CalcWorkspace` into the desktop shell so
-it shows on **every** tab. Fixed bottom-right: `position:fixed; bottom:20px;
-right:24px; width:520px; max-width:calc(100vw - 48px); z-index:15`, Glass2
-`raised` r14, padding `10px 16px`, grid `auto 1fr 1fr` gap 18: label `What-if`
-(9px uppercase .5) + Spot slider (label `Spot · {P.code}`) + IV slider. Reuse
-the existing `Slider` component and `spotMin/spotMax/P.spotStep/P.ivMin/P.ivMax`.
-Remove the old centered rail from `CalcWorkspace`. Check it doesn't cover the
-Max-Pain card at 1280px width; nudge bottom padding of workspaces if needed.
+Owner revision (2026-07-10): the What-if sliders are used infrequently, so keep
+them tucked away and out of the main layout — collapsed by default, available
+on every tab.
+
+- Shell state `whatIfOpen` (default `false`).
+- Collapsed: a small fixed bottom-right pill (`position:fixed; bottom:20px;
+  right:24px; z-index:15`), Glass2 `chip` r999, padding `8px 14px`, click to
+  open. Content: `⇅ What-if` label + compact readout
+  `{P.code} {spot} · IV {iv}%` (mono, tnum) so it's informative while closed.
+- Expanded: the full rail replaces the pill at the same bottom-right anchor —
+  Glass2 `raised` r14, `width:520px; max-width:calc(100vw - 48px)`, padding
+  `10px 16px`, grid `auto 1fr 1fr` gap 18: a header cell with `What-if` label +
+  a `×` collapse button, Spot slider (`Spot · {P.code}`), IV slider. Reuse the
+  `Slider` component and `spotMin/spotMax/P.spotStep/P.ivMin/P.ivMax`.
+- Remove the old centered rail from `CalcWorkspace`. When expanded it may sit
+  over the Max-Pain card — that's fine since it's user-triggered and dismissable;
+  no layout reflow needed.
 
 ## Increment ⑧ — IV Surface: 3D / HEATMAP toggle
 

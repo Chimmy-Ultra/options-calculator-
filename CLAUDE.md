@@ -75,8 +75,9 @@ This is **not a typical React app.** Skim these before touching code, or you'll 
 Product specs live in `products.js` (`window.PRODUCTS` / `window.getProduct`). Every contract fact — multiplier, strike step, currency, pricing model, IV/spot ranges, expiries — must come from the product object `P`; never hardcode TXO values in shared components.
 
 - **TXO** 台指選擇權 — Black-Scholes on spot (`model: 'bs'`), NT$, ×50/pt, strike step 50.
-- **ZC / ZS / ZW** CBOT 玉米/黃豆/小麥期貨選擇權 — **Black-76 on futures** (`model: 'b76'`), US$, 報價 cents/bushel, 5,000 bu → 1¢ = $50/口. Strike steps: ZC/ZW 10¢, ZS 20¢. Grain IV smiles skew to CALLS (drought risk) — opposite of TXO's put skew (`P.skew`).
-- Live data: grains pull real quotes/expiries/chains from IB via `server/` (see `server/README.md`). Live chain rows replace `genChain` mock rows but keep the same row shape — keep it that way.
+- **ZC / ZS / ZW** CBOT 玉米/黃豆/小麥期貨選擇權 — **Black-76 on futures** (`model: 'b76'`), US$, 報價 cents/bushel, 5,000 bu → 1¢ = $50/口. Strike steps: ZC/ZW 10¢, ZS 20¢. `eighth: true` → quotes show 1/8-cent ticks (462.875). Grain IV smiles skew to CALLS (drought risk) — opposite of TXO's put skew (`P.skew`).
+- **ES / GC / CL / NG** — S&P 500 E-mini, Gold, WTI Crude, Natural Gas futures options (Black-76, US$). Multipliers ×US$50/pt, ×US$100/oz, ×US$1,000/bbl, ×US$10,000/pt. NG uses fractional strikes (step 0.1) — the chain shows two-decimal strikes. These are registry-only entries: adding a product is a `products.js` entry plus a `server/main.py` `PRODUCTS` row; nothing else changes.
+- Live data: futures products pull real quotes/expiries/chains from IB via `server/` (see `server/README.md`). Live chain rows replace `genChain` mock rows but keep the same row shape — keep it that way.
 
 ### TXO domain conventions (Taiwan index options)
 
@@ -98,7 +99,7 @@ These break Western intuition — get them wrong and the UI looks correct but me
 There is no test suite. To verify:
 
 1. Open `design_handoff_options_lab/index.html` directly in a browser, **or** run a static server from that directory.
-2. Exercise the four workspaces: Chain, Calculator, IV Surface, Compare.
+2. Exercise the desktop workspaces: **Chain / Chart / Calculator / IV Surface** (the single-contract pricer is folded into Calculator; Compare is shelved — code kept, tab removed). Mobile keeps its own Calc/Chain/Pricer/IV tabs.
 3. Check phone width too (DevTools responsive mode, ~390px) — many regressions only show on mobile.
 4. Watch the console: Babel parse errors and Three.js warnings show up there.
 
@@ -106,6 +107,6 @@ If you can't run a browser in this environment, **say so explicitly** rather tha
 
 ### Commits and PRs
 
-- Commit messages in this repo are short Traditional Chinese (繁中), prefixed `feat:` / `fix:` / `chore:`. Match that style.
+- **English** for everything pushed to GitHub — commit messages, PR titles/bodies, and new code comments (owner request, 2026-07). Prefix commits `feat:` / `fix:` / `chore:`. Existing Chinese comments can stay; don't mass-translate them.
 - One concern per commit. The history is granular on purpose.
 - Branch convention: `claude/<short-kebab-topic>`.
