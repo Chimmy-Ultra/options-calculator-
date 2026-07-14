@@ -141,6 +141,49 @@ function WorkspaceTabs({ value, onChange, accent, light }) {
   );
 }
 
+// Product dropdown (design ⑥) — replaces the native select with a custom menu
+// listing each product's name + reference spot. Shows live IB / mock badge.
+function ProductDropdown({ productId, P, spot, live, open, setOpen, onPick, light }) {
+  const fmtSpot = (v) => v.toLocaleString(undefined, { maximumFractionDigits: v < 10 ? 2 : v < 1000 ? 2 : 0 });
+  return (
+    <div style={{ position: 'relative', flexShrink: 0 }}>
+      {open && <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 25 }} />}
+      <Glass2 tone="chip" radius={999} padding="8px 12px"
+        onClick={() => setOpen(!open)}
+        style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap', cursor: 'pointer', border: '1px solid oklch(0.66 0.16 250 / 0.55)' }}>
+        <span className="lt-prodsel" style={{ fontSize: 10, fontWeight: 700, padding: '2px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)' }}>{P.code} ▾</span>
+        <span className="tnum" style={{ fontSize: 13, fontWeight: 600 }}>{spot.toLocaleString()}</span>
+        {P.ib ? (
+          <span className={`mono ${live ? '' : 'lt-mock'}`} title={live ? 'IB connected (delayed/realtime per subscription)' : 'no local IB proxy — mock data'} style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.5, color: live ? '#4dd0c8' : 'rgba(255,255,255,0.45)' }}>{live ? '● IB' : '○ MOCK'}</span>
+        ) : (
+          <span className="tnum" style={{ fontSize: 11, color: 'oklch(0.78 0.14 145)' }}>+0.84%</span>
+        )}
+      </Glass2>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 8px)', left: 0, zIndex: 30, width: 250, padding: 6, borderRadius: 14,
+          backdropFilter: 'blur(36px) saturate(160%)', WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+          background: light ? 'rgba(255,255,255,0.97)' : 'linear-gradient(155deg, rgba(80,90,115,0.92), rgba(36,42,58,0.95))',
+          border: `1px solid ${light ? 'rgba(25,40,70,0.16)' : 'rgba(255,255,255,0.14)'}`,
+          boxShadow: '0 28px 56px -24px rgba(0,0,0,0.7)', color: light ? '#1c2433' : '#e8eaef',
+          display: 'flex', flexDirection: 'column', gap: 2,
+        }}>
+          {window.PRODUCTS.map((p) => (
+            <button key={p.id} onClick={() => onPick(p.id)} style={{
+              display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 9, border: 'none', textAlign: 'left', cursor: 'pointer',
+              background: p.id === productId ? (light ? 'rgba(20,40,80,0.08)' : 'rgba(255,255,255,0.10)') : 'transparent', color: 'inherit',
+            }}>
+              <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 5px', borderRadius: 4, background: light ? 'rgba(20,40,80,0.08)' : 'rgba(255,255,255,0.08)', minWidth: 26, textAlign: 'center' }}>{p.code}</span>
+              <span style={{ fontSize: 11, opacity: 0.85, flex: 1 }}>{p.name}</span>
+              <span className="tnum" style={{ fontSize: 11, fontWeight: 600, fontFamily: 'ui-monospace, Menlo, monospace', opacity: 0.8 }}>{fmtSpot(p.defaultSpot)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Expiry strip — overflow scroll on narrow desktop windows, plain flex when
 // there's room. expiries 由商品決定（TXO 週/月選、穀物月份、或 IB 真實到期日）。
 function ExpiryStrip({ value, onChange, expiries = TXO_EXPIRIES, light }) {
@@ -217,9 +260,11 @@ function Obsidian3() {
   const [liveBars, setLiveBars] = uS(null); // 近月期貨的 IB 歷史 K
   const [barPeriodId, setBarPeriodId] = uS('D'); // K 線週期：D / 4H / 1H
   const [theme, setTheme] = uS('dark'); // 'dark' | 'light'（設計稿的 Light/Dark 切換）
+  const [prodMenuOpen, setProdMenuOpen] = uS(false);
   const light = theme === 'light';
   // 亮色靠 body.light 的 CSS 覆蓋（tokens.css），圖表等元件則吃 theme prop 的 light 分支。
   uE(() => { document.body.classList.toggle('light', theme === 'light'); }, [theme]);
+  uE(() => { setProdMenuOpen(false); }, [workspace]); // close product menu on tab change
   const [expiryId, setExpiryId] = uS('m');
   const expiries = productExpiries(P, live && live.expiries);
   const expiry = expiries.find((e) => e.id === expiryId) || expiries[0];
@@ -415,29 +460,13 @@ function Obsidian3() {
         <WorkspaceTabs value={workspace} onChange={setWorkspace} accent={accent} light={light} />
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
-          <Glass2 tone="chip" radius={999} padding="8px 12px" style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
-            <select
-              value={productId}
-              onChange={(e) => switchProduct(e.target.value)}
-              title={P.name}
-              className="lt-prodsel"
-              style={{
-                fontSize: 10, fontWeight: 700, padding: '2px 5px', borderRadius: 4,
-                background: 'rgba(255,255,255,0.06)', color: light ? '#1c2433' : '#e8eaef',
-                border: 'none', outline: 'none', cursor: 'pointer', fontFamily: 'inherit',
-              }}>
-              {window.PRODUCTS.map((p) => <option key={p.id} value={p.id}>{p.code}</option>)}
-            </select>
-            <span className="tnum" style={{ fontSize: 13, fontWeight: 600 }}>{spot.toLocaleString()}</span>
-            {P.ib ? (
-              <span className={`mono ${live ? '' : 'lt-mock'}`} title={live ? 'IB 已連線（延遲/即時依訂閱）' : '沒偵測到本機 IB proxy — mock 數據'} style={{
-                fontSize: 9, fontWeight: 700, letterSpacing: 0.5,
-                color: live ? '#4dd0c8' : 'rgba(255,255,255,0.45)',
-              }}>{live ? '● IB' : '○ MOCK'}</span>
-            ) : (
-              <span className="tnum" style={{ fontSize: 11, color: 'oklch(0.78 0.14 145)' }}>+0.84%</span>
-            )}
-          </Glass2>
+          <DataQualityPill quality={quality} />
+          <ProductDropdown
+            productId={productId} P={P} spot={spot} live={live}
+            open={prodMenuOpen} setOpen={setProdMenuOpen}
+            onPick={(id) => { switchProduct(id); setProdMenuOpen(false); }}
+            light={light}
+          />
           <SettlementCountdown dte={dte} note={P.settleNote} />
           <Glass2 tone="chip" radius={999} padding="8px 13px" style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
             onClick={() => setTheme(light ? 'dark' : 'light')} title="切換 亮色 / 深色">
@@ -767,7 +796,7 @@ function CalcWorkspace({ P, theme = 'dark', legs, setLegs, spot, setSpot, spotMi
 
 // ───────────────────────────────────────────────── CHAIN WORKSPACE
 // P&L what-if card (design ⑤) — compact hero + POP gauge + max profit/loss tiles.
-function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, quality, theme, light, D }) {
+function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, theme, light, D }) {
   const profit = pnlNTD >= 0;
   const heroColor = profit
     ? (light ? 'oklch(0.60 0.13 75)' : 'oklch(0.84 0.14 75)')
@@ -777,7 +806,7 @@ function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, quality, 
     <Glass2 tone="raised" padding="14px 14px 12px" radius={16}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
         <div style={{ minWidth: 0 }}>
-          <Eyebrow right={<DataQualityPill quality={quality} />}>P&L what-if · {P.code}</Eyebrow>
+          <Eyebrow>P&L what-if · {P.code}</Eyebrow>
           <div className="tnum" style={{ fontSize: 24, fontWeight: 600, letterSpacing: -0.4, lineHeight: 1.05, marginTop: 3, fontFamily: 'ui-monospace, SF Mono, monospace', color: heroColor }}>
             {profit ? '+' : ''}{P.cur}{Math.abs(Math.round(pnlNTD)).toLocaleString()}
           </div>
@@ -853,7 +882,7 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, onAddL
 
         {/* pnl what-if */}
         <div style={{ gridArea: 'pnl', minWidth: 0 }}>
-          <WhatIfCard P={P} pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss} popValue={popValue} quality={quality} theme={theme} light={light} D={D} />
+          <WhatIfCard P={P} pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss} popValue={popValue} theme={theme} light={light} D={D} />
         </div>
 
         {/* payoff */}
