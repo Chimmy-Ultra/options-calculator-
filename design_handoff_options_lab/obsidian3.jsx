@@ -110,12 +110,13 @@ function Eyebrow({ children, right }) {
 
 // Workspace tabs
 function WorkspaceTabs({ value, onChange, accent, light }) {
+  // Desktop tabs (design): Compare is shelved and Pricer is folded into
+  // Calculator, so the top bar shows four workspaces.
   const items = [
     { id: 'chain',  label: 'Chain',      icon: '☷' },
+    { id: 'chart',  label: 'Chart',      icon: '☵' },
     { id: 'calc',   label: 'Calculator', icon: '◈' },
-    { id: 'pricer', label: 'Pricer',     icon: '$' },
     { id: 'iv',     label: 'IV Surface', icon: '◬' },
-    { id: 'compare',label: 'Compare',    icon: '◫' },
   ];
   return (
     <Glass2 tone="chip" radius={999} padding={4} style={{ display: 'flex', gap: 2 }}>
@@ -137,6 +138,49 @@ function WorkspaceTabs({ value, onChange, accent, light }) {
         );
       })}
     </Glass2>
+  );
+}
+
+// Product dropdown (design ⑥) — replaces the native select with a custom menu
+// listing each product's name + reference spot. Shows live IB / mock badge.
+function ProductDropdown({ productId, P, spot, live, open, setOpen, onPick, light }) {
+  const fmtSpot = (v) => v.toLocaleString(undefined, { maximumFractionDigits: v < 10 ? 2 : v < 1000 ? 2 : 0 });
+  return (
+    <div style={{ position: 'relative', flexShrink: 0 }}>
+      {open && <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 25 }} />}
+      <Glass2 tone="chip" radius={999} padding="8px 12px"
+        onClick={() => setOpen(!open)}
+        style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap', cursor: 'pointer', border: '1px solid oklch(0.66 0.16 250 / 0.55)' }}>
+        <span className="lt-prodsel" style={{ fontSize: 10, fontWeight: 700, padding: '2px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)' }}>{P.code} ▾</span>
+        <span className="tnum" style={{ fontSize: 13, fontWeight: 600 }}>{spot.toLocaleString()}</span>
+        {P.ib ? (
+          <span className={`mono ${live ? '' : 'lt-mock'}`} title={live ? 'IB connected (delayed/realtime per subscription)' : 'no local IB proxy — mock data'} style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.5, color: live ? '#4dd0c8' : 'rgba(255,255,255,0.45)' }}>{live ? '● IB' : '○ MOCK'}</span>
+        ) : (
+          <span className="tnum" style={{ fontSize: 11, color: 'oklch(0.78 0.14 145)' }}>+0.84%</span>
+        )}
+      </Glass2>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 8px)', left: 0, zIndex: 30, width: 250, padding: 6, borderRadius: 14,
+          backdropFilter: 'blur(36px) saturate(160%)', WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+          background: light ? 'rgba(255,255,255,0.97)' : 'linear-gradient(155deg, rgba(80,90,115,0.92), rgba(36,42,58,0.95))',
+          border: `1px solid ${light ? 'rgba(25,40,70,0.16)' : 'rgba(255,255,255,0.14)'}`,
+          boxShadow: '0 28px 56px -24px rgba(0,0,0,0.7)', color: light ? '#1c2433' : '#e8eaef',
+          display: 'flex', flexDirection: 'column', gap: 2,
+        }}>
+          {window.PRODUCTS.map((p) => (
+            <button key={p.id} onClick={() => onPick(p.id)} style={{
+              display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 9, border: 'none', textAlign: 'left', cursor: 'pointer',
+              background: p.id === productId ? (light ? 'rgba(20,40,80,0.08)' : 'rgba(255,255,255,0.10)') : 'transparent', color: 'inherit',
+            }}>
+              <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 5px', borderRadius: 4, background: light ? 'rgba(20,40,80,0.08)' : 'rgba(255,255,255,0.08)', minWidth: 26, textAlign: 'center' }}>{p.code}</span>
+              <span style={{ fontSize: 11, opacity: 0.85, flex: 1 }}>{p.name}</span>
+              <span className="tnum" style={{ fontSize: 11, fontWeight: 600, fontFamily: 'ui-monospace, Menlo, monospace', opacity: 0.8 }}>{fmtSpot(p.defaultSpot)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -168,8 +212,8 @@ function ExpiryStrip({ value, onChange, expiries = TXO_EXPIRIES, light }) {
   );
 }
 
-// K 線週期切換（日 / 4H / 1H）— 小型 segmented。
-function KPeriodToggle({ value, onChange }) {
+// K-line period toggle (Daily / 4H / 1H) — small segmented control.
+function KPeriodToggle({ value, onChange, light = false }) {
   return (
     <div style={{ display: 'flex', gap: 2 }}>
       {K_PERIODS.map((p) => {
@@ -177,14 +221,39 @@ function KPeriodToggle({ value, onChange }) {
         return (
           <button key={p.id} onClick={() => onChange(p.id)} style={{
             fontSize: 9, fontWeight: 700, padding: '3px 8px', borderRadius: 6, minWidth: 26,
-            border: '1px solid ' + (active ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.08)'),
-            background: active ? 'rgba(255,255,255,0.10)' : 'transparent',
-            color: active ? '#fff' : 'rgba(255,255,255,0.5)',
+            border: '1px solid ' + (active ? (light ? 'rgba(20,40,80,0.3)' : 'rgba(255,255,255,0.22)') : (light ? 'rgba(25,40,70,0.14)' : 'rgba(255,255,255,0.08)')),
+            background: active ? (light ? 'rgba(20,40,80,0.10)' : 'rgba(255,255,255,0.10)') : 'transparent',
+            color: active ? 'inherit' : (light ? 'rgba(20,30,50,0.5)' : 'rgba(255,255,255,0.5)'),
             cursor: 'pointer', fontFamily: 'inherit',
           }}>{p.label}</button>
         );
       })}
     </div>
+  );
+}
+
+// Collapsible global What-if rail (design ⑦, owner-revised to be tucked away).
+// Collapsed = a small pill with a spot/IV readout; expanded = Spot + IV sliders.
+function WhatIfRail({ P, spot, setSpot, spotMin, spotMax, iv, setIv, open, setOpen, theme, light }) {
+  if (!open) {
+    return (
+      <Glass2 tone="chip" radius={999} padding="8px 14px" onClick={() => setOpen(true)}
+        style={{ position: 'fixed', bottom: 20, right: 24, zIndex: 15, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.3 }}>⇅ What-if</span>
+        <span className="tnum" style={{ fontSize: 11, opacity: 0.7, fontFamily: 'ui-monospace, Menlo, monospace' }}>{P.code} {spot.toLocaleString()} · IV {iv}%</span>
+      </Glass2>
+    );
+  }
+  return (
+    <Glass2 tone="raised" radius={14} padding="10px 16px"
+      style={{ position: 'fixed', bottom: 20, right: 24, zIndex: 15, width: 520, maxWidth: 'calc(100vw - 48px)', display: 'grid', gridTemplateColumns: 'auto 1fr 1fr', gap: 18, alignItems: 'center' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
+        <span style={{ fontSize: 9, letterSpacing: 0.7, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600 }}>What-if</span>
+        <button onClick={() => setOpen(false)} title="collapse" style={{ fontSize: 13, lineHeight: 1, padding: '2px 7px', borderRadius: 6, border: '1px solid rgba(128,140,170,0.3)', background: 'rgba(128,140,170,0.12)', color: 'inherit', cursor: 'pointer', fontFamily: 'inherit' }}>×</button>
+      </div>
+      <Slider label={`Spot · ${P.code}`} value={spot} min={spotMin} max={spotMax} step={P.spotStep} onChange={setSpot} format={(v) => v.toLocaleString()} theme={theme} />
+      <Slider label="IV" value={iv} min={P.ivMin} max={P.ivMax} step={0.5} suffix="%" onChange={setIv} theme={theme} />
+    </Glass2>
   );
 }
 
@@ -208,7 +277,7 @@ function SettlementCountdown({ dte, note = '13:30' }) {
 
 function Obsidian3() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
-  const [workspace, setWorkspace] = uS('calc');
+  const [workspace, setWorkspace] = uS('chain'); // design opens on Chain
   const [productId, setProductId] = uS('txo');
   const P = window.getProduct(productId);
   const [live, setLive] = uS(null);         // { quote, expiries, health } — IB proxy 抓到的
@@ -216,9 +285,12 @@ function Obsidian3() {
   const [liveBars, setLiveBars] = uS(null); // 近月期貨的 IB 歷史 K
   const [barPeriodId, setBarPeriodId] = uS('D'); // K 線週期：D / 4H / 1H
   const [theme, setTheme] = uS('dark'); // 'dark' | 'light'（設計稿的 Light/Dark 切換）
+  const [prodMenuOpen, setProdMenuOpen] = uS(false);
+  const [whatIfOpen, setWhatIfOpen] = uS(false); // collapsible What-if rail (owner: rarely used)
   const light = theme === 'light';
   // 亮色靠 body.light 的 CSS 覆蓋（tokens.css），圖表等元件則吃 theme prop 的 light 分支。
   uE(() => { document.body.classList.toggle('light', theme === 'light'); }, [theme]);
+  uE(() => { setProdMenuOpen(false); }, [workspace]); // close product menu on tab change
   const [expiryId, setExpiryId] = uS('m');
   const expiries = productExpiries(P, live && live.expiries);
   const expiry = expiries.find((e) => e.id === expiryId) || expiries[0];
@@ -305,8 +377,12 @@ function Obsidian3() {
   // On phone/fold, Compare is the only desktop-exclusive workspace (it needs the
   // multi-card grid to be useful). IV Surface is now mobile-friendly so it stays.
   uE(() => {
-    if (vp.layout !== 'desk' && workspace === 'compare') setWorkspace('calc');
+    if (vp.layout !== 'desk' && (workspace === 'compare' || workspace === 'chart')) setWorkspace('calc');
   }, [vp.layout]);
+  // Desktop: Pricer/Compare tabs removed — redirect stale state to Chain.
+  uE(() => {
+    if (vp.layout === 'desk' && (workspace === 'pricer' || workspace === 'compare')) setWorkspace('chain');
+  }, [vp.layout, workspace]);
 
   // P&L numbers（點數 × 商品乘數）。Valued at the same daysRem as PayoffChart
   // so the displayed number always matches the curve.
@@ -410,29 +486,13 @@ function Obsidian3() {
         <WorkspaceTabs value={workspace} onChange={setWorkspace} accent={accent} light={light} />
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
-          <Glass2 tone="chip" radius={999} padding="8px 12px" style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
-            <select
-              value={productId}
-              onChange={(e) => switchProduct(e.target.value)}
-              title={P.name}
-              className="lt-prodsel"
-              style={{
-                fontSize: 10, fontWeight: 700, padding: '2px 5px', borderRadius: 4,
-                background: 'rgba(255,255,255,0.06)', color: light ? '#1c2433' : '#e8eaef',
-                border: 'none', outline: 'none', cursor: 'pointer', fontFamily: 'inherit',
-              }}>
-              {window.PRODUCTS.map((p) => <option key={p.id} value={p.id}>{p.code}</option>)}
-            </select>
-            <span className="tnum" style={{ fontSize: 13, fontWeight: 600 }}>{spot.toLocaleString()}</span>
-            {P.ib ? (
-              <span className={`mono ${live ? '' : 'lt-mock'}`} title={live ? 'IB 已連線（延遲/即時依訂閱）' : '沒偵測到本機 IB proxy — mock 數據'} style={{
-                fontSize: 9, fontWeight: 700, letterSpacing: 0.5,
-                color: live ? '#4dd0c8' : 'rgba(255,255,255,0.45)',
-              }}>{live ? '● IB' : '○ MOCK'}</span>
-            ) : (
-              <span className="tnum" style={{ fontSize: 11, color: 'oklch(0.78 0.14 145)' }}>+0.84%</span>
-            )}
-          </Glass2>
+          <DataQualityPill quality={quality} />
+          <ProductDropdown
+            productId={productId} P={P} spot={spot} live={live}
+            open={prodMenuOpen} setOpen={setProdMenuOpen}
+            onPick={(id) => { switchProduct(id); setProdMenuOpen(false); }}
+            light={light}
+          />
           <SettlementCountdown dte={dte} note={P.settleNote} />
           <Glass2 tone="chip" radius={999} padding="8px 13px" style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
             onClick={() => setTheme(light ? 'dark' : 'light')} title="切換 亮色 / 深色">
@@ -455,8 +515,7 @@ function Obsidian3() {
       {/* WORKSPACE BODY */}
       {workspace === 'calc' && (
         <CalcWorkspace
-          P={P} bars={bars} barsLive={!!liveBars} theme={theme} light={light}
-          barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
+          P={P} theme={theme} light={light}
           legs={legs} setLegs={setLegs}
           spot={spot} setSpot={setSpot}
           spotMin={spotMin} spotMax={spotMax}
@@ -473,23 +532,33 @@ function Obsidian3() {
       )}
       {workspace === 'chain' && (
         <ChainWorkspace
-          P={P} rows={chainRows} theme={theme} light={light}
-          spot={spot} expiry={expiry}
+          P={P} rows={chainRows} theme={theme}
+          spot={spot} setSpot={setSpot} expiry={expiry}
           onAddLeg={addLegFromChain}
           legs={legs} setLegs={setLegs}
-          D={D}
+          iv={iv} setIv={setIv} dte={dte}
+          pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss}
+          popValue={popValue} portfolioG={portfolioG}
+          accent={accent} t={t} D={D}
           quality={quality}
         />
       )}
-      {workspace === 'pricer' && (
-        <PricerWorkspace D={D} P={P} spot={spot} iv={iv} dte={dte} accent={accent} theme={theme} />
+      {workspace === 'chart' && (
+        <ChartWorkspace
+          P={P} bars={bars} barsLive={!!liveBars} theme={theme} light={light}
+          barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
+          D={D}
+        />
       )}
       {workspace === 'iv' && (
-        <IVWorkspace D={D} P={P} expiry={expiry} expiries={expiries} light={light} />
+        <IVWorkspace D={D} P={P} spot={spot} iv={iv} expiry={expiry} expiries={expiries} light={light} theme={theme} />
       )}
-      {workspace === 'compare' && (
-        <CompareWorkspace D={D} P={P} spot={spot} iv={iv} dte={dte} theme={theme} light={light} />
-      )}
+
+      {/* Global collapsible What-if rail — on every tab */}
+      <WhatIfRail
+        P={P} spot={spot} setSpot={setSpot} spotMin={spotMin} spotMax={spotMax}
+        iv={iv} setIv={setIv} open={whatIfOpen} setOpen={setWhatIfOpen} theme={theme} light={light}
+      />
 
       {/* Tweaks panel */}
       <TweaksPanel title="Tweaks">
@@ -521,7 +590,7 @@ function Obsidian3() {
 }
 
 // ───────────────────────────────────────────────── CALCULATOR WORKSPACE
-function CalcWorkspace({ P, bars, barsLive, theme = 'dark', barPeriodId, setBarPeriodId, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
+function CalcWorkspace({ P, theme = 'dark', legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
   const light = theme === 'light';
   const hoverInfo = uM(() => {
     if (!hover) return null;
@@ -599,6 +668,12 @@ function CalcWorkspace({ P, bars, barsLive, theme = 'dark', barPeriodId, setBarP
           <Eyebrow>Saved scenarios</Eyebrow>
           <ScenarioTimeline theme={theme} items={SAVED_SCENARIOS} current={SAVED_SCENARIOS.length - 1} />
         </Glass2>
+
+        {/* Single-contract pricer — folded in from the removed Pricer tab. */}
+        <Glass2 tone="panel" padding={D.panelPad}>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{P.model === 'b76' ? 'Black-76' : 'Black-Scholes'}</span>}>Option Pricer</Eyebrow>
+          <OptionPricer key={P.id} product={P} spot={spot} iv={iv} dte={dte} theme={theme} accent={accent} />
+        </Glass2>
       </div>
 
       {/* Right column */}
@@ -638,7 +713,6 @@ function CalcWorkspace({ P, bars, barsLive, theme = 'dark', barPeriodId, setBarP
         <Glass2 tone="chip" padding={4} style={{ display: 'flex', gap: 2, overflowX: 'auto', scrollbarWidth: 'none' }}>
           {[
             { id: 'payoff', label: 'Payoff' },
-            { id: 'kbar', label: 'K線' },
             { id: 'cross', label: 'P&L' },
             { id: 'greeks', label: 'Greeks' },
             { id: 'dist', label: 'Dist' },
@@ -672,12 +746,6 @@ function CalcWorkspace({ P, bars, barsLive, theme = 'dark', barPeriodId, setBarP
               <input type="range" min="0" max="1" step="0.01" value={sliceFrac} onChange={(e) => setSliceFrac(parseFloat(e.target.value))}
                 style={{ width: '100%', accentColor: accent }} />
             </div>
-          </>)}
-          {view === 'kbar' && (<>
-            <Eyebrow right={<KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} />}>
-              K線 · {P.code} <span style={{ color: 'rgba(255,255,255,0.5)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· {barsLive ? '近月期貨 · IB' : 'mock'}</span>
-            </Eyebrow>
-            <KBarChart bars={bars} theme={theme} height={150} width={304} />
           </>)}
           {view === 'cross' && (<>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{dte}d</span>}>P&L vs spot</Eyebrow>
@@ -723,18 +791,7 @@ function CalcWorkspace({ P, bars, barsLive, theme = 'dark', barPeriodId, setBarP
         </Glass2>
       </div>
 
-      {/* Bottom command rail */}
-      <div style={{
-        position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)',
-        width: 'min(720px, calc(100vw - 720px))', zIndex: 5,
-      }}>
-        <Glass2 tone="raised" padding="16px 22px">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28 }}>
-            <Slider label="Spot" value={spot} min={spotMin} max={spotMax} step={P.spotStep} onChange={setSpot} format={(v) => v.toLocaleString()} theme={theme} />
-            <Slider label="IV" value={iv} min={P.ivMin} max={P.ivMax} step={0.5} suffix="%" onChange={setIv} theme={theme} />
-          </div>
-        </Glass2>
-      </div>
+      {/* Spot / IV live in the global What-if rail (shell) now. */}
 
       {/* Surface legend */}
       <div style={{
@@ -759,80 +816,260 @@ function CalcWorkspace({ P, bars, barsLive, theme = 'dark', barPeriodId, setBarP
 }
 
 // ───────────────────────────────────────────────── CHAIN WORKSPACE
-function ChainWorkspace({ P, rows, theme = 'dark', spot, expiry, onAddLeg, legs, setLegs, D, quality }) {
-  const light = theme === 'light';
+// P&L what-if card (design ⑤) — compact hero + POP gauge + max profit/loss tiles.
+function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, theme, light, D }) {
+  const profit = pnlNTD >= 0;
+  const heroColor = profit
+    ? (light ? 'oklch(0.60 0.13 75)' : 'oklch(0.84 0.14 75)')
+    : (light ? 'oklch(0.50 0.10 220)' : 'oklch(0.74 0.12 220)');
+  const tile = { padding: '7px 10px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' };
   return (
-    <div style={{ position: 'absolute', top: 110, left: 24, right: 24, bottom: 24, zIndex: 5, display: 'flex', gap: D.gap }}>
-      <div style={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
-        <Glass2 tone="panel" padding={D.panelPad} style={{ maxHeight: '100%', overflow: 'auto' }}>
-          <Eyebrow right={
-            <span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>
-          }>Option Chain · {P.code}</Eyebrow>
-          <OptionChain spot={spot} contract={expiry.type} dte={expiry.dte} product={P} rows={rows} onAddLeg={onAddLeg} theme={theme} />
-        </Glass2>
+    <Glass2 tone="raised" padding="14px 14px 12px" radius={16}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+        <div style={{ minWidth: 0 }}>
+          <Eyebrow>P&L what-if · {P.code}</Eyebrow>
+          <div className="tnum" style={{ fontSize: 24, fontWeight: 600, letterSpacing: -0.4, lineHeight: 1.05, marginTop: 3, fontFamily: 'ui-monospace, SF Mono, monospace', color: heroColor }}>
+            {profit ? '+' : ''}{P.cur}{Math.abs(Math.round(pnlNTD)).toLocaleString()}
+          </div>
+          <div className="tnum" style={{ fontSize: 9, opacity: 0.5, marginTop: 3 }}>{pnlPts >= 0 ? '+' : ''}{pnlPts.toFixed(1)} pts {P.unitLabel}</div>
+        </div>
+        <div style={{ width: 74, flexShrink: 0 }}>
+          <POPGauge theme={theme} size={74} value={popValue} />
+          <div style={{ textAlign: 'center', fontSize: 7, opacity: 0.5, marginTop: 3, letterSpacing: 0.5, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>prob. of profit</div>
+        </div>
       </div>
-      <div style={{ width: 320, display: 'flex', flexDirection: 'column', gap: D.gap, maxHeight: '100%', overflow: 'auto', paddingBottom: 4 }}>
-        <Glass2 tone="panel" padding={D.panelPad}>
+      <div style={{ height: 1, background: light ? 'rgba(20,30,50,0.10)' : 'rgba(255,255,255,0.10)', margin: '10px 0 9px' }} />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <div className="lt-tile" style={tile}>
+          <div style={{ fontSize: 9, letterSpacing: 0.5, textTransform: 'uppercase', opacity: 0.6 }}>Max profit</div>
+          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'ui-monospace, Menlo, monospace', color: '#f0c068' }}>+{P.cur}{Math.round(maxProfit).toLocaleString()}</div>
+        </div>
+        <div className="lt-tile" style={tile}>
+          <div style={{ fontSize: 9, letterSpacing: 0.5, textTransform: 'uppercase', opacity: 0.6 }}>Max loss</div>
+          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'ui-monospace, Menlo, monospace', color: '#5fa3d4' }}>{P.cur}{Math.round(maxLoss).toLocaleString()}</div>
+        </div>
+      </div>
+    </Glass2>
+  );
+}
+
+// Chain-tab layout switcher (design ③): SIDE / WIDE / SPLIT.
+const CHAIN_LAYOUTS = {
+  a: { label: 'SIDE',  cols: 'minmax(460px,1fr) minmax(340px,392px)', areas: "'chain pnl' 'chain payoff' 'chain greeks' 'chain legs'" },
+  b: { label: 'WIDE',  cols: '1fr 1fr',            areas: "'chain chain' 'pnl payoff' 'greeks legs'" },
+  c: { label: 'SPLIT', cols: '1.1fr 1fr 1fr',      areas: "'chain chain chain' 'payoff pnl legs' 'greeks greeks greeks'" },
+};
+function LayoutToggle({ value, onChange, light }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <span style={{ fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.45, fontWeight: 600 }}>Layout</span>
+      {Object.keys(CHAIN_LAYOUTS).map((k) => {
+        const active = k === value;
+        return (
+          <button key={k} onClick={() => onChange(k)} style={{
+            fontSize: 9, fontWeight: 700, letterSpacing: 0.5, padding: '3px 10px', borderRadius: 999,
+            border: '1px solid ' + (light ? 'rgba(25,40,70,0.14)' : 'rgba(255,255,255,0.14)'),
+            background: active ? 'linear-gradient(150deg,oklch(0.66 0.16 250),oklch(0.55 0.18 240))' : 'transparent',
+            color: active ? '#fff' : (light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)'),
+            cursor: 'pointer', fontFamily: 'inherit',
+          }}>{CHAIN_LAYOUTS[k].label}</button>
+        );
+      })}
+    </div>
+  );
+}
+
+function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, onAddLeg, legs, setLegs,
+  iv, setIv, dte, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, portfolioG, accent, t, D, quality }) {
+  const light = theme === 'light';
+  const [layout, setLayout] = uS('a');
+  const lay = CHAIN_LAYOUTS[layout];
+  const credit = legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0);
+  const glassArea = (area, children, pad = D.panelPad) => (
+    <Glass2 tone="panel" padding={pad} style={{ gridArea: area, minWidth: 0 }}>{children}</Glass2>
+  );
+  return (
+    <div style={{ position: 'absolute', top: 110, left: 24, right: 24, bottom: 24, zIndex: 5, overflowY: 'auto', paddingBottom: 4 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+        <LayoutToggle value={layout} onChange={setLayout} light={light} />
+      </div>
+
+      <div style={{ display: 'grid', gap: D.gap, alignItems: 'start', gridTemplateColumns: lay.cols, gridTemplateAreas: lay.areas }}>
+        {/* chain */}
+        <Glass2 tone="panel" padding={D.panelPad} style={{ gridArea: 'chain', minWidth: 0 }}>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>}>Option Chain · {P.code}</Eyebrow>
+          <OptionChain spot={spot} contract={expiry.type} dte={expiry.dte} product={P} rows={rows} legs={legs} onAddLeg={onAddLeg} theme={theme} />
+        </Glass2>
+
+        {/* pnl what-if */}
+        <div style={{ gridArea: 'pnl', minWidth: 0 }}>
+          <WhatIfCard P={P} pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss} popValue={popValue} theme={theme} light={light} D={D} />
+        </div>
+
+        {/* payoff */}
+        {glassArea('payoff', (<>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>at expiry</span>}>
+            Payoff {t.showProbCone && <span style={{ color: '#a78bfa', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· 1σ/2σ cone</span>}
+          </Eyebrow>
+          <PayoffChart legs={legs} spot={spot} theme={theme} height={150} width={304} iv={iv} dte={dte} showCone={t.showProbCone} sliceFrac={1} rangePct={0.08} showKeyNumbers={true} model={P.model} r={P.r / 100} strikeStep={P.strikeStep} />
+        </>))}
+
+        {/* greeks */}
+        <div style={{ gridArea: 'greeks', minWidth: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 8 }}>
+          <GreekChip label="Delta · Δ" value={(portfolioG.delta >= 0 ? '+' : '') + portfolioG.delta.toFixed(2)} theme={theme} emphasis={portfolioG.delta >= 0 ? 'up' : 'down'} />
+          <GreekChip label="Gamma · Γ" value={portfolioG.gamma.toFixed(4)} theme={theme} />
+          <GreekChip label="Theta · Θ" value={(portfolioG.theta >= 0 ? '+' : '') + portfolioG.theta.toFixed(2)} theme={theme} emphasis={portfolioG.theta >= 0 ? 'up' : 'down'} />
+          <GreekChip label="Vega · V" value={(portfolioG.vega >= 0 ? '+' : '') + portfolioG.vega.toFixed(2)} theme={theme} emphasis={portfolioG.vega >= 0 ? 'up' : 'down'} />
+        </div>
+
+        {/* legs */}
+        {glassArea('legs', (<>
           <Eyebrow right={
-            <button style={miniBtn} onClick={() => setLegs([])}>clear</button>
-          }>Current legs · {legs.length}</Eyebrow>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 2 * P.strikeStep) / P.strikeStep) * P.strikeStep, iv, dte, P)])}>+ leg</button>
+              {legs.length > 0 && <button style={miniBtn} onClick={() => setLegs([])}>clear</button>}
+            </div>
+          }>Legs · {legs.length}</Eyebrow>
           {legs.length === 0 ? (
-            <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 11, opacity: 0.5 }}>Click any chain row to add a leg</div>
+            <div style={{ padding: '20px 0', textAlign: 'center', fontSize: 11, opacity: 0.5 }}>Click any chain row to add a leg</div>
           ) : (
             <LegEditor legs={legs} onChange={setLegs} theme={theme} />
           )}
-        </Glass2>
-        <Glass2 tone="raised" padding={D.panelPad}>
-          <Eyebrow right={<DataQualityPill quality={quality} />}>Net premium</Eyebrow>
-          <div className="tnum" style={{ fontSize: 28, fontWeight: 600, fontFamily: 'ui-monospace, SF Mono, monospace', letterSpacing: -0.4 }}>
-            {P.cur}{Math.round(legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0) * P.mult).toLocaleString()}
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, opacity: 0.6, marginTop: 8, fontFamily: 'ui-monospace, Menlo, monospace' }}>
+            <span>{credit >= 0 ? 'Net credit' : 'Net debit'}</span>
+            <span>{credit >= 0 ? '+' : ''}{P.cur}{Math.round(credit * P.mult).toLocaleString()}</span>
           </div>
-          <div style={{ fontSize: 11, opacity: 0.55, marginTop: 6 }}>
-            {legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0) >= 0 ? 'credit received' : 'debit paid'}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 10 }}>
+            {[
+              { label: '−5% & IV+15%', spot: -5, iv: 15 },
+              { label: '−10% crash', spot: -10, iv: 21 },
+            ].map((s, i) => (
+              <button key={i} onClick={() => {
+                setSpot(Math.round(P.defaultSpot * (1 + s.spot / 100) / P.spotStep) * P.spotStep);
+                setIv(Math.max(P.ivMin, Math.min(P.ivMax, P.defaultIv + s.iv)));
+              }} style={{
+                padding: '8px 6px', borderRadius: 8, fontSize: 10, fontWeight: 600,
+                border: '1px solid rgba(128,140,170,0.28)', cursor: 'pointer',
+                background: 'rgba(128,140,170,0.12)', color: 'inherit', fontFamily: 'inherit',
+              }}>{s.label}</button>
+            ))}
           </div>
-        </Glass2>
+        </>))}
+      </div>
+
+      {/* OI Profile + Max Pain — kept, below the grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: D.gap, marginTop: D.gap }}>
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>}>OI profile</Eyebrow>
           <OIProfile spot={spot} contract={expiry.type} rows={rows} theme={theme} maxRows={11} />
         </Glass2>
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>結算指標</span>}>Max pain</Eyebrow>
-          <MaxPain spot={spot} contract={expiry.type} rows={rows} ntdMult={P.mult} cur={P.cur} theme={theme} height={150} width={280} />
+          <MaxPain spot={spot} contract={expiry.type} rows={rows} ntdMult={P.mult} cur={P.cur} theme={theme} height={150} width={520} />
         </Glass2>
       </div>
     </div>
   );
 }
 
-// ───────────────────────────────────────────────── PRICER WORKSPACE
-function PricerWorkspace({ D, P, spot, iv, dte, accent, theme = 'dark' }) {
+// ───────────────────────────────────────────────── CHART WORKSPACE
+// Top-level Chart tab (from the design): full-width candles + MA + RSI.
+// Desktop only — mobile keeps the K線 sub-tab inside Calc.
+function ChartWorkspace({ P, bars, barsLive, theme, light, barPeriodId, setBarPeriodId, D }) {
+  const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
   return (
-    <div style={{ position: 'absolute', top: 110, left: 0, right: 0, bottom: 0, zIndex: 5, padding: '0 24px 24px', overflowY: 'auto' }}>
-      <div style={{ maxWidth: 540, margin: '0 auto' }}>
-        <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{P.model === 'b76' ? 'Black-76 · 期貨選擇權' : 'Black-Scholes · 歐式'}</span>}>
-            Option Pricer <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· 單張合約理論定價</span>
-          </Eyebrow>
-          <OptionPricer key={P.id} product={P} spot={spot} iv={iv} dte={dte} theme={theme} accent={accent} />
-        </Glass2>
-      </div>
+    <div style={{ position: 'absolute', top: 110, left: 24, right: 24, bottom: 24, zIndex: 5, overflowY: 'auto' }}>
+      <Glass2 tone="panel" padding={D.panelPad}>
+        <Eyebrow right={<KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} light={light} />}>
+          Chart · {P.code}
+          <span style={{ color: light ? 'rgba(20,30,50,0.5)' : 'rgba(255,255,255,0.5)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>
+            · {barsLive ? '近月期貨 · IB' : 'mock'}
+          </span>
+        </Eyebrow>
+        <PriceChart
+          bars={bars} theme={theme} code={P.code}
+          periodLabel={per.label === '日' ? 'Daily' : per.label}
+          sourceLabel={barsLive
+            ? '● IB feed — front-month futures via server/ proxy (TWS / Gateway)'
+            : '○ MOCK OHLC — random walk; connect the IB proxy (server/) for real bars'}
+        />
+      </Glass2>
     </div>
   );
 }
 
 // ───────────────────────────────────────────────── IV SURFACE WORKSPACE
-function IVWorkspace({ D, P, expiry, expiries = TXO_EXPIRIES, light = false, theme = 'dark' }) {
+function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, light = false, theme = 'dark' }) {
   const ref = uR(null);
+  const [ivView, setIvView] = uS('3d'); // '3d' | 'heat'
   uE(() => {
-    if (!ref.current || !window.IVSurface3D) return;
+    if (ivView !== '3d' || !ref.current || !window.IVSurface3D) return;
     const inst = window.IVSurface3D.make({ container: ref.current });
     return () => inst && inst.destroy && inst.destroy();
-  }, []);
+  }, [ivView]);
+
+  // Heatmap: IV across expiry (rows) × strike (cols). Every 2nd strike, 10 cols.
+  const heat = uM(() => {
+    const atmIv = iv || (P ? P.defaultIv : 24);
+    const cols = (e) => (window.genChain
+      ? window.genChain({ spot, contract: e.type, dte: e.dte, product: P }).filter((_, i) => i % 2 === 0).slice(0, 10)
+      : []);
+    const header = cols(expiry).map((r) => window.fmtStrike(r.strike, (P && P.strikeStep) || 50));
+    const rows = expiries.map((e) => ({
+      exp: e.label,
+      cells: cols(e).map((r) => {
+        const a = Math.max(0.05, Math.min(0.6, ((r.call.iv - (atmIv - 1.8)) / 4.5) * 0.55));
+        return { v: r.call.iv.toFixed(1), bg: `rgba(240,192,104,${a.toFixed(2)})` };
+      }),
+    }));
+    return { header, rows };
+  }, [spot, iv, expiries, expiry, P]);
+
+  const viewChip = (id, label) => {
+    const active = ivView === id;
+    return (
+      <button onClick={() => setIvView(id)} style={{
+        fontSize: 9, fontWeight: 700, letterSpacing: 0.5, padding: '3px 10px', borderRadius: 999,
+        border: '1px solid ' + (light ? 'rgba(25,40,70,0.14)' : 'rgba(255,255,255,0.14)'),
+        background: active ? 'linear-gradient(150deg,oklch(0.66 0.16 250),oklch(0.55 0.18 240))' : 'transparent',
+        color: active ? '#fff' : (light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)'),
+        cursor: 'pointer', fontFamily: 'inherit',
+      }}>{label}</button>
+    );
+  };
+  const cellBorder = light ? 'rgba(25,40,70,0.08)' : 'rgba(255,255,255,0.06)';
+
   return (
     <div style={{ position: 'absolute', top: 110, left: 24, right: 24, bottom: 24, zIndex: 5, display: 'flex', gap: D.gap }}>
       <Glass2 tone="panel" padding={D.panelPad} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>strike × DTE × IV</span>}>IV Surface</Eyebrow>
-        <div ref={ref} style={{ flex: 1, minHeight: 360, borderRadius: 14, overflow: 'hidden', background: 'radial-gradient(ellipse at 30% 30%, rgba(167,139,250,0.10), transparent 60%)' }} />
+        <Eyebrow right={<span style={{ display: 'inline-flex', gap: 4 }}>{viewChip('3d', '3D')}{viewChip('heat', 'HEATMAP')}</span>}>IV Surface · {P.code}</Eyebrow>
+        {ivView === '3d' ? (
+          <div ref={ref} style={{ flex: 1, minHeight: 360, borderRadius: 14, overflow: 'hidden', background: 'radial-gradient(ellipse at 30% 30%, rgba(167,139,250,0.10), transparent 60%)' }} />
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <div style={{ minWidth: 640, fontFamily: 'ui-monospace, SF Mono, monospace', fontVariantNumeric: 'tabular-nums', fontSize: 11 }}>
+              <div style={{ display: 'flex' }}>
+                <div style={{ width: 64, flexShrink: 0, fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600, padding: '8px 10px' }}>EXP</div>
+                {heat.header.map((h, i) => (
+                  <div key={i} style={{ flex: 1, textAlign: 'center', fontSize: 9, letterSpacing: 0.4, opacity: 0.5, fontWeight: 600, padding: '8px 0' }}>{h}</div>
+                ))}
+              </div>
+              {heat.rows.map((row) => (
+                <div key={row.exp} style={{ display: 'flex' }}>
+                  <div style={{ width: 64, flexShrink: 0, padding: '9px 10px', borderTop: `1px solid ${cellBorder}`, fontWeight: 600 }}>{row.exp}</div>
+                  {row.cells.map((c, i) => (
+                    <div key={i} style={{ flex: 1, textAlign: 'center', padding: '9px 0', borderTop: `1px solid ${cellBorder}`, background: c.bg }}>{c.v}</div>
+                  ))}
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: 12, fontSize: 10, opacity: 0.5, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>low</span>
+              <span style={{ display: 'inline-block', width: 120, height: 8, borderRadius: 4, background: 'linear-gradient(90deg,rgba(240,192,104,0.06),rgba(240,192,104,0.6))' }} />
+              <span>high · rows = expiry · cols = strike · value = IV %</span>
+            </div>
+          </div>
+        )}
       </Glass2>
       <div style={{ width: 280, display: 'flex', flexDirection: 'column', gap: D.gap }}>
         <Glass2 tone="panel" padding={D.panelPad}>
@@ -858,7 +1095,9 @@ function IVWorkspace({ D, P, expiry, expiries = TXO_EXPIRIES, light = false, the
         </Glass2>
         <Glass2 tone="chip" padding={D.panelPad}>
           <div style={{ fontSize: 11, opacity: 0.65, lineHeight: 1.55 }}>
-            <strong style={{ color: '#fff' }}>Drag</strong> to orbit · <strong style={{ color: '#fff' }}>scroll</strong> to zoom. Surface shows IV across all listed strikes & expiries — lower-left = short-dated puts (highest IV); upper-right = long-dated calls.
+            {ivView === '3d'
+              ? <><strong>Drag</strong> to orbit · <strong>scroll</strong> to zoom. Surface shows IV across all listed strikes & expiries — lower-left = short-dated puts (highest IV); upper-right = long-dated calls.</>
+              : <>Heatmap: each cell is the call IV at that strike (columns) and expiry (rows). Warmer = higher IV. Mock IV for expiries other than the loaded live chain.</>}
           </div>
         </Glass2>
       </div>
@@ -905,6 +1144,9 @@ const STRATEGY_LIBRARY = [
     build: (s, iv, dte, P) => [_mkLeg('long','put',s,s,iv,dte,P)] },
 ];
 
+// Shelved: the Compare tab was removed per owner decision (2026-07-10).
+// Kept intact — re-enable by adding a 'compare' entry back to WorkspaceTabs and
+// its route. STRATEGY_LIBRARY above is still used by the mobile strategy chips.
 function CompareWorkspace({ D, P, spot, iv, dte, theme = 'dark' }) {
   const [picked, setPicked] = uS(['bull-call', 'iron-condor', 'straddle']);
   const [showPicker, setShowPicker] = uS(false);

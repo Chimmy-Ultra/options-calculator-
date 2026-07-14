@@ -1,0 +1,1023 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  html,body { margin:0; padding:0; min-height:100vh; }
+  body { color:#e8eaef; font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Inter","PingFang TC",system-ui,sans-serif;
+    background:
+      radial-gradient(circle at 1px 1px, rgba(255,255,255,.045) 1px, transparent 1.5px),
+      radial-gradient(ellipse 60% 70% at 18% 30%, oklch(0.34 0.10 250) 0%, transparent 60%),
+      radial-gradient(ellipse 50% 50% at 82% 70%, oklch(0.30 0.08 30) 0%, transparent 60%),
+      linear-gradient(180deg,#0a0d14,#11151f);
+    background-size: 32px 32px, auto, auto, auto; background-attachment: fixed; }
+  a { color:oklch(0.66 0.16 250); text-decoration:none; }
+  a:hover { color:#8fbce8; }
+  button { font-family:inherit; cursor:pointer; }
+
+  /* ── 字體樣式（Tweaks 可切換）── */
+  body.f-round { font-family:ui-rounded,"SF Pro Rounded","Varela Round","Yuanti TC","Hiragino Maru Gothic ProN",sans-serif; }
+  body.f-serif { font-family:"New York",Georgia,"Songti TC","Noto Serif TC",serif; }
+
+  /* ── 日間模式 overrides（僅主題覆蓋，基底樣式皆 inline）── */
+  body.light { color:#1c2433;
+    background:
+      radial-gradient(circle at 1px 1px, rgba(20,40,80,.055) 1px, transparent 1.5px),
+      radial-gradient(ellipse 60% 70% at 18% 30%, oklch(0.90 0.045 250) 0%, transparent 60%),
+      radial-gradient(ellipse 50% 50% at 82% 70%, oklch(0.93 0.035 60) 0%, transparent 60%),
+      linear-gradient(180deg,#eef1f6,#e4e9f2);
+    background-size: 32px 32px, auto, auto, auto; background-attachment: fixed; }
+  body.light .gl { background:linear-gradient(155deg,rgba(255,255,255,.72),rgba(244,247,252,.55)) !important;
+    border-color:rgba(25,40,70,.12) !important;
+    box-shadow:0 1px 0 rgba(255,255,255,.85) inset,0 20px 40px -20px rgba(30,45,80,.22),0 1px 2px rgba(30,45,80,.08) !important; }
+  body.light .glr { background:linear-gradient(155deg,rgba(255,255,255,.88),rgba(238,242,250,.72)) !important;
+    border-color:rgba(25,40,70,.16) !important;
+    box-shadow:0 1px 0 rgba(255,255,255,.9) inset,0 28px 56px -24px rgba(30,45,80,.3) !important; }
+  body.light .cap { background:linear-gradient(150deg,rgba(255,255,255,.92),rgba(240,244,250,.72)) !important; border-color:rgba(25,40,70,.14) !important; }
+  body.light .pt { background:rgba(20,40,80,.08) !important; }
+  body.light .hd { color:rgba(20,30,50,.55) !important; }
+  body.light .ch { color:rgba(20,30,50,.55) !important; border-color:rgba(25,40,70,.14) !important; background:rgba(255,255,255,.55) !important; }
+  body.light .chon { color:#1c2433 !important; border-color:rgba(20,40,80,.3) !important; background:rgba(20,40,80,.10) !important; }
+  body.light .goldch { color:#8a6410 !important; }
+  body.light .cc { border-top-color:rgba(25,40,70,.09) !important; }
+  body.light .dkbg { background:rgba(255,255,255,.55) !important; border-color:rgba(25,40,70,.10) !important; }
+  body.light .tile { background:rgba(20,40,80,.05) !important; border-color:rgba(25,40,70,.12) !important; }
+  body.light .btn2 { background:rgba(20,40,80,.05) !important; border-color:rgba(25,40,70,.14) !important; color:#1c2433 !important; }
+  body.light .stx { color:rgba(20,30,50,.85) !important; }
+  body.light .mockc { color:rgba(20,30,50,.45) !important; }
+  body.light .ib { color:#0d8f86 !important; }
+  body.light .au { color:#a67615 !important; }
+  body.light .bl { color:#33719f !important; }
+  body.light .trk { background:rgba(20,30,50,.14) !important; }
+  body.light .fil { background:#7a869c !important; }
+  body.light svg .svgtrk { stroke:rgba(20,30,50,.14) !important; }
+  body.light svg .pline { stroke:rgba(20,30,50,.6) !important; }
+  body.light svg .beline { stroke:#7c5ce0 !important; }
+  body.light svg .betxt { fill:#7c5ce0 !important; }
+  body.light svg .ivstroke { stroke:rgba(20,30,50,.3) !important; }
+  body.light .spotline { background:rgba(20,30,50,.4) !important; }
+  body.light .spotpill { background:#1c2433 !important; border-color:rgba(20,30,50,.5) !important; }
+</style>
+</helmet>
+
+<div style="min-height:auto;padding:20px 28px 16px;display:flex;flex-direction:column;gap:16px;box-sizing:border-box">
+
+  <!-- ═══ Top bar ═══ -->
+  <div data-screen-label="頂欄" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+    <div style="font-size:13px;font-weight:600;letter-spacing:-.2px;margin-right:4px">Options Lab</div>
+
+    <div style="position:relative">
+      <button onClick="{{toggleProdMenu}}" class="cap" style="display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;background:linear-gradient(150deg,rgba(255,255,255,.10),rgba(255,255,255,.04));border:1px solid oklch(0.66 0.16 250 / .55);box-shadow:0 1px 0 rgba(255,255,255,.10) inset;color:inherit">
+        <span class="pt" style="font-size:10px;font-weight:700;padding:2px 5px;border-radius:4px;background:rgba(255,255,255,.06)">{{prodTag}} ▾</span>
+        <span style="font-size:13px;font-weight:600;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-variant-numeric:tabular-nums">{{prodSpotTxt}}</span>
+        <span style="font-size:11px;color:{{prodChgCol}};font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums">{{prodChg}}</span>
+      </button>
+      <sc-if value="{{prodMenuOpen}}">
+        <div class="glr" style="position:absolute;top:calc(100% + 8px);left:0;z-index:30;width:250px;padding:6px;border-radius:14px;backdrop-filter:blur(36px) saturate(160%);-webkit-backdrop-filter:blur(36px) saturate(160%);background:linear-gradient(155deg,rgba(80,90,115,.85),rgba(36,42,58,.9));border:1px solid rgba(255,255,255,.14);box-shadow:0 1px 0 rgba(255,255,255,.18) inset,0 28px 56px -24px rgba(0,0,0,.8);display:flex;flex-direction:column;gap:2px">
+          <sc-for list="{{prodList}}" as="p" hint-placeholder-count="4">
+            <button onClick="{{p.pick}}" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:9px;border:none;background:{{p.bg}};color:inherit;text-align:left">
+              <span class="pt" style="font-size:10px;font-weight:700;padding:2px 5px;border-radius:4px;background:rgba(255,255,255,.08);min-width:26px;text-align:center">{{p.tag}}</span>
+              <span style="font-size:11px;opacity:.85;flex:1">{{p.name}}</span>
+              <span style="font-size:11px;font-weight:600;font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums;opacity:.8">{{p.spotTxt}}</span>
+            </button>
+          </sc-for>
+        </div>
+      </sc-if>
+    </div>
+
+    <div class="cap" style="display:inline-flex;gap:2px;padding:4px;border-radius:999px;background:linear-gradient(150deg,rgba(255,255,255,.10),rgba(255,255,255,.04));border:1px solid rgba(255,255,255,.10);margin:0 auto">
+      <button onClick="{{goChain}}" style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:7px 14px;border-radius:999px;border:none;background:{{chainBg}};color:{{chainCol}};box-shadow:{{chainSh}}">☷ Chain</button>
+      <button onClick="{{goChart}}" style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:7px 14px;border-radius:999px;border:none;background:{{chartBg}};color:{{chartCol}};box-shadow:{{chartSh}}">☵ Chart</button>
+      <button onClick="{{goCalc}}" style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:7px 14px;border-radius:999px;border:none;background:{{calcBg}};color:{{calcCol}};box-shadow:{{calcSh}}">◈ Calculator</button>
+      <button onClick="{{goIv}}" style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:7px 14px;border-radius:999px;border:none;background:{{ivBg}};color:{{ivCol}};box-shadow:{{ivSh}}">〜 IV Surface</button>
+    </div>
+
+    <span class="cap" style="display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:999px;font-size:10px;font-family:ui-monospace,Menlo,monospace;background:rgba(77,208,200,.10);border:1px solid rgba(77,208,200,.30)">
+      <i style="width:7px;height:7px;border-radius:4px;background:#4dd0c8;box-shadow:0 0 6px #4dd0c8;display:inline-block"></i>
+      <span style="opacity:.8">2/2 liquid</span>
+    </span>
+
+    <span class="cap" style="display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:10px;background:linear-gradient(150deg,rgba(255,255,255,.10),rgba(255,255,255,.04));border:1px solid rgba(255,255,255,.10)">
+      <i style="width:6px;height:6px;border-radius:3px;background:#f0c068;box-shadow:0 0 8px #f0c068;display:inline-block"></i>
+      <span style="font-size:10px;letter-spacing:.6px;text-transform:uppercase;opacity:.6;font-weight:600">Settle</span>
+      <span style="font-size:12px;font-weight:600;font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums">{{settleLab}}</span>
+    </span>
+
+    <button onClick="{{toggleTheme}}" class="cap btn2" title="Toggle light / dark mode" style="display:inline-flex;align-items:center;gap:6px;padding:8px 13px;border-radius:999px;background:linear-gradient(150deg,rgba(255,255,255,.10),rgba(255,255,255,.04));border:1px solid rgba(255,255,255,.10);color:#e8eaef;font-size:12px;font-weight:600">{{themeIcon}} {{themeLab}}</button>
+  </div>
+
+  <!-- ═══ Chain tab ═══ -->
+  <sc-if value="{{isChain}}" hint-placeholder-val="{{ true }}">
+  <div style="display:flex;justify-content:flex-end;align-items:center;gap:6px">
+    <span style="font-size:9px;letter-spacing:.6px;text-transform:uppercase;opacity:.45;font-weight:600">Layout</span>
+    <button onClick="{{setLayA}}" style="font-size:9px;font-weight:700;letter-spacing:.5px;padding:3px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:{{layABg}};color:{{layACol}}">SIDE</button>
+    <button onClick="{{setLayB}}" style="font-size:9px;font-weight:700;letter-spacing:.5px;padding:3px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:{{layBBg}};color:{{layBCol}}">WIDE</button>
+    <button onClick="{{setLayC}}" style="font-size:9px;font-weight:700;letter-spacing:.5px;padding:3px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:{{layCBg}};color:{{layCCol}}">SPLIT</button>
+  </div>
+
+  <div data-screen-label="Chain" style="display:grid;gap:18px;align-items:start;grid-template-columns:{{layCols}};grid-template-areas:{{layAreas}}">
+
+    <!-- chain block -->
+    <div style="grid-area:chain;min-width:0;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="ch" style="padding:6px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02);color:rgba(255,255,255,.55);font-size:11px;font-weight:600;display:inline-flex;flex-direction:column;align-items:center;gap:1px;line-height:1.1;min-width:52px"><span>W1</span><small style="font-size:9px;opacity:.75;font-family:ui-monospace,Menlo,monospace;font-weight:400">7/14</small></button>
+        <button class="chon" style="padding:6px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.10);color:#fff;font-size:11px;font-weight:600;display:inline-flex;flex-direction:column;align-items:center;gap:1px;line-height:1.1;min-width:52px"><span>F1</span><small style="font-size:9px;opacity:.75;font-family:ui-monospace,Menlo,monospace;font-weight:400">7/21</small></button>
+        <button class="goldch" style="position:relative;padding:6px 11px;border-radius:8px;border:1px solid #f0c068;background:rgba(240,192,104,.16);color:#f7d394;font-size:11px;font-weight:600;display:inline-flex;flex-direction:column;align-items:center;gap:1px;line-height:1.1;min-width:52px"><span>M</span><small style="font-size:9px;opacity:.75;font-family:ui-monospace,Menlo,monospace;font-weight:400">8/19</small><span style="position:absolute;top:-3px;right:-3px;width:6px;height:6px;border-radius:3px;background:#f0c068;box-shadow:0 0 6px rgba(240,192,104,.8)"></span></button>
+        <button class="ch" style="padding:6px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02);color:rgba(255,255,255,.55);font-size:11px;font-weight:600;display:inline-flex;flex-direction:column;align-items:center;gap:1px;line-height:1.1;min-width:52px"><span>W3</span><small style="font-size:9px;opacity:.75;font-family:ui-monospace,Menlo,monospace;font-weight:400">7/28</small></button>
+        <button class="ch" style="padding:6px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02);color:rgba(255,255,255,.55);font-size:11px;font-weight:600;display:inline-flex;flex-direction:column;align-items:center;gap:1px;line-height:1.1;min-width:52px"><span>SEP</span><small style="font-size:9px;opacity:.75;font-family:ui-monospace,Menlo,monospace;font-weight:400">9/16</small></button>
+        <span style="margin-left:auto;font-size:10px;opacity:.5;font-family:ui-monospace,Menlo,monospace">{{multLab}}</span>
+      </div>
+
+      <div class="gl" style="border-radius:18px;padding:18px;backdrop-filter:blur(36px) saturate(160%);-webkit-backdrop-filter:blur(36px) saturate(160%);background:linear-gradient(155deg,rgba(60,68,88,.42) 0%,rgba(28,34,48,.32) 60%,rgba(18,22,32,.28) 100%);border:1px solid rgba(255,255,255,.08);box-shadow:0 1px 0 rgba(255,255,255,.10) inset,0 -1px 0 rgba(0,0,0,.30) inset,0 20px 40px -20px rgba(0,0,0,.55)">
+        <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:11px;opacity:.85;padding:0 4px 10px">
+          <span><b style="color:#ef5350">CALLS</b> <span style="opacity:.4">|</span> <b style="color:#26a69a">PUTS</b> <span style="opacity:.55">· click any row to add leg</span></span>
+          <span style="opacity:.5;font-family:ui-monospace,Menlo,monospace;font-size:10px">F1 · 7/21 · {{dteLab}}</span>
+        </div>
+
+        <div class="dkbg" style="overflow-x:auto;border-radius:12px;border:1px solid rgba(255,255,255,.06);background:rgba(20,24,34,.4)">
+        <div style="position:relative;display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,.75fr) minmax(0,.6fr) minmax(0,.65fr) minmax(0,1.5fr) 84px minmax(0,1.5fr) minmax(0,.65fr) minmax(0,.6fr) minmax(0,.75fr) minmax(0,.8fr);min-width:900px;border-radius:12px;overflow:hidden;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-variant-numeric:tabular-nums;font-size:12px">
+
+          <div class="hd" style="font-size:9px;letter-spacing:.6px;text-transform:uppercase;color:rgba(255,255,255,.45);font-weight:600;padding:8px 10px;text-align:right">OI</div><div class="hd" style="font-size:9px;letter-spacing:.6px;text-transform:uppercase;color:rgba(255,255,255,.45);font-weight:600;padding:8px 10px;text-align:right">VOL</div><div class="hd" style="font-size:9px;letter-spacing:.6px;text-transform:uppercase;color:rgba(255,255,255,.45);font-weight:600;padding:8px 6px;text-align:right">Δ</div><div class="hd" style="font-size:9px;letter-spacing:.6px;text-transform:uppercase;color:rgba(255,255,255,.45);font-weight:600;padding:8px 8px;text-align:right">IV</div><div class="hd" style="font-size:9px;letter-spacing:.6px;text-transform:uppercase;color:rgba(255,255,255,.45);font-weight:600;padding:8px 10px;text-align:right">BID/ASK</div><div class="hd" style="font-size:9px;letter-spacing:.6px;text-transform:uppercase;color:rgba(255,255,255,.45);font-weight:600;padding:8px 0;text-align:center">STRIKE</div><div class="hd" style="font-size:9px;letter-spacing:.6px;text-transform:uppercase;color:rgba(255,255,255,.45);font-weight:600;padding:8px 10px;text-align:left">BID/ASK</div><div class="hd" style="font-size:9px;letter-spacing:.6px;text-transform:uppercase;color:rgba(255,255,255,.45);font-weight:600;padding:8px 8px;text-align:left">IV</div><div class="hd" style="font-size:9px;letter-spacing:.6px;text-transform:uppercase;color:rgba(255,255,255,.45);font-weight:600;padding:8px 6px;text-align:left">Δ</div><div class="hd" style="font-size:9px;letter-spacing:.6px;text-transform:uppercase;color:rgba(255,255,255,.45);font-weight:600;padding:8px 10px;text-align:left">VOL</div><div class="hd" style="font-size:9px;letter-spacing:.6px;text-transform:uppercase;color:rgba(255,255,255,.45);font-weight:600;padding:8px 10px;text-align:left">OI</div>
+
+          <sc-for list="{{chainRows}}" as="r" hint-placeholder-count="12">
+            <div class="cc" style="padding:7px 10px;border-top:1px solid rgba(255,255,255,.06);text-align:right;font-weight:{{r.fw}};background:{{r.cBg}}">{{r.cOi}}</div>
+            <div class="cc" style="padding:7px 10px;border-top:1px solid rgba(255,255,255,.06);text-align:right;font-weight:{{r.fw}};background:{{r.cBg}}">{{r.cVol}}</div>
+            <div class="cc" style="padding:7px 6px;border-top:1px solid rgba(255,255,255,.06);text-align:right;font-weight:{{r.fw}};background:{{r.cBg}};opacity:.85">{{r.cDl}}</div>
+            <div class="cc" style="padding:7px 8px;border-top:1px solid rgba(255,255,255,.06);text-align:right;font-weight:{{r.fw}};background:{{r.cBg}}">{{r.cIv}}</div>
+            <div class="cc" style="padding:7px 10px;border-top:1px solid rgba(255,255,255,.06);text-align:right;position:relative;white-space:nowrap;font-weight:{{r.fw}};background:{{r.cBaBg}};box-shadow:{{r.cRing}};border-radius:6px"><sc-if value="{{r.buy}}"><span style="position:absolute;left:5px;top:50%;transform:translateY(-50%);font-size:7.5px;font-weight:800;letter-spacing:.4px;padding:2px 5px;border-radius:4px;background:#f0c068;color:#0a0d14;line-height:1">BUY +1</span></sc-if><sc-if value="{{r.sell}}"><span style="position:absolute;left:5px;top:50%;transform:translateY(-50%);font-size:7.5px;font-weight:800;letter-spacing:.4px;padding:2px 5px;border-radius:4px;background:#5fa3d4;color:#0a0d14;line-height:1">SELL −1</span></sc-if><b style="color:#ef5350">{{r.cBa}}</b></div>
+            <div class="cc" style="padding:7px 0;border-top:1px solid rgba(255,255,255,.06);font-weight:{{r.kFw}};font-size:{{r.kFs}};background:{{r.kBg}};display:flex;align-items:center;justify-content:center;gap:4px"><sc-if value="{{r.atm}}"></sc-if>{{r.kTxt}}</div>
+            <div class="cc" style="padding:7px 10px;border-top:1px solid rgba(255,255,255,.06);text-align:left;position:relative;white-space:nowrap;font-weight:{{r.fw}};background:{{r.pBaBg}};box-shadow:{{r.pRing}};border-radius:6px"><b style="color:#26a69a">{{r.pBa}}</b></div>
+            <div class="cc" style="padding:7px 8px;border-top:1px solid rgba(255,255,255,.06);text-align:left;font-weight:{{r.fw}};background:{{r.pBg}}">{{r.pIv}}</div>
+            <div class="cc" style="padding:7px 6px;border-top:1px solid rgba(255,255,255,.06);text-align:left;font-weight:{{r.fw}};background:{{r.pBg}};opacity:.85">{{r.pDl}}</div>
+            <div class="cc" style="padding:7px 10px;border-top:1px solid rgba(255,255,255,.06);text-align:left;font-weight:{{r.fw}};background:{{r.pBg}}">{{r.pVol}}</div>
+            <div class="cc" style="padding:7px 10px;border-top:1px solid rgba(255,255,255,.06);text-align:left;font-weight:{{r.fw}};background:{{r.pBg}}">{{r.pOi}}</div>
+          </sc-for>
+
+          <div class="spotline" style="position:absolute;left:0;right:0;height:1px;background:rgba(255,255,255,.35);top:calc(28px + (100% - 28px) * {{spotFrac}});pointer-events:none"></div>
+          <div class="spotpill" style="position:absolute;left:50%;transform:translate(-50%,-50%);top:calc(28px + (100% - 28px) * {{spotFrac}});background:#10141d;border:1px solid rgba(255,255,255,.3);color:#fff;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-variant-numeric:tabular-nums;font-size:9.5px;font-weight:700;padding:2px 8px;border-radius:999px;box-shadow:0 4px 12px rgba(0,0,0,.5);pointer-events:none;white-space:nowrap">{{spotTxt}}</div>
+        </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- P&L card -->
+    <div style="grid-area:pnl;min-width:0">
+      <div class="glr" style="padding:14px 14px 12px;border-radius:16px;position:relative;overflow:hidden;backdrop-filter:blur(36px) saturate(160%);-webkit-backdrop-filter:blur(36px) saturate(160%);background:linear-gradient(155deg,rgba(80,90,115,.50),rgba(36,42,58,.42));border:1px solid rgba(255,255,255,.14);box-shadow:0 1px 0 rgba(255,255,255,.18) inset,0 28px 56px -24px rgba(0,0,0,.7)">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+          <div style="min-width:0">
+            <div style="font-size:9px;letter-spacing:.7px;text-transform:uppercase;opacity:.5;font-weight:600">P&amp;L what-if · TXO</div>
+            <div style="font-size:24px;font-weight:600;letter-spacing:-.4px;line-height:1.05;margin-top:5px;font-variant-numeric:tabular-nums;font-family:ui-monospace,'SF Mono',Menlo,monospace;color:{{heroColor}}">{{heroTxt}}</div>
+            <div style="font-size:9px;opacity:.5;margin-top:3px;font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,monospace">{{subTxt}} ×50 NTD/pt</div>
+          </div>
+          <div style="width:74px;flex-shrink:0;position:relative">
+            <svg viewBox="0 0 110 66" width="74" style="display:block;margin:0 auto">
+              <path class="svgtrk" d="M 12 60 A 46 46 0 0 1 98 60" fill="none" stroke="rgba(255,255,255,.10)" stroke-width="7" stroke-linecap="round"></path>
+              <path d="{{popArc}}" fill="none" stroke="#5fa3d4" stroke-width="7" stroke-linecap="round"></path>
+            </svg>
+            <div style="position:absolute;left:0;right:0;top:27px;text-align:center;font-size:12px;line-height:1;font-weight:700;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-variant-numeric:tabular-nums;pointer-events:none">{{popTxt}}</div>
+            <div style="text-align:center;font-size:7px;opacity:.5;margin-top:3px;letter-spacing:.5px;text-transform:uppercase;white-space:nowrap">prob. of profit</div>
+          </div>
+        </div>
+        <div class="trk" style="height:1px;background:rgba(255,255,255,.10);margin:10px 0 9px"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div class="tile" style="padding:7px 10px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)">
+            <div style="font-size:9px;letter-spacing:.5px;text-transform:uppercase;opacity:.6">Max profit</div>
+            <div class="au" style="font-size:14px;font-weight:600;margin-top:2px;font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums;color:#f0c068">{{maxProfitTxt}}</div>
+          </div>
+          <div class="tile" style="padding:7px 10px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)">
+            <div style="font-size:9px;letter-spacing:.5px;text-transform:uppercase;opacity:.6">Max loss</div>
+            <div class="bl" style="font-size:14px;font-weight:600;margin-top:2px;font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums;color:#5fa3d4">{{maxLossTxt}}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Payoff -->
+    <div style="grid-area:payoff;min-width:0">
+      <div class="gl" style="padding:18px;border-radius:18px;backdrop-filter:blur(36px) saturate(160%);-webkit-backdrop-filter:blur(36px) saturate(160%);background:linear-gradient(155deg,rgba(60,68,88,.42),rgba(28,34,48,.32));border:1px solid rgba(255,255,255,.08);box-shadow:0 1px 0 rgba(255,255,255,.10) inset,0 20px 40px -20px rgba(0,0,0,.55)">
+        <div style="display:flex;justify-content:space-between;font-size:10px;letter-spacing:.8px;text-transform:uppercase;opacity:.6;font-weight:600;margin-bottom:10px">
+          <span>Payoff <span style="color:#a78bfa;text-transform:none">· 1σ/2σ cone</span></span><span style="opacity:.6">at expiry</span>
+        </div>
+        <svg viewBox="0 0 304 140" width="100%" style="font-family:ui-monospace,'SF Mono',Menlo,monospace">
+          <sc-if value="{{showCone}}" hint-placeholder-val="{{ true }}">
+            <rect x="16" y="8" width="184" height="124" fill="rgba(167,139,250,.18)" fill-opacity=".5"></rect>
+            <rect x="37" y="8" width="109" height="124" fill="rgba(167,139,250,.18)"></rect>
+          </sc-if>
+          <line class="svgtrk" x1="16" y1="70" x2="288" y2="70" stroke="rgba(255,255,255,.15)" stroke-dasharray="2 3"></line>
+          <path d="{{lossPath}}" fill="#26a69a" fill-opacity=".22"></path>
+          <path d="{{profitPath}}" fill="#ef5350" fill-opacity=".22"></path>
+          <path class="pline" d="{{payLine}}" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="1.5"></path>
+          <line class="beline" x1="{{beX}}" y1="14" x2="{{beX}}" y2="124" stroke="#a78bfa" stroke-width="1" stroke-dasharray="2 3" stroke-opacity=".55"></line>
+          <text class="betxt" x="{{beX}}" y="10" font-size="9" fill="#a78bfa" text-anchor="middle" font-weight="700">{{beLab}}</text>
+          <line class="pline" x1="{{spotXT}}" y1="8" x2="{{spotXT}}" y2="132" stroke="rgba(255,255,255,.55)" stroke-width="1" stroke-dasharray="3 3" stroke-opacity=".6"></line>
+          <circle cx="{{spotXT}}" cy="{{spotYT}}" r="3.5" fill="{{spotDotColor}}" stroke="#0c0e14" stroke-width="1.5"></circle>
+          <text x="288" y="18" font-size="10" fill="#ef5350" text-anchor="end" font-weight="700">{{upLab}}</text>
+          <text x="16" y="136" font-size="10" fill="#26a69a" font-weight="700">{{dnLab}}</text>
+        </svg>
+      </div>
+    </div>
+
+    <!-- Greeks -->
+    <div style="grid-area:greeks;min-width:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
+      <div class="tile" style="padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)"><div style="font-size:10px;letter-spacing:.6px;text-transform:uppercase;opacity:.6">Delta · Δ</div><div class="au" style="font-size:18px;font-weight:600;margin-top:2px;font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums;color:#f0c068">+0.18</div></div>
+      <div class="tile" style="padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)"><div style="font-size:10px;letter-spacing:.6px;text-transform:uppercase;opacity:.6">Gamma · Γ</div><div style="font-size:18px;font-weight:600;margin-top:2px;font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums">0.0004</div></div>
+      <div class="tile" style="padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)"><div style="font-size:10px;letter-spacing:.6px;text-transform:uppercase;opacity:.6">Theta · Θ</div><div class="bl" style="font-size:18px;font-weight:600;margin-top:2px;font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums;color:#5fa3d4">−0.92</div></div>
+      <div class="tile" style="padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)"><div style="font-size:10px;letter-spacing:.6px;text-transform:uppercase;opacity:.6">Vega · V</div><div class="au" style="font-size:18px;font-weight:600;margin-top:2px;font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums;color:#f0c068">+0.58</div></div>
+    </div>
+
+    <!-- Legs -->
+    <div style="grid-area:legs;min-width:0">
+      <div class="gl" style="padding:16px 18px;border-radius:18px;backdrop-filter:blur(36px) saturate(160%);-webkit-backdrop-filter:blur(36px) saturate(160%);background:linear-gradient(155deg,rgba(60,68,88,.42),rgba(28,34,48,.32));border:1px solid rgba(255,255,255,.08);box-shadow:0 1px 0 rgba(255,255,255,.10) inset,0 20px 40px -20px rgba(0,0,0,.55);display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+          <span class="stx" style="padding:6px 10px;border-radius:999px;border:1px solid #ef535055;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:6px;background:#ef535014;color:rgba(255,255,255,.85)"><i style="width:6px;height:6px;border-radius:3px;display:inline-block;background:#ef5350"></i>Bull Call Spread</span>
+          <div style="display:flex;gap:6px">
+            <button class="btn2" style="font-size:10px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.04);color:#e8eaef">+ leg</button>
+            <button class="btn2" style="font-size:10px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.04);color:#e8eaef">clear</button>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-variant-numeric:tabular-nums;font-size:12px">
+          <div class="tile" style="display:flex;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)"><span><b class="au" style="color:#f0c068">+1</b> · 22000 <b style="color:#ef5350">C</b> · 7/21</span><span style="opacity:.75">{{legBuy}}</span></div>
+          <div class="tile" style="display:flex;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)"><span><b class="bl" style="color:#5fa3d4">−1</b> · 22200 <b style="color:#ef5350">C</b> · 7/21</span><span style="opacity:.75">{{legSell}}</span></div>
+          <div style="display:flex;justify-content:space-between;gap:8px;padding:4px 10px 0;font-size:11px;opacity:.6"><span>Net debit</span><span>{{netDebit}}</span></div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button onClick="{{stress5}}" class="btn2" style="padding:8px 12px;border-radius:8px;font-size:10px;font-weight:600;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.03);color:#e8eaef">−5% &amp; IV+15%</button>
+          <button onClick="{{stress10}}" class="btn2" style="padding:8px 12px;border-radius:8px;font-size:10px;font-weight:600;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.03);color:#e8eaef">−10% crash</button>
+          <button onClick="{{reset}}" class="btn2" style="padding:8px 12px;border-radius:8px;font-size:10px;font-weight:600;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.03);color:#e8eaef">Reset</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ═══ Chart tab ═══ -->
+  <sc-if value="{{isChart}}">
+  <div data-screen-label="Chart" class="gl" style="padding:18px;border-radius:18px;backdrop-filter:blur(36px) saturate(160%);-webkit-backdrop-filter:blur(36px) saturate(160%);background:linear-gradient(155deg,rgba(60,68,88,.42),rgba(28,34,48,.32));border:1px solid rgba(255,255,255,.08);box-shadow:0 1px 0 rgba(255,255,255,.10) inset,0 20px 40px -20px rgba(0,0,0,.55)">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+      <span style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;opacity:.6;font-weight:600">{{prodTag}} · Daily</span>
+      <span style="font-size:11px;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-variant-numeric:tabular-nums;opacity:.85;display:inline-flex;gap:12px">
+        <span><span style="opacity:.5">O</span> {{chO}}</span>
+        <span><span style="opacity:.5">H</span> {{chH}}</span>
+        <span><span style="opacity:.5">L</span> {{chL}}</span>
+        <span><span style="opacity:.5">C</span> <b style="color:{{chCol}}">{{chC}}</b></span>
+      </span>
+      <span style="display:inline-flex;gap:10px;font-size:10px;font-family:ui-monospace,Menlo,monospace;opacity:.8">
+        <span><i style="display:inline-block;width:14px;height:2px;background:#f0c068;vertical-align:middle;margin-right:4px"></i>MA5</span>
+        <span><i style="display:inline-block;width:14px;height:2px;background:#5fa3d4;vertical-align:middle;margin-right:4px"></i>MA20</span>
+        <span><i style="display:inline-block;width:14px;height:2px;background:#a78bfa;vertical-align:middle;margin-right:4px"></i>RSI 14</span>
+      </span>
+    </div>
+    <svg viewBox="0 0 768 282" width="100%" style="display:block;font-family:ui-monospace,Menlo,monospace">
+      <sc-for list="{{chGrid}}" as="g" hint-placeholder-count="4">
+        <line class="svgtrk" x1="0" x2="720" y1="{{g.y}}" y2="{{g.y}}" stroke="rgba(255,255,255,.10)" stroke-dasharray="2 4"></line>
+        <text x="726" y="{{g.ty}}" font-size="9" fill="currentColor" opacity="0.45">{{g.lab}}</text>
+      </sc-for>
+      <sc-for list="{{chCandles}}" as="c" hint-placeholder-count="20">
+        <line x1="{{c.x}}" x2="{{c.x}}" y1="{{c.wy1}}" y2="{{c.wy2}}" stroke="{{c.f}}" stroke-width="1"></line>
+        <rect x="{{c.bx}}" y="{{c.by}}" width="7" height="{{c.bh}}" fill="{{c.f}}" rx="1"></rect>
+      </sc-for>
+      <polyline points="{{chMa5}}" fill="none" stroke="#f0c068" stroke-width="1.4" stroke-linejoin="round"></polyline>
+      <polyline points="{{chMa20}}" fill="none" stroke="#5fa3d4" stroke-width="1.4" stroke-linejoin="round"></polyline>
+      <sc-for list="{{chVols}}" as="v" hint-placeholder-count="20">
+        <rect x="{{v.bx}}" y="{{v.y}}" width="7" height="{{v.h}}" fill="{{v.f}}" fill-opacity="0.45"></rect>
+      </sc-for>
+      <line x1="0" x2="720" y1="{{chLastY}}" y2="{{chLastY}}" stroke="#f0c068" stroke-width="0.8" stroke-dasharray="4 3" stroke-opacity="0.7"></line>
+      <text x="726" y="{{chLastTy}}" font-size="10" font-weight="700" fill="#f0c068">{{chLastLab}}</text>
+    </svg>
+    <div style="font-size:9px;letter-spacing:.6px;text-transform:uppercase;opacity:.5;font-weight:600;margin:10px 0 4px">RSI · 14</div>
+    <svg viewBox="0 0 768 66" width="100%" style="display:block;font-family:ui-monospace,Menlo,monospace">
+      <line class="svgtrk" x1="0" x2="720" y1="21.6" y2="21.6" stroke="rgba(255,255,255,.12)" stroke-dasharray="2 4"></line>
+      <line class="svgtrk" x1="0" x2="720" y1="42.4" y2="42.4" stroke="rgba(255,255,255,.12)" stroke-dasharray="2 4"></line>
+      <text x="726" y="25" font-size="9" fill="currentColor" opacity="0.45">70</text>
+      <text x="726" y="46" font-size="9" fill="currentColor" opacity="0.45">30</text>
+      <polyline points="{{chRsi}}" fill="none" stroke="#a78bfa" stroke-width="1.4" stroke-linejoin="round"></polyline>
+    </svg>
+    <div style="margin-top:12px;font-size:10px;opacity:.5;font-family:ui-monospace,Menlo,monospace">○ MOCK OHLC — production feed: broker / exchange API (IB TWS · websocket) · last bar tracks the What-if spot</div>
+  </div>
+  </sc-if>
+
+  <!-- ═══ Calculator tab ═══ -->
+  <sc-if value="{{isCalc}}">
+  <div data-screen-label="Calculator" style="display:grid;grid-template-columns:minmax(360px,440px) minmax(0,1fr);gap:18px;align-items:start">
+    <div style="display:flex;flex-direction:column;gap:14px;min-width:0">
+      <div class="gl" style="padding:18px;border-radius:18px;backdrop-filter:blur(36px) saturate(160%);-webkit-backdrop-filter:blur(36px) saturate(160%);background:linear-gradient(155deg,rgba(60,68,88,.42),rgba(28,34,48,.32));border:1px solid rgba(255,255,255,.08);box-shadow:0 1px 0 rgba(255,255,255,.10) inset,0 20px 40px -20px rgba(0,0,0,.55);display:flex;flex-direction:column;gap:14px">
+        <div style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;opacity:.5;font-weight:600">Strategy</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="stx" style="padding:6px 10px;border-radius:999px;border:1px solid #ef5350;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:6px;background:#ef535026;color:rgba(255,255,255,.9)"><i style="width:6px;height:6px;border-radius:3px;display:inline-block;background:#ef5350"></i>Bull Call Spread</button>
+          <button class="stx" style="padding:6px 10px;border-radius:999px;border:1px solid #26a69a55;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:6px;background:#26a69a14;color:rgba(255,255,255,.65)"><i style="width:6px;height:6px;border-radius:3px;display:inline-block;background:#26a69a"></i>Bear Put Spread</button>
+          <button class="stx" style="padding:6px 10px;border-radius:999px;border:1px solid #a78bfa55;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:6px;background:#a78bfa14;color:rgba(255,255,255,.65)"><i style="width:6px;height:6px;border-radius:3px;display:inline-block;background:#a78bfa"></i>Iron Condor</button>
+          <button class="stx" style="padding:6px 10px;border-radius:999px;border:1px solid #f0c06855;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:6px;background:#f0c06814;color:rgba(255,255,255,.65)"><i style="width:6px;height:6px;border-radius:3px;display:inline-block;background:#f0c068"></i>Long Straddle</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-variant-numeric:tabular-nums;font-size:12px">
+          <div class="tile" style="display:flex;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)"><span><b class="au" style="color:#f0c068">+1</b> · 22000 <b style="color:#ef5350">C</b> · 7/21</span><span style="opacity:.75">{{legBuy}}</span></div>
+          <div class="tile" style="display:flex;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)"><span><b class="bl" style="color:#5fa3d4">−1</b> · 22200 <b style="color:#ef5350">C</b> · 7/21</span><span style="opacity:.75">{{legSell}}</span></div>
+          <div style="display:flex;justify-content:space-between;gap:8px;padding:4px 10px 0;font-size:11px;opacity:.6"><span>Net debit</span><span>{{netDebit}}</span></div>
+        </div>
+        <div class="trk" style="height:1px;background:rgba(255,255,255,.10)"></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button onClick="{{stress5}}" class="btn2" style="padding:8px 12px;border-radius:8px;font-size:10px;font-weight:600;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.03);color:#e8eaef">−5% &amp; IV+15%</button>
+          <button onClick="{{stress10}}" class="btn2" style="padding:8px 12px;border-radius:8px;font-size:10px;font-weight:600;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.03);color:#e8eaef">−10% crash</button>
+          <button onClick="{{reset}}" class="btn2" style="padding:8px 12px;border-radius:8px;font-size:10px;font-weight:600;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.03);color:#e8eaef">Reset</button>
+        </div>
+      </div>
+
+      <div class="gl" style="padding:18px;border-radius:18px;backdrop-filter:blur(36px) saturate(160%);-webkit-backdrop-filter:blur(36px) saturate(160%);background:linear-gradient(155deg,rgba(60,68,88,.42),rgba(28,34,48,.32));border:1px solid rgba(255,255,255,.08);box-shadow:0 1px 0 rgba(255,255,255,.10) inset,0 20px 40px -20px rgba(0,0,0,.55);display:flex;flex-direction:column;gap:14px">
+        <div style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;opacity:.5;font-weight:600">Theoretical · Black-Scholes <span style="opacity:.7;text-transform:none">(TXO)</span></div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline">
+            <span style="font-size:11px;opacity:.7;letter-spacing:.4px;text-transform:uppercase">Strike</span>
+            <span style="font-size:13px;font-weight:600;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-variant-numeric:tabular-nums">{{strikeTxt}}</span>
+          </div>
+          <div onPointerDown="{{onStrikeDown}}" style="position:relative;height:22px;display:flex;align-items:center;cursor:pointer;touch-action:none">
+            <div class="trk" style="position:absolute;left:0;right:0;height:4px;background:rgba(255,255,255,.10);border-radius:999px"></div>
+            <div class="fil" style="position:absolute;left:0;height:4px;background:#cdd3df;border-radius:999px;opacity:.85;width:{{strikePct}}%"></div>
+            <div style="position:absolute;width:16px;height:16px;border-radius:16px;background:linear-gradient(180deg,#fff,#cfd5e1);box-shadow:0 2px 6px rgba(0,0,0,.6),0 0 0 1px rgba(0,0,0,.4);left:calc({{strikePct}}% - 8px)"></div>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline">
+            <span style="font-size:11px;opacity:.7;letter-spacing:.4px;text-transform:uppercase">Days to expiry</span>
+            <span style="font-size:13px;font-weight:600;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-variant-numeric:tabular-nums">{{dteTxt}}</span>
+          </div>
+          <div onPointerDown="{{onDteDown}}" style="position:relative;height:22px;display:flex;align-items:center;cursor:pointer;touch-action:none">
+            <div class="trk" style="position:absolute;left:0;right:0;height:4px;background:rgba(255,255,255,.10);border-radius:999px"></div>
+            <div class="fil" style="position:absolute;left:0;height:4px;background:#cdd3df;border-radius:999px;opacity:.85;width:{{dtePct}}%"></div>
+            <div style="position:absolute;width:16px;height:16px;border-radius:16px;background:linear-gradient(180deg,#fff,#cfd5e1);box-shadow:0 2px 6px rgba(0,0,0,.6),0 0 0 1px rgba(0,0,0,.4);left:calc({{dtePct}}% - 8px)"></div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="tile" style="padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)">
+            <div style="font-size:10px;letter-spacing:.6px;text-transform:uppercase;opacity:.6">Call theo <span style="color:#ef5350">●</span></div>
+            <div style="font-size:18px;font-weight:600;margin-top:2px;font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums;color:#ef5350">{{callPx}}</div>
+            <div style="font-size:9px;opacity:.5;margin-top:2px;font-family:ui-monospace,Menlo,monospace">{{callNt}}</div>
+          </div>
+          <div class="tile" style="padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)">
+            <div style="font-size:10px;letter-spacing:.6px;text-transform:uppercase;opacity:.6">Put theo <span style="color:#26a69a">●</span></div>
+            <div style="font-size:18px;font-weight:600;margin-top:2px;font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums;color:#26a69a">{{putPx}}</div>
+            <div style="font-size:9px;opacity:.5;margin-top:2px;font-family:ui-monospace,Menlo,monospace">{{putNt}}</div>
+          </div>
+        </div>
+        <div style="font-size:10px;opacity:.5;font-family:ui-monospace,Menlo,monospace">S = {{spotTxtTXO}} · σ = {{ivTxtTXO}} · r = 1.50% · S/IV follow the What-if sliders</div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:14px;min-width:0">
+      <div class="gl" style="padding:18px;border-radius:18px;backdrop-filter:blur(36px) saturate(160%);-webkit-backdrop-filter:blur(36px) saturate(160%);background:linear-gradient(155deg,rgba(60,68,88,.42),rgba(28,34,48,.32));border:1px solid rgba(255,255,255,.08);box-shadow:0 1px 0 rgba(255,255,255,.10) inset,0 20px 40px -20px rgba(0,0,0,.55)">
+        <div style="display:flex;justify-content:space-between;font-size:10px;letter-spacing:.8px;text-transform:uppercase;opacity:.6;font-weight:600;margin-bottom:10px">
+          <span>Payoff <span style="color:#a78bfa;text-transform:none">· 1σ/2σ cone</span></span><span style="opacity:.6">at expiry</span>
+        </div>
+        <svg viewBox="0 0 304 140" width="100%" style="font-family:ui-monospace,'SF Mono',Menlo,monospace">
+          <sc-if value="{{showCone}}" hint-placeholder-val="{{ true }}">
+            <rect x="16" y="8" width="184" height="124" fill="rgba(167,139,250,.18)" fill-opacity=".5"></rect>
+            <rect x="37" y="8" width="109" height="124" fill="rgba(167,139,250,.18)"></rect>
+          </sc-if>
+          <line class="svgtrk" x1="16" y1="70" x2="288" y2="70" stroke="rgba(255,255,255,.15)" stroke-dasharray="2 3"></line>
+          <path d="{{lossPath}}" fill="#26a69a" fill-opacity=".22"></path>
+          <path d="{{profitPath}}" fill="#ef5350" fill-opacity=".22"></path>
+          <path class="pline" d="{{payLine}}" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="1.5"></path>
+          <line class="beline" x1="{{beX}}" y1="14" x2="{{beX}}" y2="124" stroke="#a78bfa" stroke-width="1" stroke-dasharray="2 3" stroke-opacity=".55"></line>
+          <text class="betxt" x="{{beX}}" y="10" font-size="9" fill="#a78bfa" text-anchor="middle" font-weight="700">{{beLab}}</text>
+          <line class="pline" x1="{{spotXT}}" y1="8" x2="{{spotXT}}" y2="132" stroke="rgba(255,255,255,.55)" stroke-width="1" stroke-dasharray="3 3" stroke-opacity=".6"></line>
+          <circle cx="{{spotXT}}" cy="{{spotYT}}" r="3.5" fill="{{spotDotColor}}" stroke="#0c0e14" stroke-width="1.5"></circle>
+          <text x="288" y="18" font-size="10" fill="#ef5350" text-anchor="end" font-weight="700">{{upLab}}</text>
+          <text x="16" y="136" font-size="10" fill="#26a69a" font-weight="700">{{dnLab}}</text>
+        </svg>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
+        <div class="tile" style="padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)"><div style="font-size:10px;letter-spacing:.6px;text-transform:uppercase;opacity:.6">Delta · Δ</div><div class="au" style="font-size:18px;font-weight:600;margin-top:2px;font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums;color:#f0c068">+0.18</div></div>
+        <div class="tile" style="padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)"><div style="font-size:10px;letter-spacing:.6px;text-transform:uppercase;opacity:.6">Gamma · Γ</div><div style="font-size:18px;font-weight:600;margin-top:2px;font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums">0.0004</div></div>
+        <div class="tile" style="padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)"><div style="font-size:10px;letter-spacing:.6px;text-transform:uppercase;opacity:.6">Theta · Θ</div><div class="bl" style="font-size:18px;font-weight:600;margin-top:2px;font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums;color:#5fa3d4">−0.92</div></div>
+        <div class="tile" style="padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)"><div style="font-size:10px;letter-spacing:.6px;text-transform:uppercase;opacity:.6">Vega · V</div><div class="au" style="font-size:18px;font-weight:600;margin-top:2px;font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums;color:#f0c068">+0.58</div></div>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ═══ IV Surface tab ═══ -->
+  <sc-if value="{{isIv}}">
+  <div data-screen-label="IV Surface" class="gl" style="padding:18px;border-radius:18px;backdrop-filter:blur(36px) saturate(160%);-webkit-backdrop-filter:blur(36px) saturate(160%);background:linear-gradient(155deg,rgba(60,68,88,.42),rgba(28,34,48,.32));border:1px solid rgba(255,255,255,.08);box-shadow:0 1px 0 rgba(255,255,255,.10) inset,0 20px 40px -20px rgba(0,0,0,.55)">
+    <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:10px;letter-spacing:.8px;text-transform:uppercase;opacity:.6;font-weight:600;margin-bottom:12px">
+      <span>IV Surface · {{prodTag}}</span>
+      <span style="display:inline-flex;gap:4px;align-items:center">
+        <button onClick="{{setIv3d}}" style="font-size:9px;font-weight:700;letter-spacing:.5px;padding:3px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:{{iv3dBg}};color:{{iv3dCol}};cursor:pointer">3D</button>
+        <button onClick="{{setIvHeat}}" style="font-size:9px;font-weight:700;letter-spacing:.5px;padding:3px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:{{ivHeatBg}};color:{{ivHeatCol}};cursor:pointer">HEATMAP</button>
+      </span>
+    </div>
+
+    <sc-if value="{{iv3d}}" hint-placeholder-val="{{ true }}">
+    <div style="display:flex;justify-content:center">
+      <svg onPointerDown="{{ivOrbitDown}}" viewBox="0 0 520 315" width="100%" style="max-width:860px;display:block;color:inherit;cursor:grab;touch-action:none">
+        <sc-for list="{{ivAxes}}" as="ax" hint-placeholder-count="3">
+          <line class="svgtrk" x1="{{ax.x1}}" y1="{{ax.y1}}" x2="{{ax.x2}}" y2="{{ax.y2}}" stroke="rgba(255,255,255,.28)" stroke-width="1"></line>
+        </sc-for>
+        <sc-for list="{{ivAxTicks}}" as="tk" hint-placeholder-count="4">
+          <line class="svgtrk" x1="{{tk.x1}}" y1="{{tk.y1}}" x2="{{tk.x2}}" y2="{{tk.y2}}" stroke="rgba(255,255,255,.28)" stroke-width="1"></line>
+          <text x="{{tk.tx}}" y="{{tk.ty}}" font-size="7.5" fill="currentColor" opacity="0.45" text-anchor="end" font-family="ui-monospace,Menlo,monospace">{{tk.t}}</text>
+        </sc-for>
+        <sc-for list="{{ivQuads}}" as="q" hint-placeholder-count="8">
+          <polygon class="ivstroke" points="{{q.pts}}" fill="{{q.fill}}" stroke="rgba(255,255,255,.16)" stroke-width="0.35"></polygon>
+        </sc-for>
+        <sc-for list="{{ivSLabels}}" as="sl" hint-placeholder-count="5">
+          <text x="{{sl.x}}" y="{{sl.y}}" font-size="8" fill="currentColor" opacity="0.5" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">{{sl.t}}</text>
+        </sc-for>
+        <sc-for list="{{ivELabels}}" as="el" hint-placeholder-count="5">
+          <text x="{{el.x}}" y="{{el.y}}" font-size="9" font-weight="700" fill="currentColor" opacity="0.6" text-anchor="end" font-family="ui-monospace,Menlo,monospace">{{el.t}}</text>
+        </sc-for>
+        <sc-for list="{{ivAxLabels}}" as="al" hint-placeholder-count="3">
+          <text x="{{al.x}}" y="{{al.y}}" font-size="10" font-weight="700" letter-spacing="0.8" fill="currentColor" opacity="0.8" text-anchor="{{al.anc}}" font-family="ui-monospace,Menlo,monospace">{{al.t}}</text>
+        </sc-for>
+      </svg>
+    </div>
+    </sc-if>
+
+    <sc-if value="{{ivHeat}}">
+    <div class="dkbg" style="overflow-x:auto;border-radius:12px;border:1px solid rgba(255,255,255,.06);background:rgba(20,24,34,.4)">
+      <div style="min-width:780px;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-variant-numeric:tabular-nums;font-size:11px">
+        <div style="display:flex">
+          <div class="hd" style="width:64px;flex-shrink:0;font-size:9px;letter-spacing:.6px;text-transform:uppercase;color:rgba(255,255,255,.45);font-weight:600;padding:8px 10px">EXP</div>
+          <sc-for list="{{ivHeatHead}}" as="h" hint-placeholder-count="10">
+            <div class="hd" style="flex:1;text-align:center;font-size:9px;letter-spacing:.6px;color:rgba(255,255,255,.45);font-weight:600;padding:8px 0">{{h}}</div>
+          </sc-for>
+        </div>
+        <sc-for list="{{ivRows}}" as="row" hint-placeholder-count="5">
+          <div style="display:flex">
+            <div class="cc" style="width:64px;flex-shrink:0;padding:9px 10px;border-top:1px solid rgba(255,255,255,.06);font-weight:600">{{row.exp}}</div>
+            <sc-for list="{{row.cells}}" as="c" hint-placeholder-count="10">
+              <div class="cc" style="flex:1;text-align:center;padding:9px 0;border-top:1px solid rgba(255,255,255,.06);background:{{c.bg}}">{{c.v}}</div>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+    </sc-if>
+
+    <div style="margin-top:12px;font-size:10px;opacity:.5;font-family:ui-monospace,Menlo,monospace;display:flex;align-items:center;gap:8px">
+      <span>low</span>
+      <span style="display:inline-block;width:120px;height:8px;border-radius:4px;background:linear-gradient(90deg,rgba(240,192,104,.06),rgba(240,192,104,.6))"></span>
+      <span>high · X = strike · depth = expiry (front = near) · height = IV % · <strong style="color:inherit;opacity:.9">drag</strong> to orbit</span>
+    </div>
+  </div>
+  </sc-if>
+</div>
+
+<!-- ═══ What-if block (in flow) ═══ -->
+<div data-screen-label="What-if" class="glr" style="margin:2px 28px 24px auto;width:520px;max-width:calc(100vw - 56px);padding:10px 16px;border-radius:14px;box-sizing:border-box;position:relative;backdrop-filter:blur(36px) saturate(160%);-webkit-backdrop-filter:blur(36px) saturate(160%);background:linear-gradient(155deg,rgba(80,90,115,.50),rgba(36,42,58,.42));border:1px solid rgba(255,255,255,.14);box-shadow:0 1px 0 rgba(255,255,255,.18) inset,0 -1px 0 rgba(0,0,0,.30) inset,0 28px 56px -24px rgba(0,0,0,.7);display:grid;grid-template-columns:auto 1fr 1fr;gap:18px;align-items:center">
+  <div style="font-size:9px;letter-spacing:.7px;text-transform:uppercase;opacity:.5;font-weight:600;align-self:center">What-if</div>
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <span style="font-size:11px;opacity:.7;letter-spacing:.4px;text-transform:uppercase">Spot · {{prodTag}}</span>
+      <span style="font-size:13px;font-weight:600;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-variant-numeric:tabular-nums">{{spotTxt}}</span>
+    </div>
+    <div onPointerDown="{{onSpotDown}}" style="position:relative;height:22px;display:flex;align-items:center;cursor:pointer;touch-action:none">
+      <div class="trk" style="position:absolute;left:0;right:0;height:4px;background:rgba(255,255,255,.10);border-radius:999px"></div>
+      <div class="fil" style="position:absolute;left:0;height:4px;background:#cdd3df;border-radius:999px;opacity:.85;width:{{spotPct}}%"></div>
+      <div style="position:absolute;width:16px;height:16px;border-radius:16px;background:linear-gradient(180deg,#fff,#cfd5e1);box-shadow:0 2px 6px rgba(0,0,0,.6),0 0 0 1px rgba(0,0,0,.4);left:calc({{spotPct}}% - 8px)"></div>
+    </div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <span style="font-size:11px;opacity:.7;letter-spacing:.4px;text-transform:uppercase">IV</span>
+      <span style="font-size:13px;font-weight:600;font-family:ui-monospace,'SF Mono',Menlo,monospace;font-variant-numeric:tabular-nums">{{ivTxt}}</span>
+    </div>
+    <div onPointerDown="{{onIvDown}}" style="position:relative;height:22px;display:flex;align-items:center;cursor:pointer;touch-action:none">
+      <div class="trk" style="position:absolute;left:0;right:0;height:4px;background:rgba(255,255,255,.10);border-radius:999px"></div>
+      <div class="fil" style="position:absolute;left:0;height:4px;background:#cdd3df;border-radius:999px;opacity:.85;width:{{ivPct}}%"></div>
+      <div style="position:absolute;width:16px;height:16px;border-radius:16px;background:linear-gradient(180deg,#fff,#cfd5e1);box-shadow:0 2px 6px rgba(0,0,0,.6),0 0 0 1px rgba(0,0,0,.4);left:calc({{ivPct}}% - 8px)"></div>
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;theme&quot;: { &quot;editor&quot;: &quot;enum&quot;, &quot;options&quot;: [&quot;Dark&quot;, &quot;Light&quot;], &quot;default&quot;: &quot;Dark&quot;, &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;Appearance&quot; },
+  &quot;uiFont&quot;: { &quot;editor&quot;: &quot;enum&quot;, &quot;options&quot;: [&quot;System Sans&quot;, &quot;Rounded&quot;, &quot;Serif&quot;], &quot;default&quot;: &quot;System Sans&quot;, &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;Appearance&quot; },
+  &quot;showCone&quot;: { &quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: true, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Payoff&quot; }
+}">
+class Component extends DCLogic {
+  state = {
+    product: 'TXO',
+    spots: { TXO: 21850, ZC: 462.5, ZW: 550.0, ZS: 1182.25, CL: 72.30, NG: 3.42, ES: 6120, GC: 3352 },
+    ivs: { TXO: 24, ZC: 26, ZW: 29, ZS: 22, CL: 33, NG: 45, ES: 15, GC: 18 },
+    prodMenu: false,
+    layout: 'a',
+    tab: 'chain', strike: 21900, dte: 11,
+    railOpen: false, ivView: '3d', ivYaw: 0.55,
+    themeOverride: null,
+  };
+
+  products() {
+    return {
+      TXO: { tag: 'TXO', name: 'TAIEX Options', spot0: 21850, qtick: 1.0, chg: '+0.84%', chgCol: '#ef5350', step: 50, sstep: 10, sdp: 0, pdp: 1, mult: '×50 NTD/pt', settle: '11d · 13:30', dte: 11 },
+      ES:  { tag: 'ES',  name: 'S&P 500 E-mini', spot0: 6120, qtick: 0.25, chg: '+0.42%', chgCol: '#ef5350', step: 25, sstep: 1, sdp: 2, pdp: 2, mult: '×US$50 / pt', settle: '35d · 15:00 CT', dte: 35 },
+      GC:  { tag: 'GC',  name: 'Gold', spot0: 3352, qtick: 0.1, chg: '−0.18%', chgCol: '#26a69a', step: 25, sstep: 0.5, sdp: 1, pdp: 1, mult: '×US$100 / oz', settle: '28d · 12:30 CT', dte: 28 },
+      CL:  { tag: 'CL',  name: 'WTI Crude Oil', spot0: 72.30, qtick: 0.03, chg: '+0.31%', chgCol: '#ef5350', step: 1, sstep: 0.05, sdp: 2, pdp: 2, mult: '×US$1,000 / bbl', settle: '21d · 14:30 CT', dte: 21 },
+      NG:  { tag: 'NG',  name: 'Natural Gas', spot0: 3.42, qtick: 0.005, chg: '+1.12%', chgCol: '#ef5350', step: 0.1, sstep: 0.005, sdp: 3, pdp: 3, mult: '×US$10,000 / pt', settle: '26d · 14:30 CT', dte: 26 },
+      ZC:  { tag: 'ZC',  name: 'Corn', spot0: 462.5, qtick: 0.125, eighth: true, chg: '+0.06%', chgCol: '#ef5350', step: 5, sstep: 0.25, sdp: 2, pdp: 3, mult: "×$50 / ¢", settle: '43d · 13:20 CT', dte: 43 },
+      ZW:  { tag: 'ZW',  name: 'Wheat', spot0: 550.0, qtick: 0.125, eighth: true, chg: '−0.23%', chgCol: '#26a69a', step: 5, sstep: 0.25, sdp: 2, pdp: 3, mult: "×$50 / ¢", settle: '43d · 13:20 CT', dte: 43 },
+      ZS:  { tag: 'ZS',  name: 'Soybeans', spot0: 1182.25, qtick: 0.125, eighth: true, chg: '+0.06%', chgCol: '#ef5350', step: 20, sstep: 0.25, sdp: 2, pdp: 3, mult: "×$50 / ¢", settle: '43d · 13:20 CT', dte: 43 },
+    };
+  }
+
+  effTheme() {
+    if (this.state.themeOverride) return this.state.themeOverride;
+    return (this.props.theme ?? 'Dark') === 'Light' ? 'light' : 'dark';
+  }
+
+  syncBody() {
+    const b = document.body;
+    b.classList.toggle('light', this.effTheme() === 'light');
+    b.classList.remove('f-round', 'f-serif');
+    const f = this.props.uiFont ?? 'System Sans';
+    if (f === 'Rounded') b.classList.add('f-round');
+    if (f === 'Serif') b.classList.add('f-serif');
+  }
+
+  componentDidMount() { this.syncBody(); }
+  componentDidUpdate() { this.syncBody(); }
+
+  ncdf(x) {
+    const t = 1 / (1 + 0.2316419 * Math.abs(x));
+    const d = 0.3989422804 * Math.exp(-x * x / 2);
+    let p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+    return x >= 0 ? 1 - p : p;
+  }
+  npdf(x) { return 0.3989422804 * Math.exp(-x * x / 2); }
+
+  bs(S, K, T, sig, r) {
+    const sqT = Math.sqrt(Math.max(T, 1e-6));
+    const d1 = (Math.log(S / K) + (r + sig * sig / 2) * T) / (sig * sqT);
+    const d2 = d1 - sig * sqT;
+    const call = S * this.ncdf(d1) - K * Math.exp(-r * T) * this.ncdf(d2);
+    return { call, put: call - S + K * Math.exp(-r * T), d1, d2 };
+  }
+
+  drag(min, max, step, setter) {
+    return (e) => {
+      const el = e.currentTarget;
+      try { el.setPointerCapture(e.pointerId); } catch (_) {}
+      const upd = (ev) => {
+        const rect = el.getBoundingClientRect();
+        let p = (ev.clientX - rect.left) / rect.width;
+        p = Math.min(1, Math.max(0, p));
+        let v = min + p * (max - min);
+        v = Math.round(v / step) * step;
+        setter(v);
+      };
+      upd(e);
+      const mv = (ev) => upd(ev);
+      const up = () => {
+        el.removeEventListener('pointermove', mv);
+        el.removeEventListener('pointerup', up);
+      };
+      el.addEventListener('pointermove', mv);
+      el.addEventListener('pointerup', up);
+    };
+  }
+
+  ivOrbit(e) {
+    const el = e.currentTarget;
+    try { el.setPointerCapture(e.pointerId); } catch (_) {}
+    const sx = e.clientX;
+    const y0 = this.state.ivYaw;
+    const mv = (ev) => {
+      const yaw = Math.min(1.25, Math.max(-1.25, y0 + (ev.clientX - sx) * 0.006));
+      this.setState({ ivYaw: yaw });
+    };
+    const up = () => {
+      el.removeEventListener('pointermove', mv);
+      el.removeEventListener('pointerup', up);
+    };
+    el.addEventListener('pointermove', mv);
+    el.addEventListener('pointerup', up);
+  }
+
+  hash(n) { return Math.abs(Math.sin(n * 12.9898) * 43758.5453) % 1; }
+
+  chartData(spec, S, fmtS) {
+    const n = 60, W = 720, pTop = 12, pBot = 196, vTop = 210, vBot = 274;
+    const seed = spec.spot0;
+    const ret = (i) => (this.hash(i * 3.7 + seed) - 0.5) * 0.022 + 0.0012;
+    const closes = new Array(n);
+    closes[n - 1] = S;
+    for (let i = n - 2; i >= 0; i--) closes[i] = closes[i + 1] / (1 + ret(i + 1));
+    const o = [], h = [], l = [], vol = [];
+    for (let i = 0; i < n; i++) {
+      o[i] = i ? closes[i - 1] : closes[0] * 0.997;
+      h[i] = Math.max(o[i], closes[i]) * (1 + this.hash(i + seed + 7) * 0.006);
+      l[i] = Math.min(o[i], closes[i]) * (1 - this.hash(i + seed + 13) * 0.006);
+      vol[i] = (600 + this.hash(i + seed + 31) * 2000) * (1 + Math.abs(ret(i)) * 40);
+    }
+    const pMin = Math.min(...l) * 0.998, pMax = Math.max(...h) * 1.002;
+    const y = (p) => pTop + ((pMax - p) / (pMax - pMin)) * (pBot - pTop);
+    const xw = W / n;
+    const vMax = Math.max(...vol);
+    const candles = [], vols = [];
+    for (let i = 0; i < n; i++) {
+      const up = closes[i] >= o[i];
+      const f = up ? '#ef5350' : '#26a69a';
+      const by = y(Math.max(o[i], closes[i]));
+      const bh = Math.max(1.2, Math.abs(y(o[i]) - y(closes[i])));
+      candles.push({
+        x: (i * xw + xw / 2).toFixed(1),
+        bx: (i * xw + xw / 2 - 3.5).toFixed(1),
+        wy1: y(h[i]).toFixed(1), wy2: y(l[i]).toFixed(1),
+        by: by.toFixed(1), bh: bh.toFixed(1), f,
+      });
+      const vh = (vol[i] / vMax) * (vBot - vTop);
+      vols.push({ bx: (i * xw + xw / 2 - 3.5).toFixed(1), y: (vBot - vh).toFixed(1), h: vh.toFixed(1), f });
+    }
+    const maPts = (k) => {
+      const pts = [];
+      for (let i = k - 1; i < n; i++) {
+        let s = 0;
+        for (let j = i - k + 1; j <= i; j++) s += closes[j];
+        pts.push((i * xw + xw / 2).toFixed(1) + ',' + y(s / k).toFixed(1));
+      }
+      return pts.join(' ');
+    };
+    // RSI 14
+    const rsiPts = [];
+    let ag = 0, al = 0;
+    for (let i = 1; i < n; i++) {
+      const d = closes[i] - closes[i - 1];
+      const g = Math.max(d, 0), lo = Math.max(-d, 0);
+      if (i <= 14) { ag += g / 14; al += lo / 14; }
+      else { ag = (ag * 13 + g) / 14; al = (al * 13 + lo) / 14; }
+      if (i >= 14) {
+        const rsi = al === 0 ? 100 : 100 - 100 / (1 + ag / al);
+        rsiPts.push((i * xw + xw / 2).toFixed(1) + ',' + (8 + ((100 - rsi) / 100) * 52).toFixed(1));
+      }
+    }
+    const grid = [];
+    for (let t = 0; t < 4; t++) {
+      const p = pMin + (0.12 + t * 0.25) * (pMax - pMin);
+      grid.push({ y: y(p).toFixed(1), ty: (y(p) + 3).toFixed(1), lab: fmtS(p) });
+    }
+    const li = n - 1;
+    return {
+      chCandles: candles, chVols: vols,
+      chMa5: maPts(5), chMa20: maPts(20),
+      chRsi: rsiPts.join(' '),
+      chGrid: grid,
+      chLastY: y(S).toFixed(1),
+      chLastTy: (y(S) + 3.5).toFixed(1),
+      chLastLab: fmtS(S),
+      chO: fmtS(o[li]), chH: fmtS(h[li]), chL: fmtS(l[li]), chC: fmtS(closes[li]),
+      chCol: closes[li] >= o[li] ? '#ef5350' : '#26a69a',
+    };
+  }
+
+  fmtPx(v, spec) {
+    if (spec.eighth) return (Math.round(v * 8) / 8).toFixed(3);
+    return v.toFixed(spec.pdp);
+  }
+
+  chainData(spec, S, ivNow) {
+    const step = spec.step;
+    const atmK = Math.round(S / step) * step;
+    const k0 = atmK - 9 * step;
+    const T = spec.dte / 365, r = 0.02;
+    const rows = [];
+    for (let i = 0; i < 20; i++) {
+      const k = k0 + i * step;
+      const x = (k - S) / (10 * step);
+      const ivK = Math.max(5, ivNow * (1 + 0.10 * x * x) - ivNow * 0.03 * x);
+      const sig = ivK / 100;
+      const { call, put, d1 } = this.bs(S, k, T, sig, r);
+      const tick = Math.max(spec.qtick, call * 0.004);
+      const pTick = Math.max(spec.qtick, put * 0.004);
+      const h1 = this.hash(k), h2 = this.hash(k + 7);
+      const pf = Math.max(0.25, 1.7 - Math.abs(i - 9.5) * 0.14);
+      const cOi = Math.round((1500 + h1 * 11000) * pf / 10) * 10;
+      const pOi = Math.round((1400 + h2 * 10000) * pf / 10) * 10;
+      const atm = k === atmK;
+      const cItm = k < S, pItm = k > S;
+      const buy = spec.tag === 'TXO' && k === 22000;
+      const sell = spec.tag === 'TXO' && k === 22200;
+      const baseBg = atm ? 'rgba(255,255,255,.06)' : '';
+      const cBg = baseBg || (cItm ? 'rgba(239,83,80,.08)' : '');
+      const pBg = baseBg || (pItm ? 'rgba(38,166,154,.08)' : '');
+      rows.push({
+        kTxt: spec.step < 1 ? k.toFixed(2) : String(Math.round(k)),
+        atm, buy, sell,
+        fw: atm ? 700 : 400,
+        kFw: atm ? 700 : 500,
+        kFs: atm ? '13px' : '12px',
+        kBg: baseBg,
+        cBg, pBg,
+        cBaBg: buy ? 'rgba(240,192,104,.10)' : cBg,
+        pBaBg: pBg,
+        cRing: buy ? 'inset 0 0 0 1px rgba(240,192,104,.8)' : 'none',
+        pRing: sell ? 'inset 0 0 0 1px rgba(95,163,212,.8)' : 'none',
+        cOi: cOi.toLocaleString('en-US'),
+        pOi: pOi.toLocaleString('en-US'),
+        cVol: Math.round(cOi * (0.06 + h2 * 0.18)).toLocaleString('en-US'),
+        pVol: Math.round(pOi * (0.06 + h1 * 0.18)).toLocaleString('en-US'),
+        cIv: ivK.toFixed(1) + '%',
+        pIv: ivK.toFixed(1) + '%',
+        cDl: '+' + this.ncdf(d1).toFixed(2).replace('0.', '.'),
+        pDl: (this.ncdf(d1) - 1).toFixed(2).replace('0.', '.'),
+        cBa: this.fmtPx(Math.max(call - tick, tick), spec) + '/' + this.fmtPx(call + tick, spec),
+        pBa: this.fmtPx(Math.max(put - pTick, pTick), spec) + '/' + this.fmtPx(put + pTick, spec),
+      });
+      if (sell) { rows[rows.length - 1].pRing = 'none'; rows[rows.length - 1].cRing = 'inset 0 0 0 1px rgba(95,163,212,.8)'; rows[rows.length - 1].cBaBg = 'rgba(95,163,212,.12)'; }
+    }
+    // SELL badge belongs on the call side (both legs are calls)
+    return { rows, atmK, k0 };
+  }
+
+  iv3dData(ivNow) {
+    const smile = [1.6, 1.0, 0.4, 0.1, 0.0, 0.1, 0.4, 0.8, 1.3, 1.9];
+    const exps = [['W1', 1.2], ['F1', 0], ['M', -0.4], ['W3', -0.8], ['SEP', -1.1]];
+    const shifts = exps.map(([, s]) => s);
+    const v = exps.map(([, s]) => smile.map((b) => ivNow + b + s));
+    // Catmull-Rom sampling of the coarse data → smooth dense mesh
+    const cr = (arr, t) => {
+      const n = arr.length;
+      const i = Math.max(0, Math.min(n - 2, Math.floor(t)));
+      const f = t - i;
+      const p0 = arr[Math.max(0, i - 1)], p1 = arr[i], p2 = arr[i + 1], p3 = arr[Math.min(n - 1, i + 2)];
+      return p1 + 0.5 * f * (p2 - p0 + f * (2 * p0 - 5 * p1 + 4 * p2 - p3 + f * (3 * (p1 - p2) + p3 - p0)));
+    };
+    const val = (u, w) => ivNow + cr(smile, u) + cr(shifts, w);
+    const yaw = this.state.ivYaw;
+    const cy = Math.cos(yaw), sy = Math.sin(yaw);
+    const lo = ivNow - 1.5;
+    const proj = (u, w, vl) => {
+      const X = (u - 4.5) * cy + (w - 2) * sy;
+      const D = -(u - 4.5) * sy + (w - 2) * cy;
+      const z = (vl - lo) * 9;
+      return [260 + X * 40, 172 + D * 18 - z, D];
+    };
+    const NX = 30, NY = 14;
+    const quads = [];
+    for (let iy = 0; iy < NY; iy++) {
+      for (let ix = 0; ix < NX; ix++) {
+        const u0 = (ix * 9) / NX, u1 = ((ix + 1) * 9) / NX;
+        const w0 = (iy * 4) / NY, w1 = ((iy + 1) * 4) / NY;
+        const vs = [val(u0, w0), val(u1, w0), val(u1, w1), val(u0, w1)];
+        const c = [proj(u0, w0, vs[0]), proj(u1, w0, vs[1]), proj(u1, w1, vs[2]), proj(u0, w1, vs[3])];
+        const avg = (vs[0] + vs[1] + vs[2] + vs[3]) / 4;
+        const a = Math.min(0.75, Math.max(0.15, 0.15 + ((avg - lo - 0.3) / 4.5) * 0.6));
+        quads.push({ ord: (c[0][2] + c[1][2] + c[2][2] + c[3][2]) / 4, pts: c.map((p) => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' '), fill: 'rgba(240,192,104,' + a.toFixed(2) + ')' });
+      }
+    }
+    quads.sort((q1, q2) => q1.ord - q2.ord);
+
+    // ── axes: pick the front-facing corner so lines never hide behind the surface
+    const uL = sy >= 0 ? 0 : 9, uR = sy >= 0 ? 9 : 0;   // outer-front strike corner flips with yaw sign
+    const wF = 4;                                        // cy > 0 always ⇒ w=4 is the front row
+    const base = lo - 0.9;
+    const A = proj(uL, wF, base);   // front-left corner (origin)
+    const B = proj(uR, wF, base);   // strike axis end
+    const Cg = proj(uL, 0, base); // expiry axis end (front → back)
+    const zTop = proj(uL, wF, ivNow + 3.2);     // IV axis end
+    const axes = [
+      { x1: A[0].toFixed(1), y1: A[1].toFixed(1), x2: B[0].toFixed(1), y2: B[1].toFixed(1) },
+      { x1: A[0].toFixed(1), y1: A[1].toFixed(1), x2: Cg[0].toFixed(1), y2: Cg[1].toFixed(1) },
+      { x1: A[0].toFixed(1), y1: A[1].toFixed(1), x2: zTop[0].toFixed(1), y2: zTop[1].toFixed(1) },
+    ];
+    const axLabels = [
+      { x: ((A[0] + B[0]) / 2).toFixed(0), y: (Math.max(A[1], B[1]) + 14).toFixed(0), t: 'STRIKE →', anc: 'middle' },
+      { x: ((A[0] + Cg[0]) / 2 + (sy >= 0 ? 30 : -30)).toFixed(0), y: ((A[1] + Cg[1]) / 2 + 8).toFixed(0), t: 'EXPIRY ↗', anc: 'middle' },
+      { x: (zTop[0] - 6).toFixed(0), y: (zTop[1] - 5).toFixed(0), t: 'IV %', anc: 'end' },
+    ];
+    // IV ticks on the vertical axis
+    const axTicks = [];
+    for (let tv = Math.ceil(lo); tv <= ivNow + 3; tv += 2) {
+      const p = proj(uL, wF, tv);
+      axTicks.push({ x1: (p[0] - 4).toFixed(1), y1: p[1].toFixed(1), x2: p[0].toFixed(1), y2: p[1].toFixed(1), tx: (p[0] - 7).toFixed(0), ty: (p[1] + 2.5).toFixed(0), t: String(tv) });
+    }
+    return { quads, exps, v, axes, axLabels, axTicks };
+  }
+
+  renderVals() {
+    const st = this.state;
+    const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+    const light = this.effTheme() === 'light';
+    const P = this.products();
+    const spec = P[st.product];
+    const S = st.spots[st.product];
+    const iv = st.ivs[st.product];
+    const St = st.spots.TXO, ivT = st.ivs.TXO;
+
+    // ── TXO position analytics (P&L card / payoff / POP always describe the TXO spread)
+    const pts = (St - 21750) * 0.35 + (ivT - 20) * 2.4;
+    const pnl = Math.round(pts * 50 / 5) * 5;
+    const profit = pnl >= 0;
+    const fmtN = (n) => Math.abs(Math.round(n)).toLocaleString('en-US');
+
+    // entry fills = generated chain mids at default state (21850 / 24% / 11d)
+    const EB = this.bs(21850, 22000, 11 / 365, 0.24, 0.02).call;
+    const ES = this.bs(21850, 22200, 11 / 365, 0.24, 0.02).call;
+    const debit = EB - ES;
+    const BE = 22000 + debit;
+    const maxPts = 200 - debit;
+    const pxK = (k) => 16 + ((k - 21600) / 900) * 272;
+    const yL = (70 + debit * 0.248).toFixed(1);
+    const yP = (70 - maxPts * 0.248).toFixed(1);
+    const beX = pxK(BE).toFixed(1);
+
+    const bT = 11 / 365, bSig = Math.max(ivT, 1) / 100;
+    const dBE = (Math.log(St / BE) + (0.015 - bSig * bSig / 2) * bT) / (bSig * Math.sqrt(bT));
+    const pop = Math.round(clamp(this.ncdf(dBE) * 100, 1, 99));
+    const gcx = 55, gcy = 76.16, gr = 46;
+    const a0 = Math.atan2(60 - gcy, 12 - gcx);
+    const a1 = Math.atan2(60 - gcy, 98 - gcx);
+    const phi = a0 + (pop / 100) * (a1 - a0);
+
+    const spotXT = clamp(16 + ((St - 21600) / 900) * 272, 16, 288).toFixed(1);
+    const expPts = clamp(St - 22000, 0, 200) - debit;
+    const spotYT = clamp(70 - expPts * 0.248, 10, 130).toFixed(1);
+
+    // ── product chain
+    const chain = this.chainData(spec, S, iv);
+    const spotFrac = clamp(((S - chain.k0) / spec.step + 1) / 20, 0.02, 1).toFixed(3);
+    const fmtS = (v) => v.toLocaleString('en-US', { minimumFractionDigits: spec.sdp, maximumFractionDigits: spec.sdp });
+
+    // ── tabs / chips
+    const actBg = 'linear-gradient(150deg,oklch(0.66 0.16 250),oklch(0.55 0.18 240))';
+    const actSh = '0 1px 0 rgba(255,255,255,.18) inset,0 4px 10px -4px rgba(0,0,0,.5)';
+    const inactCol = light ? 'rgba(20,30,50,.6)' : 'rgba(255,255,255,.65)';
+    const tabV = (name) => ({
+      bg: st.tab === name ? actBg : 'transparent',
+      col: st.tab === name ? '#fff' : inactCol,
+      sh: st.tab === name ? actSh : 'none',
+    });
+    const tc = tabV('chain'), tk = tabV('calc'), ti = tabV('iv'), tch = tabV('chart');
+    const chipV = (on) => ({ bg: on ? actBg : 'transparent', col: on ? '#fff' : inactCol });
+    const lA = chipV(st.layout === 'a'), lB = chipV(st.layout === 'b'), lC = chipV(st.layout === 'c');
+    const i3 = chipV(st.ivView === '3d'), iH = chipV(st.ivView !== '3d');
+
+    // ── layouts
+    const LAY = {
+      a: { cols: 'minmax(460px,1fr) minmax(340px,392px)', areas: "'chain pnl' 'chain payoff' 'chain greeks' 'chain legs'" },
+      b: { cols: '1fr 1fr', areas: "'chain chain' 'pnl payoff' 'greeks legs'" },
+      c: { cols: '1.1fr 1fr 1fr', areas: "'chain chain chain' 'payoff pnl legs' 'greeks greeks greeks'" },
+    };
+    const lay = LAY[st.layout];
+
+    // ── theoretical BS (Calculator, TXO)
+    const K = st.strike, dte = st.dte;
+    const rr = 0.015, T = Math.max(dte, 0.5) / 365, sig = Math.max(ivT, 1) / 100;
+    const { call, put } = this.bs(St, K, T, sig, rr);
+
+    // ── IV surface (selected product)
+    const surf = this.iv3dData(iv);
+    const sLabels = chain.rows.filter((_, i) => i % 2 === 0).map((r, ix) => {
+      const p = ((ixx) => {
+        const cy2 = Math.cos(st.ivYaw), sy2 = Math.sin(st.ivYaw);
+        const X = (ixx - 4.5) * cy2 + (4.6 - 2) * sy2;
+        const D = -(ixx - 4.5) * sy2 + (4.6 - 2) * cy2;
+        return [260 + X * 40, 172 + D * 18 + 12];
+      })(ix);
+      return { x: p[0].toFixed(0), y: p[1].toFixed(0), t: r.kTxt };
+    });
+    const eLabels = surf.exps.map(([name], iy) => {
+      const cy2 = Math.cos(st.ivYaw), sy2 = Math.sin(st.ivYaw);
+      const X = (-0.6 - 4.5) * cy2 + (iy - 2) * sy2;
+      const D = -(-0.6 - 4.5) * sy2 + (iy - 2) * cy2;
+      return { x: (260 + X * 40).toFixed(0), y: (172 + D * 18 - 14).toFixed(0), t: name };
+    });
+    const ivRows = surf.exps.map(([name], iy) => ({
+      exp: name,
+      cells: surf.v[iy].filter((_, i) => i < 10).map((val) => {
+        const a = Math.min(0.6, Math.max(0.05, ((val - (iv - 1.8)) / 4.5) * 0.55));
+        return { v: val.toFixed(1), bg: 'rgba(240,192,104,' + a.toFixed(2) + ')' };
+      }),
+    }));
+    const ivHeatHead = chain.rows.filter((_, i) => i % 2 === 0).map((r) => r.kTxt);
+
+    const setSpot = (v) => this.setState((s) => ({ spots: { ...s.spots, [s.product]: v } }));
+    const setIv = (v) => this.setState((s) => ({ ivs: { ...s.ivs, [s.product]: v } }));
+
+    const prodList = Object.keys(P).map((key) => ({
+      tag: key,
+      name: P[key].name,
+      spotTxt: st.spots[key].toLocaleString('en-US', { minimumFractionDigits: P[key].sdp, maximumFractionDigits: P[key].sdp }),
+      bg: key === st.product ? 'rgba(255,255,255,.10)' : 'transparent',
+      pick: () => this.setState({ product: key, prodMenu: false }),
+    }));
+
+    return {
+      // top bar / product
+      prodTag: spec.tag,
+      prodSpotTxt: fmtS(S),
+      prodChg: spec.chg,
+      prodChgCol: spec.chgCol,
+      prodMenuOpen: st.prodMenu,
+      toggleProdMenu: () => this.setState((s) => ({ prodMenu: !s.prodMenu })),
+      prodList,
+      settleLab: spec.settle,
+      multLab: spec.mult + ' · ATM = ' + chain.atmK.toLocaleString('en-US'),
+      dteLab: spec.dte + 'd',
+
+      // tabs
+      isChain: st.tab === 'chain', isCalc: st.tab === 'calc', isIv: st.tab === 'iv', isChart: st.tab === 'chart',
+      goChain: () => this.setState({ tab: 'chain', prodMenu: false }),
+      goCalc: () => this.setState({ tab: 'calc', prodMenu: false }),
+      goIv: () => this.setState({ tab: 'iv', prodMenu: false }),
+      goChart: () => this.setState({ tab: 'chart', prodMenu: false }),
+      chainBg: tc.bg, chainCol: tc.col, chainSh: tc.sh,
+      calcBg: tk.bg, calcCol: tk.col, calcSh: tk.sh,
+      ivBg: ti.bg, ivCol: ti.col, ivSh: ti.sh,
+      chartBg: tch.bg, chartCol: tch.col, chartSh: tch.sh,
+      ...this.chartData(spec, S, fmtS),
+
+      // layout switcher
+      setLayA: () => this.setState({ layout: 'a' }),
+      setLayB: () => this.setState({ layout: 'b' }),
+      setLayC: () => this.setState({ layout: 'c' }),
+      layABg: lA.bg, layACol: lA.col, layBBg: lB.bg, layBCol: lB.col, layCBg: lC.bg, layCCol: lC.col,
+      layCols: lay.cols, layAreas: lay.areas,
+
+      // chain
+      chainRows: chain.rows,
+      spotFrac,
+
+      // TXO analytics
+      heroTxt: (profit ? '+NT$' : 'NT$-') + fmtN(pnl),
+      heroColor: profit
+        ? (light ? 'oklch(0.60 0.13 75)' : 'oklch(0.84 0.14 75)')
+        : (light ? 'oklch(0.50 0.10 220)' : 'oklch(0.74 0.12 220)'),
+      subTxt: (pts >= 0 ? '+' : '−') + Math.abs(pts).toFixed(1) + ' pts',
+      popTxt: pop + '%',
+      popArc: 'M 12 60 A 46 46 0 0 1 ' + (gcx + gr * Math.cos(phi)).toFixed(1) + ' ' + (gcy + gr * Math.sin(phi)).toFixed(1),
+      spotXT, spotYT,
+      spotDotColor: profit ? '#ef5350' : '#26a69a',
+      legBuy: '@ ' + EB.toFixed(1),
+      legSell: '@ ' + ES.toFixed(1),
+      netDebit: debit.toFixed(1) + ' pts · NT$' + Math.round(debit * 50).toLocaleString('en-US'),
+      maxProfitTxt: '+NT$' + Math.round(maxPts * 50).toLocaleString('en-US'),
+      maxLossTxt: 'NT$-' + Math.round(debit * 50).toLocaleString('en-US'),
+      beLab: String(Math.round(BE)),
+      upLab: '↑ +' + Math.round(maxPts),
+      dnLab: '↓ -' + Math.round(debit),
+      beX,
+      lossPath: 'M16,70 L16,' + yL + ' L136.9,' + yL + ' L' + beX + ',70 Z',
+      profitPath: 'M' + beX + ',70 L197.3,' + yP + ' L288,' + yP + ' L288,70 Z',
+      payLine: 'M16,' + yL + ' L136.9,' + yL + ' L197.3,' + yP + ' L288,' + yP,
+
+      // rail (selected product)
+      spotTxt: fmtS(S),
+      ivTxt: iv + '%',
+      spotPct: (((S - spec.spot0 * 0.88) / (spec.spot0 * 1.12 - spec.spot0 * 0.88)) * 100).toFixed(1),
+      ivPct: (((iv - 10) / 70) * 100).toFixed(1),
+      onSpotDown: this.drag(spec.spot0 * 0.88, spec.spot0 * 1.12, spec.sstep, setSpot),
+      onIvDown: this.drag(10, 80, 1, setIv),
+      stress5: () => this.setState((s) => ({ spots: { ...s.spots, [s.product]: Math.round(s.spots[s.product] * 0.95 / spec.sstep) * spec.sstep }, ivs: { ...s.ivs, [s.product]: Math.min(80, s.ivs[s.product] + 15) } })),
+      stress10: () => this.setState((s) => ({ spots: { ...s.spots, [s.product]: Math.round(s.spots[s.product] * 0.90 / spec.sstep) * spec.sstep }, ivs: { ...s.ivs, [s.product]: Math.min(80, s.ivs[s.product] + 25) } })),
+      reset: () => this.setState({ spots: { TXO: 21850, ZC: 462.5, ZW: 550.0, ZS: 1182.25, CL: 72.30, NG: 3.42, ES: 6120, GC: 3352 }, ivs: { TXO: 24, ZC: 26, ZW: 29, ZS: 22, CL: 33, NG: 45, ES: 15, GC: 18 } }),
+      railOpen: st.railOpen,
+      railClosed: !st.railOpen,
+      toggleRail: () => this.setState((s) => ({ railOpen: !s.railOpen })),
+
+      // theme
+      toggleTheme: () => this.setState({ themeOverride: light ? 'dark' : 'light' }),
+      themeIcon: light ? '☀' : '☾',
+      themeLab: light ? 'Light' : 'Dark',
+
+      // calculator theo
+      strikeTxt: K.toLocaleString('en-US'),
+      dteTxt: dte + 'd',
+      strikePct: (((K - 21000) / 2000) * 100).toFixed(1),
+      dtePct: (((dte - 1) / 89) * 100).toFixed(1),
+      onStrikeDown: this.drag(21000, 23000, 50, (v) => this.setState({ strike: v })),
+      onDteDown: this.drag(1, 90, 1, (v) => this.setState({ dte: v })),
+      callPx: call.toFixed(1),
+      putPx: put.toFixed(1),
+      callNt: 'NT$' + Math.round(call * 50).toLocaleString('en-US') + ' / contract',
+      putNt: 'NT$' + Math.round(put * 50).toLocaleString('en-US') + ' / contract',
+      spotTxtTXO: St.toLocaleString('en-US'),
+      ivTxtTXO: ivT + '%',
+
+      // iv surface
+      iv3d: st.ivView === '3d',
+      ivHeat: st.ivView !== '3d',
+      setIv3d: () => this.setState({ ivView: '3d' }),
+      setIvHeat: () => this.setState({ ivView: 'heat' }),
+      iv3dBg: i3.bg, iv3dCol: i3.col, ivHeatBg: iH.bg, ivHeatCol: iH.col,
+      ivQuads: surf.quads,
+      ivSLabels: sLabels,
+      ivELabels: eLabels,
+      ivAxes: surf.axes,
+      ivAxLabels: surf.axLabels,
+      ivAxTicks: surf.axTicks,
+      ivOrbitDown: (e) => this.ivOrbit(e),
+      ivRows,
+      ivHeatHead,
+
+      // misc
+      showCone: this.props.showCone ?? true,
+    };
+  }
+}
+</script>
+</body>
+</html>
