@@ -20,7 +20,7 @@
     {
       id: 'zc', code: 'ZC', name: '玉米 Corn',
       cur: 'US$', mult: 50, unitLabel: '×$50/¢ · 5,000 bu',
-      strikeStep: 10,
+      strikeStep: 10, eighth: true,
       model: 'b76', r: 4.0, skew: 'call',
       defaultSpot: 450, defaultIv: 26,
       spotMin: 350, spotMax: 560, spotStep: 0.25,
@@ -37,7 +37,7 @@
     {
       id: 'zs', code: 'ZS', name: '黃豆 Soybeans',
       cur: 'US$', mult: 50, unitLabel: '×$50/¢ · 5,000 bu',
-      strikeStep: 20,
+      strikeStep: 20, eighth: true,
       model: 'b76', r: 4.0, skew: 'call',
       defaultSpot: 1050, defaultIv: 20,
       spotMin: 850, spotMax: 1250, spotStep: 0.25,
@@ -55,7 +55,7 @@
     {
       id: 'zw', code: 'ZW', name: '小麥 Wheat',
       cur: 'US$', mult: 50, unitLabel: '×$50/¢ · 5,000 bu',
-      strikeStep: 10,
+      strikeStep: 10, eighth: true,
       model: 'b76', r: 4.0, skew: 'call',
       defaultSpot: 550, defaultIv: 30,
       spotMin: 420, spotMax: 680, spotStep: 0.25,

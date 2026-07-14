@@ -39,15 +39,45 @@ function genChain({ spot, contract, dte = 17, product }) {
   return rows;
 }
 
-function OptionChain({ spot, contract = 'monthly', dte, product, rows: rowsProp, onAddLeg, theme = 'dark' }) {
+// Quote formatting. CBOT grains trade in eighths of a cent (P.eighth) and show
+// three decimals (e.g. 462.875); everything else shows one decimal, or two for
+// sub-1 strike steps (NG).
+function fmtPx(v, P) {
+  if (P && P.eighth) return (Math.round(v * 8) / 8).toFixed(3);
+  if (P && P.strikeStep && P.strikeStep < 1) return v.toFixed(2);
+  return v.toFixed(1);
+}
+// Delta, T-quote style: leading zero stripped, sign always shown ('+.69' / '-.31').
+function fmtDelta(d) {
+  return (d < 0 ? '-' : '+') + Math.abs(d).toFixed(2).replace(/^0/, '');
+}
+// Strike label — two decimals when the strike step is fractional (NG).
+function fmtStrike(k, step) {
+  return step < 1 ? k.toFixed(2) : String(Math.round(k));
+}
+
+const CHAIN_COLS =
+  'minmax(0,.8fr) minmax(0,.75fr) minmax(0,.6fr) minmax(0,.65fr) minmax(0,1.5fr) 84px minmax(0,1.5fr) minmax(0,.65fr) minmax(0,.6fr) minmax(0,.75fr) minmax(0,.8fr)';
+
+function OptionChain({ spot, contract = 'monthly', dte, product, rows: rowsProp, legs, onAddLeg, theme = 'dark' }) {
   const genRows = cnM(() => genChain({ spot, contract, dte, product }), [spot, contract, dte, product]);
   const rows = (rowsProp && rowsProp.length) ? rowsProp : genRows;
   const [hov, setHov] = cnS(null); // { row, side }
   const dark = theme === 'dark';
-  const colHead = dark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)';
-  const border = dark ? 'rgba(255,255,255,0.06)' : 'rgba(20,30,60,0.06)';
-  const rowAlt = dark ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.55)';
-  const itmBg = dark ? 'rgba(240,192,104,0.05)' : 'rgba(240,192,104,0.10)';
+  const P = product || {};
+  const step = rows.length > 1 ? (rows[1].strike - rows[0].strike) : (P.strikeStep || 50);
+  const colHead = dark ? 'rgba(255,255,255,0.45)' : 'rgba(20,30,50,0.45)';
+  const border = dark ? 'rgba(255,255,255,0.06)' : 'rgba(25,40,70,0.08)';
+  const rowAlt = dark ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.5)';
+
+  // Position badges: match legs to strike + type.
+  const legAt = (strike, type) => (legs || []).find((l) => l.strike === strike && l.type === type) || null;
+
+  // Spot line vertical position within the grid (data area starts below the 28px header).
+  const spotFrac = rows.length
+    ? Math.max(0.02, Math.min(1, ((spot - rows[0].strike) / step + 0.5) / rows.length))
+    : 0.5;
+  const spotTxt = step < 5 ? spot.toFixed(2) : Math.round(spot).toLocaleString();
 
   function cellClick(strike, side, opt) {
     if (!onAddLeg) return;
@@ -61,71 +91,113 @@ function OptionChain({ spot, contract = 'monthly', dte, product, rows: rowsProp,
   );
 
   return (
-    <div style={{ width: '100%', overflow: 'hidden' }}>
+    <div style={{ width: '100%' }}>
       {/* legend */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 12px 10px' }}>
-        <div style={{ fontSize: 11, opacity: 0.55 }}>
-          <span style={{ color: '#ef5350', fontWeight: 600 }}>CALL 買權</span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '4px 4px 10px' }}>
+        <div style={{ fontSize: 11, opacity: 0.7 }}>
+          <span style={{ color: '#ef5350', fontWeight: 600 }}>CALLS</span>
           <span style={{ opacity: 0.4, margin: '0 8px' }}>|</span>
-          <span style={{ color: '#26a69a', fontWeight: 600 }}>PUT 賣權</span>
+          <span style={{ color: '#26a69a', fontWeight: 600 }}>PUTS</span>
           <span style={{ opacity: 0.4, marginLeft: 12 }}>· click any row to add leg</span>
         </div>
         <div className="mono" style={{ fontSize: 10, opacity: 0.5 }}>
-          {(product && product.unitLabel) || '×50 NTD/pt'} · ATM = ${rows.find((r) => r.atm)?.strike}
+          {(product && product.unitLabel) || '×50 NTD/pt'} · ATM = {fmtStrike(rows.find((r) => r.atm)?.strike ?? spot, step)}
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr) 80px repeat(4, 1fr)', borderRadius: 12, overflow: 'hidden', border: `1px solid ${border}`, background: dark ? 'rgba(20,24,34,0.4)' : 'rgba(255,255,255,0.6)' }}>
-        {/* Header */}
-        <HCol>OI</HCol><HCol>Vol</HCol><HCol>IV</HCol><HCol>BID/ASK</HCol>
-        <div style={{ fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', color: colHead, fontWeight: 600, padding: '8px', textAlign: 'center' }}>STRIKE</div>
-        <HCol align="left">BID/ASK</HCol><HCol align="left">IV</HCol><HCol align="left">Vol</HCol><HCol align="left">OI</HCol>
+      <div className="lt-chainbg" style={{ overflowX: 'auto', borderRadius: 12, border: `1px solid ${border}`, background: dark ? 'rgba(20,24,34,0.4)' : 'rgba(255,255,255,0.55)' }}>
+        <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: CHAIN_COLS, minWidth: 900, borderRadius: 12, overflow: 'hidden', fontFamily: 'ui-monospace, SF Mono, monospace', fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>
+          {/* Header */}
+          <HCol>OI</HCol><HCol>Vol</HCol><HCol>Δ</HCol><HCol>IV</HCol><HCol>BID/ASK</HCol>
+          <div style={{ fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', color: colHead, fontWeight: 600, padding: '8px 0', textAlign: 'center' }}>STRIKE</div>
+          <HCol align="left">BID/ASK</HCol><HCol align="left">IV</HCol><HCol align="left">Δ</HCol><HCol align="left">Vol</HCol><HCol align="left">OI</HCol>
 
-        {rows.map((r, i) => {
-          const isHov = hov && hov.row === i;
-          const callItmBg = dark ? 'rgba(239,83,80,0.08)' : 'rgba(239,83,80,0.12)';
-          const putItmBg  = dark ? 'rgba(38,166,154,0.08)' : 'rgba(38,166,154,0.12)';
-          const callBg = (isHov && hov.side === 'call') ? (dark ? 'rgba(239,83,80,0.22)' : 'rgba(239,83,80,0.26)') : (r.itmCall ? callItmBg : (i % 2 ? rowAlt : 'transparent'));
-          const putBg  = (isHov && hov.side === 'put')  ? (dark ? 'rgba(38,166,154,0.22)' : 'rgba(38,166,154,0.26)') : (r.itmPut  ? putItmBg : (i % 2 ? rowAlt : 'transparent'));
-          const Cell = ({ children, area, side, align = 'right' }) => (
-            <div onClick={() => cellClick(r.strike, side, side === 'call' ? r.call : r.put)}
-                 onMouseEnter={() => setHov({ row: i, side })}
-                 onMouseLeave={() => setHov(null)}
-                 style={{
-              padding: '7px 10px', borderTop: `1px solid ${border}`, fontSize: 12,
-              fontFamily: 'ui-monospace, SF Mono, monospace', fontVariantNumeric: 'tabular-nums',
-              color: dark ? '#e8eaef' : '#1d1d22',
-              background: side === 'call' ? callBg : putBg,
-              textAlign: align, cursor: 'pointer', transition: 'background .12s',
-            }}>
-              {children}
-            </div>
-          );
-
-          return (
-            <React.Fragment key={r.strike}>
-              <Cell side="call">{r.call.oi.toLocaleString()}</Cell>
-              <Cell side="call">{r.call.vol.toLocaleString()}</Cell>
-              <Cell side="call">{r.call.iv.toFixed(1)}%</Cell>
-              <Cell side="call"><span style={{ color: '#ef5350', fontWeight: 600 }}>{r.call.bid.toFixed(1)}/{r.call.ask.toFixed(1)}</span></Cell>
-              <div style={{
-                padding: '7px 0', borderTop: `1px solid ${border}`,
-                textAlign: 'center', fontWeight: r.atm ? 700 : 500,
-                fontSize: r.atm ? 13 : 12, fontFamily: 'ui-monospace, SF Mono, monospace',
-                background: r.atm ? (dark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.85)') : 'transparent',
-                color: r.atm ? (dark ? '#fff' : '#1d1d22') : (dark ? 'rgba(255,255,255,0.85)' : '#1d1d22'),
-                position: 'relative',
+          {rows.map((r, i) => {
+            const isHov = hov && hov.row === i;
+            const callItmBg = dark ? 'rgba(239,83,80,0.08)' : 'rgba(239,83,80,0.12)';
+            const putItmBg  = dark ? 'rgba(38,166,154,0.08)' : 'rgba(38,166,154,0.12)';
+            const callBg = (isHov && hov.side === 'call') ? (dark ? 'rgba(239,83,80,0.22)' : 'rgba(239,83,80,0.26)') : (r.itmCall ? callItmBg : (i % 2 ? rowAlt : 'transparent'));
+            const putBg  = (isHov && hov.side === 'put')  ? (dark ? 'rgba(38,166,154,0.22)' : 'rgba(38,166,154,0.26)') : (r.itmPut  ? putItmBg : (i % 2 ? rowAlt : 'transparent'));
+            const callLeg = legAt(r.strike, 'call');
+            const putLeg = legAt(r.strike, 'put');
+            const Cell = ({ children, side, align = 'right' }) => (
+              <div onClick={() => cellClick(r.strike, side, side === 'call' ? r.call : r.put)}
+                   onMouseEnter={() => setHov({ row: i, side })}
+                   onMouseLeave={() => setHov(null)}
+                   style={{
+                padding: '7px 10px', borderTop: `1px solid ${border}`,
+                color: dark ? '#e8eaef' : '#1c2433',
+                background: side === 'call' ? callBg : putBg,
+                textAlign: align, cursor: 'pointer', transition: 'background .12s',
               }}>
-                {r.atm && <span style={{ position: 'absolute', left: 6, fontSize: 8, padding: '1px 4px', borderRadius: 3, background: 'oklch(0.66 0.16 250)', color: '#fff', fontWeight: 700, letterSpacing: 0.4 }}>ATM</span>}
-                {r.strike}
+                {children}
               </div>
-              <Cell side="put" align="left"><span style={{ color: '#26a69a', fontWeight: 600 }}>{r.put.bid.toFixed(1)}/{r.put.ask.toFixed(1)}</span></Cell>
-              <Cell side="put" align="left">{r.put.iv.toFixed(1)}%</Cell>
-              <Cell side="put" align="left">{r.put.vol.toLocaleString()}</Cell>
-              <Cell side="put" align="left">{r.put.oi.toLocaleString()}</Cell>
-            </React.Fragment>
-          );
-        })}
+            );
+            // BID/ASK cell with optional position badge + ring.
+            const BaCell = ({ side }) => {
+              const leg = side === 'call' ? callLeg : putLeg;
+              const opt = side === 'call' ? r.call : r.put;
+              const ringCol = leg ? (leg.side === 'long' ? 'rgba(240,192,104,0.85)' : 'rgba(95,163,212,0.85)') : null;
+              return (
+                <div onClick={() => cellClick(r.strike, side, opt)}
+                     onMouseEnter={() => setHov({ row: i, side })}
+                     onMouseLeave={() => setHov(null)}
+                     style={{
+                  padding: '7px 10px', borderTop: `1px solid ${border}`,
+                  background: side === 'call' ? callBg : putBg,
+                  boxShadow: ringCol ? `inset 0 0 0 1px ${ringCol}` : 'none', borderRadius: ringCol ? 6 : 0,
+                  textAlign: side === 'call' ? 'right' : 'left', cursor: 'pointer', position: 'relative', whiteSpace: 'nowrap',
+                }}>
+                  {leg && (
+                    <span style={{
+                      position: 'absolute', left: 5, top: '50%', transform: 'translateY(-50%)',
+                      fontSize: 7.5, fontWeight: 800, letterSpacing: 0.4, padding: '2px 5px', borderRadius: 4, lineHeight: 1,
+                      background: leg.side === 'long' ? '#f0c068' : '#5fa3d4', color: '#0a0d14',
+                    }}>{leg.side === 'long' ? 'BUY +' : 'SELL −'}{leg.qty}</span>
+                  )}
+                  <span style={{ color: side === 'call' ? '#ef5350' : '#26a69a', fontWeight: 600 }}>
+                    {fmtPx(opt.bid, P)}/{fmtPx(opt.ask, P)}
+                  </span>
+                </div>
+              );
+            };
+
+            return (
+              <React.Fragment key={r.strike}>
+                <Cell side="call">{r.call.oi.toLocaleString()}</Cell>
+                <Cell side="call">{r.call.vol.toLocaleString()}</Cell>
+                <Cell side="call"><span style={{ opacity: 0.85 }}>{fmtDelta(r.call.delta)}</span></Cell>
+                <Cell side="call">{r.call.iv.toFixed(1)}%</Cell>
+                <BaCell side="call" />
+                <div style={{
+                  padding: '7px 0', borderTop: `1px solid ${border}`,
+                  textAlign: 'center', fontWeight: r.atm ? 700 : 500,
+                  fontSize: r.atm ? 13 : 12,
+                  background: r.atm ? (dark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.85)') : 'transparent',
+                  color: r.atm ? (dark ? '#fff' : '#1c2433') : (dark ? 'rgba(255,255,255,0.85)' : '#1c2433'),
+                  position: 'relative',
+                }}>
+                  {r.atm && <span style={{ position: 'absolute', left: 6, fontSize: 8, padding: '1px 4px', borderRadius: 3, background: 'oklch(0.66 0.16 250)', color: '#fff', fontWeight: 700, letterSpacing: 0.4 }}>ATM</span>}
+                  {fmtStrike(r.strike, step)}
+                </div>
+                <BaCell side="put" />
+                <Cell side="put" align="left">{r.put.iv.toFixed(1)}%</Cell>
+                <Cell side="put" align="left"><span style={{ opacity: 0.85 }}>{fmtDelta(r.put.delta)}</span></Cell>
+                <Cell side="put" align="left">{r.put.vol.toLocaleString()}</Cell>
+                <Cell side="put" align="left">{r.put.oi.toLocaleString()}</Cell>
+              </React.Fragment>
+            );
+          })}
+
+          {/* Spot line + pill overlay */}
+          <div className="spotline" style={{ position: 'absolute', left: 0, right: 0, height: 1, background: dark ? 'rgba(255,255,255,0.35)' : 'rgba(20,30,50,0.4)', top: `calc(28px + (100% - 28px) * ${spotFrac})`, pointerEvents: 'none' }} />
+          <div className="spotpill" style={{
+            position: 'absolute', left: '50%', transform: 'translate(-50%,-50%)', top: `calc(28px + (100% - 28px) * ${spotFrac})`,
+            background: dark ? '#10141d' : '#1c2433', border: `1px solid ${dark ? 'rgba(255,255,255,0.3)' : 'rgba(20,30,50,0.5)'}`,
+            color: '#fff', fontVariantNumeric: 'tabular-nums', fontSize: 9.5, fontWeight: 700, padding: '2px 8px', borderRadius: 999,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.5)', pointerEvents: 'none', whiteSpace: 'nowrap',
+          }}>{spotTxt}</div>
+        </div>
       </div>
     </div>
   );
@@ -133,3 +205,5 @@ function OptionChain({ spot, contract = 'monthly', dte, product, rows: rowsProp,
 
 window.OptionChain = OptionChain;
 window.genChain = genChain;
+window.fmtPx = fmtPx;
+window.fmtStrike = fmtStrike;
