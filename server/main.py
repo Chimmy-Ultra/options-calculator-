@@ -22,11 +22,18 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from ib_async import IB, Future, FuturesOption
 
-# 標準（月）選擇權 trading class；weekly（ZC1-5 / Monday / Wednesday）先不接
+# Standard (monthly) options trading class; weeklies not wired yet.
+# tradingClass for the newer products is a best-guess for the standard monthly
+# class — _sec_def() falls back to the class with the most expirations if it
+# doesn't match, so a wrong guess degrades gracefully.
 PRODUCTS = {
     "zc": {"symbol": "ZC", "exchange": "CBOT", "tradingClass": "OZC", "strikeStep": 10.0},
     "zs": {"symbol": "ZS", "exchange": "CBOT", "tradingClass": "OZS", "strikeStep": 20.0},
     "zw": {"symbol": "ZW", "exchange": "CBOT", "tradingClass": "OZW", "strikeStep": 10.0},
+    "es": {"symbol": "ES", "exchange": "CME", "tradingClass": "ES", "strikeStep": 25.0},
+    "gc": {"symbol": "GC", "exchange": "COMEX", "tradingClass": "OG", "strikeStep": 25.0},
+    "cl": {"symbol": "CL", "exchange": "NYMEX", "tradingClass": "LO", "strikeStep": 1.0},
+    "ng": {"symbol": "NG", "exchange": "NYMEX", "tradingClass": "ON", "strikeStep": 0.1},
 }
 
 IB_HOST = os.environ.get("IB_HOST", "127.0.0.1")
