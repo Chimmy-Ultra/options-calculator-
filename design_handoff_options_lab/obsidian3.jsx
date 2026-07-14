@@ -59,12 +59,6 @@ const TXO_EXPIRIES = [
   { id: 'w4', label: 'W4', dte: 25, type: 'weekly',  dow: 'wed', date: '6/03' },
 ];
 
-const SAVED_SCENARIOS = [
-  { t: '2w ago', name: 'Bull call 21500/700', pnl: 12250 },
-  { t: '1w ago', name: 'Iron condor', pnl: -4000 },
-  { t: '3d ago', name: 'Put credit spread', pnl: 9000 },
-  { t: 'today',  name: 'Bull call 21900/22100', pnl: 19000 },
-];
 
 function Glass2({ tone = 'panel', radius = 18, padding = 18, style, children, ...rest }) {
   const styles = {
@@ -515,7 +509,7 @@ function Obsidian3() {
       {/* WORKSPACE BODY */}
       {workspace === 'calc' && (
         <CalcWorkspace
-          P={P} theme={theme} light={light}
+          P={P} theme={theme} light={light} rows={chainRows}
           legs={legs} setLegs={setLegs}
           spot={spot} setSpot={setSpot}
           spotMin={spotMin} spotMax={spotMax}
@@ -590,7 +584,7 @@ function Obsidian3() {
 }
 
 // ───────────────────────────────────────────────── CALCULATOR WORKSPACE
-function CalcWorkspace({ P, theme = 'dark', legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
+function CalcWorkspace({ P, theme = 'dark', rows, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
   const light = theme === 'light';
   const hoverInfo = uM(() => {
     if (!hover) return null;
@@ -640,39 +634,11 @@ function CalcWorkspace({ P, theme = 'dark', legs, setLegs, spot, setSpot, spotMi
           <LegEditor legs={legs} onChange={setLegs} theme={theme} />
         </Glass2>
 
-        <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow right={
-            <span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>1-click</span>
-          }>Stress test</Eyebrow>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-            {[
-              { label: '−5% & IV+15%', spot: -5, iv: 15 },
-              { label: '+3% & IV−5%',  spot: 3,  iv: -5 },
-              { label: '−10% crash',   spot: -10, iv: 21 },
-              { label: 'Reset',        spot: 0,  iv: 0,  reset: true },
-            ].map((s, i) => (
-              <button key={i} onClick={() => {
-                if (s.reset) { setSpot(P.defaultSpot); setIv(P.defaultIv); return; }
-                setSpot(Math.round(P.defaultSpot * (1 + s.spot/100)));
-                setIv(Math.max(P.ivMin, Math.min(P.ivMax, P.defaultIv + s.iv)));
-              }} style={{
-                padding: '8px 6px', borderRadius: 8, fontSize: 10, fontWeight: 600,
-                border: '1px solid rgba(128,140,170,0.28)', cursor: 'pointer',
-                background: 'rgba(128,140,170,0.12)', color: 'inherit', fontFamily: 'inherit',
-              }}>{s.label}</button>
-            ))}
-          </div>
-        </Glass2>
-
-        <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow>Saved scenarios</Eyebrow>
-          <ScenarioTimeline theme={theme} items={SAVED_SCENARIOS} current={SAVED_SCENARIOS.length - 1} />
-        </Glass2>
-
-        {/* Single-contract pricer — folded in from the removed Pricer tab. */}
+        {/* Single-contract pricer — folded in from the removed Pricer tab.
+            Auto: pick a strike, IV is pulled from the chain smile, price is live. */}
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{P.model === 'b76' ? 'Black-76' : 'Black-Scholes'}</span>}>Option Pricer</Eyebrow>
-          <OptionPricer key={P.id} product={P} spot={spot} iv={iv} dte={dte} theme={theme} accent={accent} />
+          <OptionPricer key={P.id} product={P} spot={spot} iv={iv} dte={dte} rows={rows} theme={theme} accent={accent} />
         </Glass2>
       </div>
 
@@ -1482,8 +1448,8 @@ function MobileApp({
         )}
         {workspace === 'pricer' && (
           <Glass2 tone="panel" padding={14}>
-            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>單張定價</span>}>Option Pricer</Eyebrow>
-            <OptionPricer key={P.id} product={P} spot={spot} iv={iv} dte={dte} theme={theme} accent={accent} />
+            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>single contract</span>}>Option Pricer</Eyebrow>
+            <OptionPricer key={P.id} product={P} spot={spot} iv={iv} dte={dte} rows={chainRows} theme={theme} accent={accent} />
           </Glass2>
         )}
         {workspace === 'iv' && (

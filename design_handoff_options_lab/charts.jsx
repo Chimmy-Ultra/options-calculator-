@@ -533,27 +533,42 @@ function MaxPain({ spot, contract = 'monthly', theme = 'dark', height = 160, wid
 // Pick a strike + call/put, see theoretical price + full Greeks (Δ Γ V Θ Ρ).
 // Manages its own type / strike / r state internally; reads spot+iv from props
 // so users can sync to the global TXO_SPOT / IV slider with the "最新" buttons.
-function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = '#7c5cf0', product }) {
+function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = '#7c5cf0', product, rows }) {
   const dark = theme === 'dark';
-  // 換商品時請在呼叫端用 key={product.id} 重掛，內部 state 才會跟著重設。
+  // Auto pricer: spot / DTE come from the current market context (props); the IV
+  // is pulled from the option-chain smile at the chosen strike, so price + Greeks
+  // compute live with no manual entry. Remount on product change via key.
   const P = product || (window.getProduct && window.getProduct('txo'))
     || { cur: 'NT$', mult: 50, strikeStep: 50, model: 'bs', r: defaultR, unitLabel: '×50 NTD/pt' };
-  const baseR = P.r != null ? P.r : defaultR;
+  const r = (P.r != null ? P.r : defaultR) / 100;
+  const step = P.strikeStep;
+  const atm = Math.round(spot / step) * step;
   const [type, setType] = React.useState('call');
-  const [strike, setStrike] = React.useState(Math.round(spot / P.strikeStep) * P.strikeStep);
-  const [pricerSpot, setPricerSpot] = React.useState(spot);
-  const [pricerIv, setPricerIv] = React.useState(iv);
-  const [pricerDte, setPricerDte] = React.useState(dte);
-  const [r, setR] = React.useState(baseR);
+  const [strike, setStrike] = React.useState(atm);
   const [marketPx, setMarketPx] = React.useState('');
 
+  const kMin = (rows && rows.length) ? rows[0].strike : atm - 8 * step;
+  const kMax = (rows && rows.length) ? rows[rows.length - 1].strike : atm + 8 * step;
+
+  // IV at the chosen strike, pulled from the smile (nearest chain row); the chain
+  // already carries the real (or mock) per-strike IV. Falls back to the ATM iv.
+  const strikeIv = useMemoM(() => {
+    if (rows && rows.length) {
+      let best = rows[0], bd = Infinity;
+      for (const row of rows) { const d = Math.abs(row.strike - strike); if (d < bd) { bd = d; best = row; } }
+      const v = type === 'call' ? best.call.iv : best.put.iv;
+      if (v) return v;
+    }
+    return iv;
+  }, [rows, strike, type, iv]);
+
   const result = useMemoM(() => {
-    const price = window.bsPrice ? window.bsPrice(type, pricerSpot, strike, pricerIv, pricerDte, r / 100, P.model) : 0;
+    const price = window.bsPrice ? window.bsPrice(type, spot, strike, strikeIv, dte, r, P.model) : 0;
     const g = window.bsGreeks
-      ? window.bsGreeks(type, pricerSpot, strike, pricerIv, pricerDte, r / 100, P.model)
+      ? window.bsGreeks(type, spot, strike, strikeIv, dte, r, P.model)
       : { delta: 0, gamma: 0, theta: 0, vega: 0, rho: 0 };
     return { price, ...g };
-  }, [type, pricerSpot, strike, pricerIv, pricerDte, r, P.model]);
+  }, [type, spot, strike, strikeIv, dte, r, P.model]);
 
   const mp = parseFloat(marketPx);
   const hasMarket = !isNaN(mp) && mp > 0;
@@ -569,67 +584,44 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
     fontFamily: 'ui-monospace, SF Mono, monospace', fontSize: 13, fontWeight: 600,
     fontVariantNumeric: 'tabular-nums', outline: 'none',
   };
-  const snapBtn = {
-    fontSize: 9, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase',
-    padding: '5px 8px', borderRadius: 6, border: `1px solid ${fieldBorder}`,
-    background: 'rgba(255,255,255,0.04)', color: dark ? '#e8eaef' : '#1d1d22',
-    cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit',
-  };
   const upColor = '#ef5350', downColor = '#26a69a';
-
-  function field(label, value, onChange, sub = null, snap = null, snapLabel = 'now') {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <span style={labelStyle}>{label}</span>
-        <div style={{ display: 'flex', gap: 4 }}>
-          <input type="number" value={value} onChange={(e) => onChange(parseFloat(e.target.value))}
-            style={{ ...fieldStyle, flex: 1 }} step="0.01" />
-          {snap && (
-            <button onClick={snap} style={snapBtn}>{snapLabel}</button>
-          )}
-        </div>
-        {sub && <span style={{ fontSize: 9, opacity: 0.45, fontFamily: 'ui-monospace, SF Mono, monospace' }}>{sub}</span>}
-      </div>
-    );
-  }
+  const fmtK = (k) => (step < 1 ? k.toFixed(2) : String(Math.round(k)));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {/* Type toggle + Strike row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={labelStyle}>Type</span>
-          <div style={{ display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden', border: `1px solid ${fieldBorder}` }}>
-            {[
-              { id: 'call', label: 'CALL', color: upColor },
-              { id: 'put',  label: 'PUT',  color: downColor },
-            ].map((opt) => {
-              const active = type === opt.id;
-              return (
-                <button key={opt.id} onClick={() => setType(opt.id)} style={{
-                  flex: 1, padding: '8px 4px', border: 'none', cursor: 'pointer',
-                  background: active ? `${opt.color}33` : 'transparent',
-                  color: active ? opt.color : (dark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.55)'),
-                  fontWeight: 700, fontSize: 11, letterSpacing: 0.3, fontFamily: 'inherit',
-                }}>{opt.label}</button>
-              );
-            })}
-          </div>
+      {/* Type toggle */}
+      <div style={{ display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden', border: `1px solid ${fieldBorder}` }}>
+        {[
+          { id: 'call', label: 'CALL', color: upColor },
+          { id: 'put',  label: 'PUT',  color: downColor },
+        ].map((opt) => {
+          const active = type === opt.id;
+          return (
+            <button key={opt.id} onClick={() => setType(opt.id)} style={{
+              flex: 1, padding: '8px 4px', border: 'none', cursor: 'pointer',
+              background: active ? `${opt.color}33` : 'transparent',
+              color: active ? opt.color : (dark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.55)'),
+              fontWeight: 700, fontSize: 11, letterSpacing: 0.3, fontFamily: 'inherit',
+            }}>{opt.label}</button>
+          );
+        })}
+      </div>
+
+      {/* Strike slider — IV auto-pulled from the smile; spot / DTE from context */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <span style={labelStyle}>Strike</span>
+          <span className="tnum" style={{ fontSize: 13, fontWeight: 600, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
+            {fmtK(strike)}{strike === atm ? ' · ATM' : ''}
+          </span>
         </div>
-        {field('Strike', strike, (v) => setStrike(v || 0), null,
-          () => setStrike(Math.round(pricerSpot / P.strikeStep) * P.strikeStep), 'ATM')}
-      </div>
-
-      {/* Spot + IV row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        {field('Underlying', pricerSpot, setPricerSpot, null, () => setPricerSpot(spot))}
-        {field('IV %', pricerIv, setPricerIv, null, () => setPricerIv(iv))}
-      </div>
-
-      {/* DTE + Risk-free rate row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        {field('Days to expiry', pricerDte, setPricerDte, null, () => setPricerDte(dte), 'sync')}
-        {field('Risk-free %', r, setR, null, () => setR(baseR), 'default')}
+        <input type="range" min={kMin} max={kMax} step={step} value={strike}
+          onChange={(e) => setStrike(parseFloat(e.target.value))} style={{ width: '100%', accentColor: accent }} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, opacity: 0.5, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
+          <span>{fmtK(kMin)}</span>
+          <span>spot {spot.toLocaleString()} · {dte}d · IV {strikeIv.toFixed(1)}%</span>
+          <span>{fmtK(kMax)}</span>
+        </div>
       </div>
 
       {/* Big theoretical price card */}
@@ -647,7 +639,7 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
               color: dark ? '#e8eaef' : '#1d1d22',
             }}>{result.price.toFixed(2)}</div>
             <div style={{ fontSize: 11, opacity: 0.55, marginTop: 4, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
-              ≈ {P.cur}{Math.round(result.price * P.mult).toLocaleString()} ({type === 'call' ? 'CALL' : 'PUT'} K={strike})
+              ≈ {P.cur}{Math.round(result.price * P.mult).toLocaleString()} ({type === 'call' ? 'CALL' : 'PUT'} K={fmtK(strike)})
             </div>
           </div>
           {hasMarket && (
