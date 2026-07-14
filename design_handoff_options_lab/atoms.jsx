@@ -174,10 +174,22 @@ function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, i
         const clampX = (s) => Math.max(pad, Math.min(W - pad, xat(s)));
         const x2lo = clampX(twoSigDown), x2hi = clampX(twoSigUp);
         const x1lo = clampX(oneSigDown), x1hi = clampX(oneSigUp);
+        const coneLine = theme === 'dark' ? 'rgba(167,139,250,0.85)' : 'rgba(109,40,217,0.7)';
+        const inRange = (s) => s > xs[0] && s < xs[xs.length - 1];
+        const bound = (x, s, dash, label) => (
+          <g>
+            <line x1={x} x2={x} y1={pad / 2} y2={H - pad} stroke={coneLine} strokeWidth="1" strokeDasharray={dash} strokeOpacity="0.9" />
+            {inRange(s) && <text x={x} y={pad / 2 + 7} fontSize="7.5" fill={coneLine} textAnchor="middle" fontWeight="700" fontFamily="ui-monospace, SF Mono, monospace">{label}</text>}
+          </g>
+        );
         return (
           <g>
             <rect x={x2lo} y={pad/2} width={Math.max(0, x2hi - x2lo)} height={H - pad} fill={coneColor} fillOpacity="0.5" />
             <rect x={x1lo} y={pad/2} width={Math.max(0, x1hi - x1lo)} height={H - pad} fill={coneColor} />
+            {bound(x2lo, twoSigDown, '1 3', '−2σ')}
+            {bound(x1lo, oneSigDown, '3 2', '−1σ')}
+            {bound(x1hi, oneSigUp, '3 2', '+1σ')}
+            {bound(x2hi, twoSigUp, '1 3', '+2σ')}
           </g>
         );
       })()}
