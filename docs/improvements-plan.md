@@ -3,7 +3,7 @@
 > **Status (2026-07-16): PENDING — not started.** Scope settled with the owner.
 > Eight increments: ① state persistence ② live auto-refresh + freshness stamp
 > ③ per-leg expiry ④ IB positions import ⑤ fees & tax ⑥ chain BUY/SELL popover
-> ⑦ 3D surface auto-rotate fix ⑧ in-app help drawer (English).
+> ⑦ 3D surface auto-rotate fix ⑧ layered in-app help (tooltips + drawer, English).
 > **Mobile design port is explicitly OUT of this batch** (next batch, own plan).
 
 **Read `CLAUDE.md` first.** Zero-build Babel frontend, `window.*` globals, no
@@ -176,25 +176,53 @@ Owner: keeps the surface, but "it starts spinning again when I let go".
 - Check `iv-surface.js` for the same idle-spin pattern; if present, apply the
   identical fix.
 
-## Increment ⑧ — in-app help drawer (English, hideable)
+## Increment ⑧ — layered in-app help (English, hideable)
 
 Owner: "I don't really know how to read these — write an English tutorial
 inside the app, must be hideable."
 
-- **New file `design_handoff_options_lab/help.jsx`** (Babel .jsx):
-  `window.HelpDrawer = ({ open, onClose, workspace, theme }) => ...` plus a
-  `HELP_SECTIONS` data array. Register it in `index.html`
-  (`<script type="text/babel" src="help.jsx">` before obsidian3.jsx) and in
-  the service-worker `APP_SHELL`.
+**How comparable products do it** (surveyed 2026-07): OptionStrat,
+thinkorswim and tastytrade put a plain-English hover tooltip directly on
+every metric — help lives where the eye already is, not in a separate manual.
+Robinhood layers it (one-liner first, expand for more — progressive
+disclosure). TradingView adds a one-time first-run hint so users discover the
+help exists, then never nags again. A standalone manual alone is the weakest
+pattern; the tooltip layer matters most. So this increment is **three
+layers**, in priority order:
+
+### ⑧a — contextual tooltips (`HelpTip`) — the layer that matters most
+
+- **New file `design_handoff_options_lab/help.jsx`** (Babel .jsx) exporting on
+  window: `HelpTip`, `HelpDrawer`, and a `HELP_COPY` dictionary
+  (`{ key: { term, short, example? } }`).
+- `HelpTip({ k, children })` wraps a label: renders `children` with a subtle
+  dotted underline (`border-bottom: 1px dotted`, opacity .5); on hover
+  (desktop only) shows a ~240px Glass-style popover: **term** in bold,
+  `short` (1–2 plain-English sentences), optional `example` line in mono
+  (concrete numbers beat definitions: "Δ +0.50 → position gains ≈ 0.5 pt per
+  1-pt rise of the underlying").
+- Wrap these existing labels (keys in `HELP_COPY`): the Greek tiles/labels
+  (Δ Γ Θ V ρ) wherever they appear as tiles, `POP`, `Max pain`, `OI`, `VOL`,
+  `IV`, `DTE`, `breakeven`, `Max profit` / `Max loss`, `Theoretical price`,
+  and the panel eyebrows `P&L now`, `P&L what-if`, `Payoff`, `Greeks profile`,
+  `P&L distribution`, `Option Pricer`, `IV Surface`. Desktop only; do not
+  touch mobile markup.
+- Positioning: fixed-position popover clamped to viewport; no new deps,
+  no portals needed (compute from `getBoundingClientRect`).
+
+### ⑧b — help drawer (the manual / glossary, backup layer)
+
+- Register `help.jsx` in `index.html` (`<script type="text/babel"
+  src="help.jsx">` before obsidian3.jsx) and in the service-worker
+  `APP_SHELL`.
 - **Trigger**: a `?` chip in the desktop top bar (after the theme toggle),
-  toggles `helpOpen` state in `Obsidian3`. Desktop only (hide on
-  phone/fold viewports).
+  toggles `helpOpen` state in `Obsidian3`. Desktop only (hide on phone/fold).
 - **Drawer**: fixed right side (`right:24; top:110; bottom:20; width:320`),
-  Glass2 raised, `overflow-y:auto`, `×` close button, Esc closes,
-  z-index above panels. On open, scroll to the section matching the current
+  Glass2 raised, `overflow-y:auto`, `×` close button, Esc closes, z-index
+  above panels. On open, scroll to the section matching the current
   `workspace`.
-- **Sections** (all copy in plain English, 1–3 sentences per concept,
-  written for a non-quant):
+- **Sections** (plain English, 1–3 sentences per concept, non-quant reader;
+  reuse/extend `HELP_COPY` so tooltip and drawer copy stay consistent):
   - *Option chain*: what OI / VOL / Δ / IV / BID·ASK columns mean; the spot
     line; click a price to add a leg; BUY/SELL badges are your positions.
   - *Calculator — 3D P&L surface* (owner explicitly asked): "Horizontal axis =
@@ -203,15 +231,21 @@ inside the app, must be hideable."
     Hover to read exact numbers; drag to orbit, scroll to zoom."
   - *Payoff chart*: solid line = P&L at expiry, faint line = P&L today,
     breakevens, the shaded cone = ±1σ/±2σ expected move.
-  - *Greeks*: one-liners for Δ Γ Θ V ρ ("Δ: how much the position gains per
-    1-point move of the underlying", etc.).
+  - *Greeks*: one-liners for Δ Γ Θ V ρ with a numeric example each.
   - *P&L distribution & POP*: probability-weighted outcomes; POP = chance of
     any profit at expiry.
   - *What-if rail*: sliders re-price everything at a hypothetical spot/IV.
   - *IV surface*: strike × expiry × IV; smile/skew in one sentence
     (grains skew to calls, TXO to puts).
-- Content lives in `HELP_SECTIONS`; Opus writes the full copy following the
-  bullets above.
+
+### ⑧c — discoverability (one-time hint)
+
+- First visit only (localStorage flag `optionsLab.helpSeen`, set on dismiss
+  OR on first drawer open): a small pill next to the `?` chip —
+  `New here? Click ? for a guide` with an `×`. Never shown again after.
+- A full spotlight product tour (Intro.js-style) is explicitly **out of
+  scope** — hand-rolling spotlight positioning across three layouts isn't
+  worth it; tooltips + drawer cover the need.
 
 ## CLAUDE.md updates (same batch, last commit)
 
@@ -248,8 +282,10 @@ existing setup: `vpricer.js` et al.):
      update; Esc closes.
    - ⑦: drag the Calculator 3D surface, release, wait 5 s → no spin; fresh
      reload → idle spin still present before first drag.
-   - ⑧: `?` opens drawer scrolled to current tab's section; Esc/× closes;
-     hidden on ~390px viewport.
+   - ⑧: hover a Greek tile / POP / eyebrow → tooltip popover with copy,
+     clamped inside the viewport; `?` opens drawer scrolled to current tab's
+     section; Esc/× closes; first load shows the hint pill once (gone after
+     dismiss + reload); all of it hidden on ~390px viewport.
 
 ## Endgame
 
