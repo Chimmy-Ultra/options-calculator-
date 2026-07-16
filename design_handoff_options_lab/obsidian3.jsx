@@ -302,6 +302,30 @@ function SettlementCountdown({ dte, note = '13:30' }) {
   );
 }
 
+// Freshness stamp (②) — shows the time of the last successful live fetch and
+// turns amber "STALE" once the data is older than 45s. Its own 1s ticker keeps
+// the re-render local to the chip. Only rendered for live IB products.
+function FreshnessChip({ lastLiveAt }) {
+  const [, tick] = uS(0);
+  uE(() => {
+    const id = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+  if (!lastLiveAt) return null;
+  const stale = (Date.now() - lastLiveAt) > 45000;
+  const d = new Date(lastLiveAt);
+  const hhmmss = [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
+  return (
+    <span className="mono" title={stale ? 'live data may be stale — last update shown' : 'last live update'} style={{
+      fontSize: 9, fontWeight: 700, letterSpacing: 0.4, fontFamily: 'ui-monospace, SF Mono, monospace',
+      color: stale ? '#f0c068' : 'inherit', opacity: stale ? 0.8 : 0.5,
+      display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap', flexShrink: 0,
+    }}>
+      {stale && <span style={{ fontWeight: 800 }}>STALE</span>}{hhmmss}
+    </span>
+  );
+}
+
 function Obsidian3() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [workspace, setWorkspace] = uS(() => {
@@ -312,6 +336,7 @@ function Obsidian3() {
   const P = window.getProduct(productId);
   const [live, setLive] = uS(null);         // { quote, expiries, health } — IB proxy 抓到的
   const [liveRows, setLiveRows] = uS(null); // 當前到期日的 IB 期權鏈 rows
+  const [lastLiveAt, setLastLiveAt] = uS(null); // ② timestamp of last successful live fetch
   const [liveBars, setLiveBars] = uS(null); // 近月期貨的 IB 歷史 K
   const [barPeriodId, setBarPeriodId] = uS('D'); // K 線週期：D / 4H / 1H
   const [theme, setTheme] = uS(() => {
@@ -384,6 +409,7 @@ function Obsidian3() {
     setLive(null);
     setLiveRows(null);
     setLiveBars(null);
+    setLastLiveAt(null);
     setExpiryId(e0.id);
     setSpot(p.defaultSpot);
     setIv(p.defaultIv);
@@ -403,7 +429,7 @@ function Obsidian3() {
         window.LiveData.expiries(P.id),
       ]);
       if (dead) return;
-      if (quote && quote.last > 0) setSpot(quote.last);
+      if (quote && quote.last > 0) { setSpot(quote.last); setLastLiveAt(Date.now()); }
       if (exps && exps.length) setExpiryId(exps[0].id);
       // K 棒交給下面的專屬 effect 抓（換週期會重抓，避免重複邏輯）。
       setLive({ quote, expiries: exps && exps.length ? exps : null, health });
@@ -421,9 +447,38 @@ function Obsidian3() {
       if (dead || !chain || !chain.rows || !chain.rows.length) return;
       setLiveRows(chain.rows);
       if (chain.underlying && chain.underlying.price > 0) setSpot(chain.underlying.price);
+      setLastLiveAt(Date.now());
     })();
     return () => { dead = true; };
   }, [live, expiryId]);
+
+  // ② Live auto-refresh: while connected, re-pull the quote every 10s and the
+  // option chain every 30s so intraday prices don't silently go stale. Paused
+  // when the tab is hidden; refetches immediately on becoming visible again.
+  uE(() => {
+    if (!live || !P.ib || !window.LiveData) return undefined;
+    let dead = false;
+    const pullQuote = async () => {
+      if (document.hidden) return;
+      const q = await window.LiveData.quote(P.id);
+      if (dead || !q || !(q.last > 0)) return;
+      setSpot(q.last);
+      setLastLiveAt(Date.now());
+    };
+    const pullChain = async () => {
+      if (document.hidden) return;
+      const chain = await window.LiveData.chain(P.id, expiryId);
+      if (dead || !chain || !chain.rows || !chain.rows.length) return;
+      setLiveRows(chain.rows);
+      if (chain.underlying && chain.underlying.price > 0) setSpot(chain.underlying.price);
+      setLastLiveAt(Date.now());
+    };
+    const qId = setInterval(pullQuote, 10000);
+    const cId = setInterval(pullChain, 30000);
+    const onVis = () => { if (!document.hidden) { pullQuote(); pullChain(); } };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { dead = true; clearInterval(qId); clearInterval(cId); document.removeEventListener('visibilitychange', onVis); };
+  }, [live, productId, expiryId]);
 
   // IB live：K 線依所選週期抓歷史 K 棒。剛連上 + 每次換週期都會重抓；
   // 換週期時不清舊 bars（留著顯示直到新資料到，避免閃回 mock）。
@@ -562,6 +617,7 @@ function Obsidian3() {
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
           <DataQualityPill quality={quality} />
+          {live && P.ib && <FreshnessChip lastLiveAt={lastLiveAt} />}
           <ProductDropdown
             productId={productId} P={P} spot={spot} live={live}
             open={prodMenuOpen} setOpen={setProdMenuOpen}
