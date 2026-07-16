@@ -1,10 +1,11 @@
 # Improvements Batch — execution spec
 
-> **Status (2026-07-16): PENDING — not started.** Scope settled with the owner.
-> Eight increments: ① state persistence ② live auto-refresh + freshness stamp
-> ③ per-leg expiry ④ IB positions import ⑤ fees & tax ⑥ chain BUY/SELL popover
-> ⑦ 3D surface auto-rotate fix ⑧ layered in-app help (tooltips + drawer, English).
-> **Mobile design port is explicitly OUT of this batch** (next batch, own plan).
+> **Status (2026-07-16): ALL DONE.** ① state persistence ✅ ② live auto-refresh +
+> freshness stamp ✅ ③ per-leg expiry ✅ ④ IB positions import ✅ ⑤ fees & tax ✅
+> ⑥ chain BUY/SELL popover ✅ ⑦ 3D surface auto-rotate fix ✅ ⑧ layered in-app
+> help (tooltips + drawer + first-run hint) ✅. Verified in-browser (dark + light,
+> all four tabs, live stub for ②/④, zero console errors). SW cache at v28.
+> **Mobile design port remains OUT of this batch** (next batch, own plan).
 
 **Read `CLAUDE.md` first.** Zero-build Babel frontend, `window.*` globals, no
 imports, Taiwan colors (red = calls, teal = puts — never "fix"), all product
