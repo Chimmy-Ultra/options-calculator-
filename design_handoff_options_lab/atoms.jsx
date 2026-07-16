@@ -110,16 +110,15 @@ function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, i
     for (let i = 0; i <= 80; i++) arr.push(lo + (i / 80) * (hi - lo));
     return arr;
   }, [legs, spot, iv, dte, showCone, rangePct, strikeStep]);
-  // P&L at the time slice: BS-valued at daysRem = dte * (1 - sliceFrac).
-  // sliceFrac=0 → daysRem=dte → smooth BS curve − premium (the realistic "now" P&L).
-  // sliceFrac=1 → daysRem≈0 → kinked intrinsic − premium (expiry hockey stick).
-  // Previous `intrinsic * sliceFrac` showed a flat zero line at "now", which is wrong.
-  const daysRem = Math.max(0, dte * (1 - sliceFrac));
-  const ys = xs.map((s) => legs.reduce((acc, l) => {
-    const sign = l.side === 'long' ? 1 : -1;
-    const value = bsPrice(l.type, s, l.strike, iv, daysRem, r, model);
-    return acc + sign * l.qty * (value - l.premium);
-  }, 0));
+  // P&L at the time slice, valued at the FRONT expiry horizon T0 (earliest leg).
+  // sliceFrac maps to daysElapsed = sliceFrac · T0: sliceFrac=0 → today's smooth
+  // BS curve − premium; sliceFrac=1 → the front expiry, where near legs kink to
+  // intrinsic while later legs keep their remaining time value (calendars).
+  // Single-expiry portfolios reduce to the previous behaviour exactly.
+  const T0 = frontDte(legs, dte);
+  const daysElapsed = sliceFrac * T0;
+  const cost = portfolioCostPts(legs);
+  const ys = xs.map((s) => portfolioValuePts(legs, s, iv, daysElapsed, dte, r, model) - cost);
   const maxY = Math.max(...ys.map(Math.abs), 1);
   const pad = 16;
   const W = width, H = height;
@@ -366,13 +365,45 @@ function legGreeks(leg, S, ivPct, dte, r = 0.015, model = 'bs') {
 }
 
 // Portfolio-level Greeks: sum of per-leg Greeks at given spot/IV/DTE.
+// Each leg is valued at its own days-to-expiry (leg.dte) when set, so a
+// calendar / diagonal spread aggregates correctly; legs without dte use the
+// workspace dte. Per-leg IV is out of scope — one IV applies to every leg.
 function portfolioGreeks(legs, S, ivPct, dte, r = 0.015, model = 'bs') {
   const acc = { delta: 0, gamma: 0, theta: 0, vega: 0 };
   for (const l of legs) {
-    const g = legGreeks(l, S, ivPct, dte, r, model);
+    const g = legGreeks(l, S, ivPct, (l.dte != null ? l.dte : dte), r, model);
     acc.delta += g.delta; acc.gamma += g.gamma; acc.theta += g.theta; acc.vega += g.vega;
   }
   return acc;
+}
+
+// Front expiry (T0) of a portfolio: the earliest-expiring leg, in days. This is
+// the horizon at which "at expiry" curves and metrics are evaluated — later
+// legs still carry time value there. Legs without dte use the workspace dte.
+function frontDte(legs, dte) {
+  if (!legs || !legs.length) return dte;
+  return Math.min.apply(null, legs.map((l) => (l.dte != null ? l.dte : dte)));
+}
+
+// Mark-to-model portfolio VALUE in points, `daysElapsed` days from now.
+// Each leg's remaining life T = max((leg.dte ?? dte) - daysElapsed, 0); at T=0
+// the leg is worth intrinsic value, otherwise bsPrice at the workspace IV.
+// Subtract the entry cost (Σ sign·qty·premium) to get P&L. Single-expiry
+// portfolios reduce exactly to Σ legPayoff, so existing numbers are unchanged.
+function portfolioValuePts(legs, S, ivPct, daysElapsed, dte, r = 0.015, model = 'bs') {
+  return legs.reduce((acc, l) => {
+    const sign = l.side === 'long' ? 1 : -1;
+    const legDte = l.dte != null ? l.dte : dte;
+    const T = Math.max(legDte - daysElapsed, 0);
+    const v = T <= 0
+      ? (l.type === 'call' ? Math.max(S - l.strike, 0) : Math.max(l.strike - S, 0))
+      : bsPrice(l.type, S, l.strike, ivPct, T, r, model);
+    return acc + sign * l.qty * v;
+  }, 0);
+}
+// Entry cost of a portfolio in points (Σ sign·qty·premium). P&L = value − cost.
+function portfolioCostPts(legs) {
+  return legs.reduce((a, l) => a + (l.side === 'long' ? 1 : -1) * l.qty * l.premium, 0);
 }
 
 // Lognormal P&L distribution at expiry: integrate over standard normal grid.
@@ -380,14 +411,20 @@ function portfolioGreeks(legs, S, ivPct, dte, r = 0.015, model = 'bs') {
 function pnlDistribution(legs, spot, ivPct, dte, opts = {}) {
   const N = opts.N || 200;          // sample points along z grid
   const zMax = opts.zMax || 3.5;    // ±zMax std devs
-  const sigma = (ivPct / 100) * Math.sqrt(Math.max(dte, 0.5) / 365);
+  const r = opts.r != null ? opts.r : 0.015;
+  const model = opts.model || 'bs';
+  // Horizon = front expiry T0: the terminal spot distribution is spread over the
+  // earliest leg's life, and P&L there keeps later legs' remaining time value.
+  const T0 = frontDte(legs, dte);
+  const cost = portfolioCostPts(legs);
+  const sigma = (ivPct / 100) * Math.sqrt(Math.max(T0, 0.5) / 365);
   // Lognormal: S_T = spot * exp(sigma * z - sigma^2/2). Drift assumed 0 (martingale under Q).
   const samples = [];
   let totalW = 0;
   for (let i = 0; i < N; i++) {
     const z = -zMax + (2 * zMax * i) / (N - 1);
     const ST = spot * Math.exp(sigma * z - sigma * sigma / 2);
-    const pnl = legs.reduce((a, l) => a + legPayoff(l, ST), 0);
+    const pnl = portfolioValuePts(legs, ST, ivPct, T0, dte, r, model) - cost;
     const w = normalPdf(z);
     samples.push({ z, ST, pnl, w });
     totalW += w;
@@ -520,12 +557,23 @@ function Slider({ label, value, min, max, step = 1, onChange, suffix = '', theme
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Leg editor (compact rows)
-function LegEditor({ legs, onChange, theme = 'light' }) {
+// Leg editor (compact rows). When `expiries` is supplied (desktop) each row gets
+// a per-leg expiry <select> so calendars / diagonals can be built; `defaultDte`
+// is the workspace expiry a dte-less leg falls back to. Mobile omits both props,
+// keeping its narrower layout unchanged.
+function LegEditor({ legs, onChange, theme = 'light', expiries, defaultDte }) {
   const dark = theme === 'dark';
   const headerColor = dark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.55)';
   const rowBg = dark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.55)';
   const rowBorder = dark ? 'rgba(255,255,255,0.06)' : 'rgba(20,30,60,0.06)';
+  const withExp = !!(expiries && expiries.length);
+  const cols = withExp ? '52px 40px minmax(0,1fr) minmax(0,0.9fr) 58px 28px 22px' : '54px 46px 1fr 1fr 32px 24px';
+  const selStyle = {
+    width: '100%', padding: '3px 2px', borderRadius: 6, border: `1px solid ${rowBorder}`,
+    background: 'transparent', color: dark ? '#e8eaef' : '#1d1d22',
+    fontFamily: 'ui-monospace, SF Mono, monospace', fontSize: 10, fontWeight: 600,
+    outline: 'none', cursor: 'pointer',
+  };
   function update(i, patch) {
     const next = legs.map((l, k) => (k === i ? { ...l, ...patch } : l));
     onChange(next);
@@ -535,12 +583,12 @@ function LegEditor({ legs, onChange, theme = 'light' }) {
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '54px 46px 1fr 1fr 32px 24px', gap: 6, fontSize: 10, letterSpacing: 0.6, textTransform: 'uppercase', color: headerColor, padding: '0 4px' }}>
-        <span>Side</span><span>Type</span><span>Strike</span><span>Premium</span><span style={{ textAlign: 'right' }}>Qty</span><span></span>
+      <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 6, fontSize: 10, letterSpacing: 0.6, textTransform: 'uppercase', color: headerColor, padding: '0 4px' }}>
+        <span>Side</span><span>Type</span><span>Strike</span><span>Premium</span>{withExp && <span>Exp</span>}<span style={{ textAlign: 'right' }}>Qty</span><span></span>
       </div>
       {legs.map((leg, i) => (
         <div key={i} style={{
-          display: 'grid', gridTemplateColumns: '54px 46px 1fr 1fr 32px 24px', gap: 6,
+          display: 'grid', gridTemplateColumns: cols, gap: 6,
           padding: '8px 6px 8px 8px', borderRadius: 10, background: rowBg, border: `1px solid ${rowBorder}`, alignItems: 'center'
         }}>
           <button
@@ -566,6 +614,16 @@ function LegEditor({ legs, onChange, theme = 'light' }) {
           >{leg.type}</button>
           <NumField value={leg.strike} step={1} onChange={(v) => update(i, { strike: v })} dark={dark} />
           <NumField value={leg.premium} step={0.05} onChange={(v) => update(i, { premium: v })} dark={dark} />
+          {withExp && (() => {
+            const effDte = leg.dte != null ? leg.dte : defaultDte;
+            const known = expiries.some((e) => e.dte === effDte);
+            return (
+              <select value={effDte} onChange={(e) => update(i, { dte: parseInt(e.target.value, 10) })} title="leg expiry" style={selStyle}>
+                {!known && <option value={effDte}>{effDte}d</option>}
+                {expiries.map((e) => <option key={e.id} value={e.dte}>{e.label} · {e.dte}d</option>)}
+              </select>
+            );
+          })()}
           <NumField value={leg.qty} step={1} onChange={(v) => update(i, { qty: v })} dark={dark} align="right" />
           <button
             onClick={() => remove(i)}
@@ -675,6 +733,7 @@ Object.assign(window, {
   Glass, PayoffChart, CrossSection, Slider, LegEditor, NumField, GreekChip, Surface3DMount,
   STRATEGIES, DEFAULT_LEGS,
   legPayoff, normalPdf, normalCdf, legGreeks, portfolioGreeks, pnlDistribution,
+  portfolioValuePts, portfolioCostPts, frontDte,
   bsPrice, bsGreeks,
   legLiquidity, dataQuality,
   useViewport,

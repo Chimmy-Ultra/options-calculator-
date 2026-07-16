@@ -378,32 +378,33 @@ function Obsidian3() {
     if (vp.layout === 'desk' && (workspace === 'pricer' || workspace === 'compare')) setWorkspace('chain');
   }, [vp.layout, workspace]);
 
-  // P&L numbers（點數 × 商品乘數）。Valued at the same daysRem as PayoffChart
-  // so the displayed number always matches the curve.
+  // P&L numbers（點數 × 商品乘數）。Valued at the same front-expiry horizon as
+  // PayoffChart (daysElapsed = sliceFrac · T0) so the number matches the curve.
   const pnlPts = uM(() => {
-    const daysRem = Math.max(0, dte * (1 - sliceFrac));
-    return legs.reduce((acc, l) => {
-      const sign = l.side === 'long' ? 1 : -1;
-      const v = bsPrice(l.type, spot, l.strike, iv, daysRem, P.r / 100, P.model);
-      return acc + sign * l.qty * (v - l.premium);
-    }, 0);
+    const T0 = frontDte(legs, dte);
+    return portfolioValuePts(legs, spot, iv, sliceFrac * T0, dte, P.r / 100, P.model)
+      - portfolioCostPts(legs);
   }, [legs, spot, iv, dte, sliceFrac, productId]);
   const pnlNTD = pnlPts * P.mult;
+  // Max profit / loss scanned at the front expiry (T0): near legs at intrinsic,
+  // later legs keep time value. Single-expiry portfolios = Σ legPayoff as before.
   const maxProfit = uM(() => {
+    const T0 = frontDte(legs, dte), cost = portfolioCostPts(legs);
     let m = -Infinity;
-    for (let s = spot * 0.7; s <= spot * 1.3; s += P.strikeStep / 2) m = Math.max(m, legs.reduce((a, l) => a + legPayoff(l, s), 0));
+    for (let s = spot * 0.7; s <= spot * 1.3; s += P.strikeStep / 2) m = Math.max(m, portfolioValuePts(legs, s, iv, T0, dte, P.r / 100, P.model) - cost);
     return m * P.mult;
-  }, [legs, spot, productId]);
+  }, [legs, spot, iv, dte, productId]);
   const maxLoss = uM(() => {
+    const T0 = frontDte(legs, dte), cost = portfolioCostPts(legs);
     let m = Infinity;
-    for (let s = spot * 0.7; s <= spot * 1.3; s += P.strikeStep / 2) m = Math.min(m, legs.reduce((a, l) => a + legPayoff(l, s), 0));
+    for (let s = spot * 0.7; s <= spot * 1.3; s += P.strikeStep / 2) m = Math.min(m, portfolioValuePts(legs, s, iv, T0, dte, P.r / 100, P.model) - cost);
     return m * P.mult;
-  }, [legs, spot, productId]);
+  }, [legs, spot, iv, dte, productId]);
 
   // Live Greeks for the current portfolio (replaces hardcoded chips).
   const portfolioG = uM(() => portfolioGreeks(legs, spot, iv, dte, P.r / 100, P.model), [legs, spot, iv, dte, productId]);
   // Real POP from lognormal P&L distribution (replaces hardcoded 0.68).
-  const popValue = uM(() => pnlDistribution(legs, spot, iv, dte).pop, [legs, spot, iv, dte]);
+  const popValue = uM(() => pnlDistribution(legs, spot, iv, dte, { r: P.r / 100, model: P.model }).pop, [legs, spot, iv, dte, productId]);
   // 期權鏈 rows：live（IB）優先，否則 mock。所有吃 chain 的元件都從這裡拿。
   const chainRows = uM(() => {
     if (liveRows && liveRows.length) return liveRows;
@@ -509,7 +510,7 @@ function Obsidian3() {
       {/* WORKSPACE BODY */}
       {workspace === 'calc' && (
         <CalcWorkspace
-          P={P} theme={theme} light={light} rows={chainRows}
+          P={P} theme={theme} light={light} rows={chainRows} expiries={expiries}
           legs={legs} setLegs={setLegs}
           spot={spot} setSpot={setSpot}
           spotMin={spotMin} spotMax={spotMax}
@@ -527,7 +528,7 @@ function Obsidian3() {
       {workspace === 'chain' && (
         <ChainWorkspace
           P={P} rows={chainRows} theme={theme}
-          spot={spot} setSpot={setSpot} expiry={expiry}
+          spot={spot} setSpot={setSpot} expiry={expiry} expiries={expiries}
           onAddLeg={addLegFromChain}
           legs={legs} setLegs={setLegs}
           iv={iv} setIv={setIv} dte={dte}
@@ -584,7 +585,7 @@ function Obsidian3() {
 }
 
 // ───────────────────────────────────────────────── CALCULATOR WORKSPACE
-function CalcWorkspace({ P, theme = 'dark', rows, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
+function CalcWorkspace({ P, theme = 'dark', rows, expiries, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
   const light = theme === 'light';
   const hoverInfo = uM(() => {
     if (!hover) return null;
@@ -631,7 +632,7 @@ function CalcWorkspace({ P, theme = 'dark', rows, legs, setLegs, spot, setSpot, 
           <Eyebrow right={
             <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 2 * P.strikeStep) / P.strikeStep) * P.strikeStep, iv, dte, P)])}>+ leg</button>
           }>Legs</Eyebrow>
-          <LegEditor legs={legs} onChange={setLegs} theme={theme} />
+          <LegEditor legs={legs} onChange={setLegs} theme={theme} expiries={expiries} defaultDte={dte} />
         </Glass2>
 
         {/* Single-contract pricer — folded in from the removed Pricer tab.
@@ -727,7 +728,7 @@ function CalcWorkspace({ P, theme = 'dark', rows, legs, setLegs, spot, setSpot, 
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>at expiry</span>}>
               P&L distribution <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· lognormal</span>
             </Eyebrow>
-            <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={140} width={304} ntdMult={P.mult} cur={P.cur} />
+            <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={140} width={304} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />
           </>)}
           {view === 'attr' && (<>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>vs baseline</span>}>
@@ -845,7 +846,7 @@ function LayoutToggle({ value, onChange, light }) {
   );
 }
 
-function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, onAddLeg, legs, setLegs,
+function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiries, onAddLeg, legs, setLegs,
   iv, setIv, dte, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, portfolioG, accent, t, D, quality }) {
   const light = theme === 'light';
   const [layout, setLayout] = uS('a');
@@ -899,7 +900,7 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, onAddL
           {legs.length === 0 ? (
             <div style={{ padding: '20px 0', textAlign: 'center', fontSize: 11, opacity: 0.5 }}>Click any chain row to add a leg</div>
           ) : (
-            <LegEditor legs={legs} onChange={setLegs} theme={theme} />
+            <LegEditor legs={legs} onChange={setLegs} theme={theme} expiries={expiries} defaultDte={dte} />
           )}
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, opacity: 0.6, marginTop: 8, fontFamily: 'ui-monospace, Menlo, monospace' }}>
             <span>{credit >= 0 ? 'Net credit' : 'Net debit'}</span>
@@ -1083,7 +1084,9 @@ function _bs(type, S, K, iv, dte, r, model) {
 function _mkLeg(side, type, S, K, iv, dte, P, qty = 1) {
   const model = (P && P.model) || 'bs';
   const r = ((P && P.r != null) ? P.r : 1.5) / 100;
-  return { side, type, strike: K, premium: _bs(type, S, K, iv, dte, r, model), qty };
+  // Store dte on the leg so calendars / diagonals value each leg at its own
+  // expiry. Single-expiry portfolios all carry the same dte → unchanged output.
+  return { side, type, strike: K, premium: _bs(type, S, K, iv, dte, r, model), qty, dte };
 }
 const STRATEGY_LIBRARY = [
   { id: 'bull-call',  name: 'Bull Call Spread',  bias: 'bullish', tag: '看小漲',
@@ -1569,7 +1572,7 @@ function MobileCalc({
         </>)}
         {view === 'dist' && (<>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>at expiry</span>}>P&L distribution</Eyebrow>
-          <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={150} width={chartW} ntdMult={P.mult} cur={P.cur} />
+          <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={150} width={chartW} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />
         </>)}
         {view === 'attr' && (<>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>vs baseline</span>}>P&L attribution</Eyebrow>
