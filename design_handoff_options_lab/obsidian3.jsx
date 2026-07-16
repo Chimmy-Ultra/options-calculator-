@@ -60,6 +60,39 @@ const TXO_EXPIRIES = [
 ];
 
 
+// ── Persistence (①). One localStorage key; every value is hard-validated on
+// restore so corrupt or stale JSON can never crash the app — any doubt falls
+// back to the built-in defaults. The key is read once per page load.
+const LS_KEY = 'optionsLab.v1';
+let _savedCache; // undefined = not read yet; null = nothing / invalid saved
+function readSaved() {
+  if (_savedCache !== undefined) return _savedCache;
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    _savedCache = raw ? JSON.parse(raw) : null;
+  } catch (e) { _savedCache = null; }
+  return _savedCache;
+}
+function validLeg(l) {
+  return l && (l.side === 'long' || l.side === 'short')
+    && (l.type === 'call' || l.type === 'put')
+    && Number.isFinite(l.strike) && Number.isFinite(l.premium)
+    && Number.isFinite(l.qty) && l.qty >= 1;
+}
+function sanitizeLegs(arr) {
+  if (!Array.isArray(arr)) return null;
+  const clean = arr.filter(validLeg).map((l) => {
+    const out = { side: l.side, type: l.type, strike: l.strike, premium: l.premium, qty: l.qty };
+    if (Number.isFinite(l.dte)) out.dte = l.dte;
+    return out;
+  });
+  return clean.length ? clean : null;
+}
+function initialProductId() {
+  const s = readSaved();
+  return (s && s.productId && window.PRODUCTS.some((p) => p.id === s.productId)) ? s.productId : 'txo';
+}
+
 function Glass2({ tone = 'panel', radius = 18, padding = 18, style, children, ...rest }) {
   const styles = {
     panel: {
@@ -271,27 +304,71 @@ function SettlementCountdown({ dte, note = '13:30' }) {
 
 function Obsidian3() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
-  const [workspace, setWorkspace] = uS('chain'); // design opens on Chain
-  const [productId, setProductId] = uS('txo');
+  const [workspace, setWorkspace] = uS(() => {
+    const s = readSaved();
+    return (s && ['chain', 'chart', 'calc', 'iv', 'pricer'].includes(s.workspace)) ? s.workspace : 'chain';
+  });
+  const [productId, setProductId] = uS(initialProductId);
   const P = window.getProduct(productId);
   const [live, setLive] = uS(null);         // { quote, expiries, health } — IB proxy 抓到的
   const [liveRows, setLiveRows] = uS(null); // 當前到期日的 IB 期權鏈 rows
   const [liveBars, setLiveBars] = uS(null); // 近月期貨的 IB 歷史 K
   const [barPeriodId, setBarPeriodId] = uS('D'); // K 線週期：D / 4H / 1H
-  const [theme, setTheme] = uS('dark'); // 'dark' | 'light'（設計稿的 Light/Dark 切換）
+  const [theme, setTheme] = uS(() => {
+    const s = readSaved();
+    return (s && (s.theme === 'light' || s.theme === 'dark')) ? s.theme : 'dark';
+  }); // 'dark' | 'light'（設計稿的 Light/Dark 切換）
   const [prodMenuOpen, setProdMenuOpen] = uS(false);
   const [whatIfOpen, setWhatIfOpen] = uS(false); // collapsible What-if rail (owner: rarely used)
   const light = theme === 'light';
   // 亮色靠 body.light 的 CSS 覆蓋（tokens.css），圖表等元件則吃 theme prop 的 light 分支。
   uE(() => { document.body.classList.toggle('light', theme === 'light'); }, [theme]);
   uE(() => { setProdMenuOpen(false); }, [workspace]); // close product menu on tab change
-  const [expiryId, setExpiryId] = uS('m');
+  // Persist working state (①), debounced. Legs are kept per-product so each
+  // product restores its own. Wrapped in try/catch — quota / private mode must
+  // never crash the app. Tweaks, the What-if rail and hover are intentionally
+  // not persisted.
+  uE(() => {
+    const id = setTimeout(() => {
+      try {
+        const prev = readSaved() || {};
+        const legsByProduct = { ...(prev.legsByProduct || {}), [productId]: legs };
+        const payload = { productId, expiryId, workspace, theme, spot, iv, legsByProduct };
+        localStorage.setItem(LS_KEY, JSON.stringify(payload));
+        _savedCache = payload; // keep the read cache in sync with the latest write
+      } catch (e) { /* quota exceeded / storage disabled — skip */ }
+    }, 400);
+    return () => clearTimeout(id);
+  }, [productId, expiryId, workspace, theme, spot, iv, legs]);
+  const [expiryId, setExpiryId] = uS(() => {
+    const s = readSaved();
+    const P0 = window.getProduct(initialProductId());
+    const exps = productExpiries(P0, null); // live expiries unknown at mount → mock list
+    if (s && s.expiryId && exps.some((e) => e.id === s.expiryId)) return s.expiryId;
+    return defaultExpiryFor(P0).id;
+  });
   const expiries = productExpiries(P, live && live.expiries);
   const expiry = expiries.find((e) => e.id === expiryId) || expiries[0];
 
-  const [legs, setLegs] = uS(() => defaultLegsFor(window.getProduct('txo'), defaultExpiryFor(window.getProduct('txo')).dte));
-  const [spot, setSpot] = uS(TXO_SPOT);
-  const [iv, setIv] = uS(24);
+  const [legs, setLegs] = uS(() => {
+    const s = readSaved();
+    const pid = initialProductId();
+    const P0 = window.getProduct(pid);
+    const saved = s && s.legsByProduct && sanitizeLegs(s.legsByProduct[pid]);
+    return saved || defaultLegsFor(P0, defaultExpiryFor(P0).dte);
+  });
+  const [spot, setSpot] = uS(() => {
+    const s = readSaved();
+    const P0 = window.getProduct(initialProductId());
+    const v = (s && Number.isFinite(s.spot)) ? s.spot : P0.defaultSpot;
+    return Math.max(P0.spotMin, Math.min(P0.spotMax, v));
+  });
+  const [iv, setIv] = uS(() => {
+    const s = readSaved();
+    const P0 = window.getProduct(initialProductId());
+    const v = (s && Number.isFinite(s.iv)) ? s.iv : P0.defaultIv;
+    return Math.max(P0.ivMin, Math.min(P0.ivMax, v));
+  });
   const [view, setView] = uS('payoff');
   const [hover, setHover] = uS(null);
   const [sliceFrac, setSliceFrac] = uS(1); // 0 = now, 1 = expiry
