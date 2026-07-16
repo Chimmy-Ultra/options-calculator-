@@ -126,10 +126,12 @@ function Glass2({ tone = 'panel', radius = 18, padding = 18, style, children, ..
   );
 }
 
-function Eyebrow({ children, right }) {
+function Eyebrow({ children, right, hk }) {
+  const HT = window.HelpTip; // desktop-only hover help (⑧a); pass hk to enable
+  const label = (hk && HT) ? <HT k={hk}>{children}</HT> : children;
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-      <span style={{ fontSize: 10, letterSpacing: 0.8, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600 }}>{children}</span>
+      <span style={{ fontSize: 10, letterSpacing: 0.8, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600 }}>{label}</span>
       {right}
     </div>
   );
@@ -345,6 +347,14 @@ function Obsidian3() {
   }); // 'dark' | 'light'（設計稿的 Light/Dark 切換）
   const [prodMenuOpen, setProdMenuOpen] = uS(false);
   const [whatIfOpen, setWhatIfOpen] = uS(false); // collapsible What-if rail (owner: rarely used)
+  // In-app help (⑧): drawer open state + one-time discoverability hint.
+  const [helpOpen, setHelpOpen] = uS(false);
+  const [helpHintSeen, setHelpHintSeen] = uS(() => { try { return localStorage.getItem('optionsLab.helpSeen') === '1'; } catch (e) { return true; } });
+  function dismissHelpHint() {
+    if (helpHintSeen) return;
+    setHelpHintSeen(true);
+    try { localStorage.setItem('optionsLab.helpSeen', '1'); } catch (e) { /* storage disabled */ }
+  }
   const light = theme === 'light';
   // 亮色靠 body.light 的 CSS 覆蓋（tokens.css），圖表等元件則吃 theme prop 的 light 分支。
   uE(() => { document.body.classList.toggle('light', theme === 'light'); }, [theme]);
@@ -630,6 +640,23 @@ function Obsidian3() {
             <span style={{ fontSize: 13 }}>{light ? '☀' : '☾'}</span>
             <span style={{ fontSize: 12, fontWeight: 600 }}>{light ? 'Light' : 'Dark'}</span>
           </Glass2>
+          <div style={{ position: 'relative', flexShrink: 0 }}>
+            <Glass2 tone="chip" radius={999} padding="8px 12px" style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', border: helpOpen ? '1px solid oklch(0.66 0.16 250 / 0.6)' : undefined }}
+              onClick={() => { setHelpOpen((v) => !v); dismissHelpHint(); }} title="Help — how to read this">
+              <span style={{ fontSize: 13, fontWeight: 700 }}>?</span>
+            </Glass2>
+            {!helpHintSeen && (
+              <div style={{
+                position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 20, whiteSpace: 'nowrap',
+                display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 999,
+                background: 'rgba(240,192,104,0.16)', border: '1px solid rgba(240,192,104,0.4)',
+                fontSize: 10, fontWeight: 600, color: light ? '#8a6410' : '#f7d394',
+              }}>
+                New here? Click <b>?</b> for a guide
+                <button onClick={(e) => { e.stopPropagation(); dismissHelpHint(); }} title="dismiss" style={{ border: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 12, lineHeight: 1, padding: 0, fontFamily: 'inherit' }}>×</button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -690,6 +717,9 @@ function Obsidian3() {
         P={P} spot={spot} setSpot={setSpot} spotMin={spotMin} spotMax={spotMax}
         iv={iv} setIv={setIv} open={whatIfOpen} setOpen={setWhatIfOpen} theme={theme} light={light}
       />
+
+      {/* In-app help drawer (⑧) */}
+      {window.HelpDrawer && <window.HelpDrawer open={helpOpen} onClose={() => setHelpOpen(false)} workspace={workspace} />}
 
       {/* Tweaks panel */}
       <TweaksPanel title="Tweaks">
@@ -801,7 +831,7 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
         {/* Single-contract pricer — folded in from the removed Pricer tab.
             Auto: pick a strike, IV is pulled from the chain smile, price is live. */}
         <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{P.model === 'b76' ? 'Black-76' : 'Black-Scholes'}</span>}>Option Pricer</Eyebrow>
+          <Eyebrow hk="pricer" right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{P.model === 'b76' ? 'Black-76' : 'Black-Scholes'}</span>}>Option Pricer</Eyebrow>
           <OptionPricer key={P.id} product={P} spot={spot} iv={iv} dte={dte} rows={rows} theme={theme} accent={accent} />
         </Glass2>
       </div>
@@ -815,7 +845,7 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
         <Glass2 tone="raised" padding={D.panelPad}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
-              <Eyebrow>P&L now</Eyebrow>
+              <Eyebrow hk="pnlnow">P&L now</Eyebrow>
               <div className="tnum" style={{
                 fontSize: 32, fontWeight: 600, letterSpacing: -0.6,
                 color: netPnl >= 0 ? (light ? 'oklch(0.60 0.13 75)' : 'oklch(0.84 0.14 75)') : (light ? 'oklch(0.50 0.10 220)' : 'oklch(0.74 0.12 220)'),
@@ -918,10 +948,10 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow right={<DataQualityPill quality={quality} />}>Greeks</Eyebrow>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <GreekChip label="Delta · Δ" value={(portfolioG.delta >= 0 ? '+' : '') + portfolioG.delta.toFixed(2)} theme={theme} emphasis={portfolioG.delta >= 0 ? 'up' : 'down'} />
-            <GreekChip label="Gamma · Γ" value={portfolioG.gamma.toFixed(4)} theme={theme} />
-            <GreekChip label="Theta · Θ" value={(portfolioG.theta >= 0 ? '+' : '') + portfolioG.theta.toFixed(2)} theme={theme} emphasis={portfolioG.theta >= 0 ? 'up' : 'down'} />
-            <GreekChip label="Vega · V" value={(portfolioG.vega >= 0 ? '+' : '') + portfolioG.vega.toFixed(2)} theme={theme} emphasis={portfolioG.vega >= 0 ? 'up' : 'down'} />
+            <GreekChip label="Delta · Δ" helpKey="delta" value={(portfolioG.delta >= 0 ? '+' : '') + portfolioG.delta.toFixed(2)} theme={theme} emphasis={portfolioG.delta >= 0 ? 'up' : 'down'} />
+            <GreekChip label="Gamma · Γ" helpKey="gamma" value={portfolioG.gamma.toFixed(4)} theme={theme} />
+            <GreekChip label="Theta · Θ" helpKey="theta" value={(portfolioG.theta >= 0 ? '+' : '') + portfolioG.theta.toFixed(2)} theme={theme} emphasis={portfolioG.theta >= 0 ? 'up' : 'down'} />
+            <GreekChip label="Vega · V" helpKey="vega" value={(portfolioG.vega >= 0 ? '+' : '') + portfolioG.vega.toFixed(2)} theme={theme} emphasis={portfolioG.vega >= 0 ? 'up' : 'down'} />
           </div>
         </Glass2>
       </div>
@@ -966,7 +996,7 @@ function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, fees = 0,
     <Glass2 tone="raised" padding="14px 14px 12px" radius={16}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
         <div style={{ minWidth: 0 }}>
-          <Eyebrow>P&L what-if · {P.code}</Eyebrow>
+          <Eyebrow hk="pnlwhatif">P&L what-if · {P.code}</Eyebrow>
           <div className="tnum" style={{ fontSize: 24, fontWeight: 600, letterSpacing: -0.4, lineHeight: 1.05, marginTop: 3, fontFamily: 'ui-monospace, SF Mono, monospace', color: heroColor }}>
             {profit ? '+' : ''}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
           </div>
@@ -1055,10 +1085,10 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiri
 
         {/* greeks */}
         <div style={{ gridArea: 'greeks', minWidth: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 8 }}>
-          <GreekChip label="Delta · Δ" value={(portfolioG.delta >= 0 ? '+' : '') + portfolioG.delta.toFixed(2)} theme={theme} emphasis={portfolioG.delta >= 0 ? 'up' : 'down'} />
-          <GreekChip label="Gamma · Γ" value={portfolioG.gamma.toFixed(4)} theme={theme} />
-          <GreekChip label="Theta · Θ" value={(portfolioG.theta >= 0 ? '+' : '') + portfolioG.theta.toFixed(2)} theme={theme} emphasis={portfolioG.theta >= 0 ? 'up' : 'down'} />
-          <GreekChip label="Vega · V" value={(portfolioG.vega >= 0 ? '+' : '') + portfolioG.vega.toFixed(2)} theme={theme} emphasis={portfolioG.vega >= 0 ? 'up' : 'down'} />
+          <GreekChip label="Delta · Δ" helpKey="delta" value={(portfolioG.delta >= 0 ? '+' : '') + portfolioG.delta.toFixed(2)} theme={theme} emphasis={portfolioG.delta >= 0 ? 'up' : 'down'} />
+          <GreekChip label="Gamma · Γ" helpKey="gamma" value={portfolioG.gamma.toFixed(4)} theme={theme} />
+          <GreekChip label="Theta · Θ" helpKey="theta" value={(portfolioG.theta >= 0 ? '+' : '') + portfolioG.theta.toFixed(2)} theme={theme} emphasis={portfolioG.theta >= 0 ? 'up' : 'down'} />
+          <GreekChip label="Vega · V" helpKey="vega" value={(portfolioG.vega >= 0 ? '+' : '') + portfolioG.vega.toFixed(2)} theme={theme} emphasis={portfolioG.vega >= 0 ? 'up' : 'down'} />
         </div>
 
         {/* legs */}

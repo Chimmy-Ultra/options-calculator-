@@ -1,7 +1,7 @@
 // Options Lab service worker.
 // Strategy: cache-first for the app shell + same-origin assets, network-first for HTML.
 // Bumping CACHE_VERSION purges old caches.
-const CACHE_VERSION = 'options-lab-v27';
+const CACHE_VERSION = 'options-lab-v28';
 const APP_SHELL = [
   './',
   './index.html',
@@ -11,6 +11,7 @@ const APP_SHELL = [
   './charts.jsx',
   './obsidian3.jsx',
   './option-chain.jsx',
+  './help.jsx',
   './tweaks-panel.jsx',
   './surface3d.js',
   './iv-surface.js',

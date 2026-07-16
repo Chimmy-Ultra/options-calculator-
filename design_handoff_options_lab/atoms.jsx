@@ -676,15 +676,17 @@ function NumField({ value, step = 1, onChange, dark, align = 'left' }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Greeks chip (one row)
-function GreekChip({ label, value, theme = 'light', emphasis }) {
+function GreekChip({ label, value, theme = 'light', emphasis, helpKey }) {
   const dark = theme === 'dark';
   const bg = dark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.6)';
   const border = dark ? 'rgba(255,255,255,0.08)' : 'rgba(20,30,60,0.06)';
+  const HT = window.HelpTip; // desktop-only hover help (⑧a); mobile omits helpKey
+  const labelEl = (helpKey && HT) ? <HT k={helpKey}>{label}</HT> : label;
   return (
     <div style={{
       flex: 1, padding: '10px 12px', borderRadius: 12, background: bg, border: `1px solid ${border}`,
     }}>
-      <div style={{ fontSize: 10, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.6 }}>{label}</div>
+      <div style={{ fontSize: 10, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.6 }}>{labelEl}</div>
       <div className="tnum" style={{
         fontSize: 18, fontWeight: 600, marginTop: 2, fontFamily: 'ui-monospace, SF Mono, monospace',
         color: emphasis === 'up' ? (dark ? '#f0c068' : '#a06f1f')
