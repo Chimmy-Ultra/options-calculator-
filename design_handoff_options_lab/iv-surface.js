@@ -119,6 +119,8 @@
     }
     applyCam();
     let drag = false, lx=0, ly=0;
+    // Stop the idle auto-spin once the user has orbited by hand (owner request).
+    let userMoved = false;
     const dom = renderer.domElement; dom.style.cursor = 'grab';
     dom.style.touchAction = 'none';
     const isTouch = !window.matchMedia || !window.matchMedia('(hover: hover)').matches;
@@ -126,6 +128,7 @@
     dom.addEventListener('pointerdown', (e) => { drag = true; lx = e.clientX; ly = e.clientY; dom.setPointerCapture(e.pointerId); dom.style.cursor='grabbing'; });
     dom.addEventListener('pointermove', (e) => {
       if (!drag) return;
+      userMoved = true;
       orbit.az -= (e.clientX - lx) * rotSens;
       orbit.el = Math.max(0.05, Math.min(Math.PI/2 - 0.05, orbit.el + (e.clientY - ly) * rotSens));
       lx = e.clientX; ly = e.clientY; applyCam();
@@ -163,7 +166,7 @@
     function tick(now) {
       const dt = (now - last) / 1000; last = now;
       // Auto-rotate disabled on touch (annoying on phones, also wastes battery).
-      if (!drag) { idle += dt; if (!isTouch && idle > 1.5) orbit.az += dt * 0.04; applyCam(); } else idle = 0;
+      if (!drag) { idle += dt; if (!isTouch && !userMoved && idle > 1.5) orbit.az += dt * 0.04; applyCam(); } else idle = 0;
       renderer.render(scene, camera);
       raf = isVisible ? requestAnimationFrame(tick) : 0;
     }
