@@ -406,6 +406,20 @@ function portfolioCostPts(legs) {
   return legs.reduce((a, l) => a + (l.side === 'long' ? 1 : -1) * l.qty * l.premium, 0);
 }
 
+// Estimated round-trip transaction cost (commission + tax) for a portfolio, in
+// the product's currency. Per contract per side: a fixed `perSide` brokerage
+// fee plus `taxRate` of the premium notional (premium × mult). Both entry and
+// exit are charged (×2); the exit tax is approximated with the entry premium.
+// Fees are broker-dependent — the defaults live in products.js.
+function estFees(legs, P) {
+  if (!P || !P.fees || !legs || !legs.length) return 0;
+  const perSide = P.fees.perSide || 0;
+  const taxRate = P.fees.taxRate || 0;
+  const mult = P.mult || 1;
+  return legs.reduce((a, l) =>
+    a + Math.abs(l.qty) * (2 * perSide + 2 * taxRate * Math.abs(l.premium) * mult), 0);
+}
+
 // Lognormal P&L distribution at expiry: integrate over standard normal grid.
 // Returns { buckets: [{ pnl, weight }], pop, expectedPnl, p10, p90 }.
 function pnlDistribution(legs, spot, ivPct, dte, opts = {}) {
@@ -733,7 +747,7 @@ Object.assign(window, {
   Glass, PayoffChart, CrossSection, Slider, LegEditor, NumField, GreekChip, Surface3DMount,
   STRATEGIES, DEFAULT_LEGS,
   legPayoff, normalPdf, normalCdf, legGreeks, portfolioGreeks, pnlDistribution,
-  portfolioValuePts, portfolioCostPts, frontDte,
+  portfolioValuePts, portfolioCostPts, frontDte, estFees,
   bsPrice, bsGreeks,
   legLiquidity, dataQuality,
   useViewport,

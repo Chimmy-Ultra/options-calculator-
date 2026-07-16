@@ -405,6 +405,9 @@ function Obsidian3() {
   const portfolioG = uM(() => portfolioGreeks(legs, spot, iv, dte, P.r / 100, P.model), [legs, spot, iv, dte, productId]);
   // Real POP from lognormal P&L distribution (replaces hardcoded 0.68).
   const popValue = uM(() => pnlDistribution(legs, spot, iv, dte, { r: P.r / 100, model: P.model }).pop, [legs, spot, iv, dte, productId]);
+  // Estimated round-trip commission + tax (currency). The two P&L cards show
+  // net-of-fees numbers; charts stay gross (they show the theoretical structure).
+  const fees = uM(() => estFees(legs, P), [legs, productId]);
   // 期權鏈 rows：live（IB）優先，否則 mock。所有吃 chain 的元件都從這裡拿。
   const chainRows = uM(() => {
     if (liveRows && liveRows.length) return liveRows;
@@ -519,7 +522,7 @@ function Obsidian3() {
           sliceFrac={sliceFrac} setSliceFrac={setSliceFrac}
           view={view} setView={setView}
           pnlPts={pnlPts} pnlNTD={pnlNTD}
-          maxProfit={maxProfit} maxLoss={maxLoss}
+          maxProfit={maxProfit} maxLoss={maxLoss} fees={fees}
           hover={hover} setHover={setHover}
           accent={accent} D={D} t={t}
           portfolioG={portfolioG} popValue={popValue} quality={quality}
@@ -532,7 +535,7 @@ function Obsidian3() {
           onAddLeg={addLegFromChain}
           legs={legs} setLegs={setLegs}
           iv={iv} setIv={setIv} dte={dte}
-          pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss}
+          pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss} fees={fees}
           popValue={popValue} portfolioG={portfolioG}
           accent={accent} t={t} D={D}
           quality={quality}
@@ -585,8 +588,12 @@ function Obsidian3() {
 }
 
 // ───────────────────────────────────────────────── CALCULATOR WORKSPACE
-function CalcWorkspace({ P, theme = 'dark', rows, expiries, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
+function CalcWorkspace({ P, theme = 'dark', rows, expiries, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
   const light = theme === 'light';
+  // Net of estimated round-trip fees (⑤). Charts stay gross.
+  const netPnl = pnlNTD - fees;
+  const netMaxProfit = maxProfit - fees;
+  const netMaxLoss = maxLoss - fees;
   const hoverInfo = uM(() => {
     if (!hover) return null;
     const spotAt = (spot * (1 + hover.xn * 0.18)).toFixed(0);
@@ -655,19 +662,24 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, legs, setLegs, spot,
               <Eyebrow>P&L now</Eyebrow>
               <div className="tnum" style={{
                 fontSize: 32, fontWeight: 600, letterSpacing: -0.6,
-                color: pnlNTD >= 0 ? (light ? 'oklch(0.60 0.13 75)' : 'oklch(0.84 0.14 75)') : (light ? 'oklch(0.50 0.10 220)' : 'oklch(0.74 0.12 220)'),
+                color: netPnl >= 0 ? (light ? 'oklch(0.60 0.13 75)' : 'oklch(0.84 0.14 75)') : (light ? 'oklch(0.50 0.10 220)' : 'oklch(0.74 0.12 220)'),
                 fontFamily: 'ui-monospace, SF Mono, monospace', lineHeight: 1,
               }}>
-                {pnlNTD >= 0 ? '+' : ''}{P.cur}{Math.abs(Math.round(pnlNTD)).toLocaleString()}
+                {netPnl >= 0 ? '+' : ''}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
               </div>
               <div className="tnum" style={{ fontSize: 10, opacity: 0.5, marginTop: 4 }}>
                 {pnlPts >= 0 ? '+' : ''}{pnlPts.toFixed(1)} pts {P.unitLabel}
               </div>
               <div className="tnum" style={{ fontSize: 11, opacity: 0.55, marginTop: 8 }}>
-                Max profit <span style={{ color: '#f0c068' }}>+{P.cur}{Math.round(maxProfit).toLocaleString()}</span>
+                Max profit <span style={{ color: '#f0c068' }}>+{P.cur}{Math.round(netMaxProfit).toLocaleString()}</span>
                 <span style={{ opacity: 0.4 }}> · </span>
-                Max loss <span style={{ color: '#5fa3d4' }}>{P.cur}{Math.round(maxLoss).toLocaleString()}</span>
+                Max loss <span style={{ color: '#5fa3d4' }}>{P.cur}{Math.round(netMaxLoss).toLocaleString()}</span>
               </div>
+              {fees > 0 && (
+                <div className="tnum" style={{ fontSize: 9, opacity: 0.45, marginTop: 4 }}>
+                  incl. est. fees {P.cur}{Math.round(fees).toLocaleString()}
+                </div>
+              )}
             </div>
             <div style={{ width: 110 }}>
               <div style={{ fontSize: 10, letterSpacing: 0.8, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600, textAlign: 'center' }}>POP</div>
@@ -784,8 +796,12 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, legs, setLegs, spot,
 
 // ───────────────────────────────────────────────── CHAIN WORKSPACE
 // P&L what-if card (design ⑤) — compact hero + POP gauge + max profit/loss tiles.
-function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, theme, light, D }) {
-  const profit = pnlNTD >= 0;
+function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, fees = 0, theme, light, D }) {
+  // Net of estimated round-trip fees (⑤).
+  const netPnl = pnlNTD - fees;
+  const netMaxProfit = maxProfit - fees;
+  const netMaxLoss = maxLoss - fees;
+  const profit = netPnl >= 0;
   const heroColor = profit
     ? (light ? 'oklch(0.60 0.13 75)' : 'oklch(0.84 0.14 75)')
     : (light ? 'oklch(0.50 0.10 220)' : 'oklch(0.74 0.12 220)');
@@ -796,9 +812,9 @@ function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, theme, li
         <div style={{ minWidth: 0 }}>
           <Eyebrow>P&L what-if · {P.code}</Eyebrow>
           <div className="tnum" style={{ fontSize: 24, fontWeight: 600, letterSpacing: -0.4, lineHeight: 1.05, marginTop: 3, fontFamily: 'ui-monospace, SF Mono, monospace', color: heroColor }}>
-            {profit ? '+' : ''}{P.cur}{Math.abs(Math.round(pnlNTD)).toLocaleString()}
+            {profit ? '+' : ''}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
           </div>
-          <div className="tnum" style={{ fontSize: 9, opacity: 0.5, marginTop: 3 }}>{pnlPts >= 0 ? '+' : ''}{pnlPts.toFixed(1)} pts {P.unitLabel}</div>
+          <div className="tnum" style={{ fontSize: 9, opacity: 0.5, marginTop: 3 }}>{pnlPts >= 0 ? '+' : ''}{pnlPts.toFixed(1)} pts {P.unitLabel}{fees > 0 ? ` · incl. est. fees ${P.cur}${Math.round(fees).toLocaleString()}` : ''}</div>
         </div>
         <div style={{ width: 74, flexShrink: 0 }}>
           <POPGauge theme={theme} size={74} value={popValue} />
@@ -809,11 +825,11 @@ function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, theme, li
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
         <div className="lt-tile" style={tile}>
           <div style={{ fontSize: 9, letterSpacing: 0.5, textTransform: 'uppercase', opacity: 0.6 }}>Max profit</div>
-          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'ui-monospace, Menlo, monospace', color: '#f0c068' }}>+{P.cur}{Math.round(maxProfit).toLocaleString()}</div>
+          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'ui-monospace, Menlo, monospace', color: '#f0c068' }}>+{P.cur}{Math.round(netMaxProfit).toLocaleString()}</div>
         </div>
         <div className="lt-tile" style={tile}>
           <div style={{ fontSize: 9, letterSpacing: 0.5, textTransform: 'uppercase', opacity: 0.6 }}>Max loss</div>
-          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'ui-monospace, Menlo, monospace', color: '#5fa3d4' }}>{P.cur}{Math.round(maxLoss).toLocaleString()}</div>
+          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'ui-monospace, Menlo, monospace', color: '#5fa3d4' }}>{P.cur}{Math.round(netMaxLoss).toLocaleString()}</div>
         </div>
       </div>
     </Glass2>
@@ -847,7 +863,7 @@ function LayoutToggle({ value, onChange, light }) {
 }
 
 function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiries, onAddLeg, legs, setLegs,
-  iv, setIv, dte, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, portfolioG, accent, t, D, quality }) {
+  iv, setIv, dte, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, popValue, portfolioG, accent, t, D, quality }) {
   const light = theme === 'light';
   const [layout, setLayout] = uS('a');
   const lay = CHAIN_LAYOUTS[layout];
@@ -870,7 +886,7 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiri
 
         {/* pnl what-if */}
         <div style={{ gridArea: 'pnl', minWidth: 0 }}>
-          <WhatIfCard P={P} pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss} popValue={popValue} theme={theme} light={light} D={D} />
+          <WhatIfCard P={P} pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss} fees={fees} popValue={popValue} theme={theme} light={light} D={D} />
         </div>
 
         {/* payoff */}

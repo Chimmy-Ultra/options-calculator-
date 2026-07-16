@@ -12,6 +12,10 @@
       defaultSpot: 21850, defaultIv: 24,
       spotMin: 20000, spotMax: 23500, spotStep: 10,
       ivMin: 10, ivMax: 50,
+      // Transaction cost per contract per side: NT$20 brokerage + 0.1% futures
+      // transaction tax on the premium notional (premium × mult). Broker-dependent
+      // — tune to your own account.
+      fees: { perSide: 20, taxRate: 0.001 },
       settleNote: '13:30',
       ivBase: { weekly: 22, monthly: 24 },
       ib: null,           // TXO 不走 IB
@@ -27,6 +31,9 @@
       ivMin: 10, ivMax: 60,
       settleNote: '13:20 CT',
       ivBase: { std: 26 },
+      // ~US$2.5 per contract per side (IB commission + exchange fees, rough
+      // all-in); no separate premium tax. Broker-dependent — tune per account.
+      fees: { perSide: 2.5, taxRate: 0 },
       ib: { symbol: 'ZC', exchange: 'CBOT' },
       mockExpiries: [
         { id: 'sep', label: 'SEP', dte: 43,  type: 'std', date: '8/21'  },
@@ -44,6 +51,7 @@
       ivMin: 8, ivMax: 50,
       settleNote: '13:20 CT',
       ivBase: { std: 20 },
+      fees: { perSide: 2.5, taxRate: 0 },
       ib: { symbol: 'ZS', exchange: 'CBOT' },
       mockExpiries: [
         { id: 'aug', label: 'AUG', dte: 15,  type: 'std', date: '7/24'  },
@@ -62,6 +70,7 @@
       ivMin: 12, ivMax: 70,
       settleNote: '13:20 CT',
       ivBase: { std: 30 },
+      fees: { perSide: 2.5, taxRate: 0 },
       ib: { symbol: 'ZW', exchange: 'CBOT' },
       mockExpiries: [
         { id: 'sep', label: 'SEP', dte: 43,  type: 'std', date: '8/21'  },
@@ -81,6 +90,7 @@
       ivMin: 8, ivMax: 60,
       settleNote: '15:00 CT',
       ivBase: { std: 15 },
+      fees: { perSide: 2.5, taxRate: 0 },
       // Standard end-of-month options trading class is 'ES' on CME.
       ib: { symbol: 'ES', exchange: 'CME', tradingClass: 'ES' },
       mockExpiries: [
@@ -99,6 +109,7 @@
       ivMin: 8, ivMax: 60,
       settleNote: '12:30 CT',
       ivBase: { std: 18 },
+      fees: { perSide: 2.5, taxRate: 0 },
       ib: { symbol: 'GC', exchange: 'COMEX', tradingClass: 'OG' },
       mockExpiries: [
         { id: 'm1', label: 'AUG', dte: 28,  type: 'std', date: '7/25' },
@@ -116,6 +127,7 @@
       ivMin: 15, ivMax: 80,
       settleNote: '14:30 CT',
       ivBase: { std: 33 },
+      fees: { perSide: 2.5, taxRate: 0 },
       ib: { symbol: 'CL', exchange: 'NYMEX', tradingClass: 'LO' },
       mockExpiries: [
         { id: 'm1', label: 'AUG', dte: 21,  type: 'std', date: '7/17' },
@@ -133,6 +145,7 @@
       ivMin: 20, ivMax: 100,
       settleNote: '14:30 CT',
       ivBase: { std: 45 },
+      fees: { perSide: 2.5, taxRate: 0 },
       ib: { symbol: 'NG', exchange: 'NYMEX', tradingClass: 'ON' },
       mockExpiries: [
         { id: 'm1', label: 'AUG', dte: 26,  type: 'std', date: '7/28' },
