@@ -268,6 +268,10 @@
     applyCamera();
 
     let dragging = false, lx = 0, ly = 0, didDrag = false;
+    // Once the user orbits the surface by hand, stop the idle auto-spin so it
+    // stays where they left it (owner request). Idle spin still runs until the
+    // first drag, as a gentle "this is interactive" hint.
+    let userMoved = false;
     const dom = renderer.domElement;
     dom.style.cursor = 'grab';
     // Block browser-level pan/zoom on this canvas so our pointer events fully control
@@ -301,7 +305,7 @@
     dom.addEventListener('pointermove', (e) => {
       if (dragging) {
         const dx = e.clientX - lx, dy = e.clientY - ly;
-        if (Math.abs(dx) + Math.abs(dy) > 2) didDrag = true;
+        if (Math.abs(dx) + Math.abs(dy) > 2) { didDrag = true; userMoved = true; }
         // Touch needs ~2.4× more rotation per pixel than mouse — fingers travel further per gesture.
         const factor = e.pointerType === 'touch' ? 0.012 : 0.005;
         orbit.az -= dx * factor;
@@ -378,7 +382,7 @@
       const dt = (now - last) / 1000; last = now;
       if (!dragging && !pinching) {
         idleTime += dt;
-        if (!isTouch && idleTime > 1.5) orbit.az += dt * 0.04;
+        if (!isTouch && !userMoved && idleTime > 1.5) orbit.az += dt * 0.04;
         applyCamera();
       } else {
         idleTime = 0;

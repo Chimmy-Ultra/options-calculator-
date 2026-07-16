@@ -1,11 +1,14 @@
 """Options Lab IB proxy — 連本機 TWS / IB Gateway，把 CBOT 農產品期貨選擇權餵給前端。
 
-前端（design_handoff_options_lab/data-live.js）打這裡的四個端點：
+前端（design_handoff_options_lab/data-live.js）打這裡的端點：
   GET /api/health            → 連線狀態
   GET /api/quote/{pid}       → 近月期貨報價（pid = zc / zs / zw）
   GET /api/expiries/{pid}    → 選擇權到期日（IB 真實資料，id = YYYYMMDD）
   GET /api/chain/{pid}       → ?expiry=YYYYMMDD 的期權鏈，rows 形狀跟前端 genChain 一致
+  GET /api/bars/{pid}        → 近月期貨歷史 K 棒
+  GET /api/positions/{pid}   → 目前帳戶的選擇權部位（唯讀，載入前端 legs 用）
 
+唯讀行情 + 部位代理：只讀 IB 的行情與持倉，不下單、不改單（沒有任何下單端點）。
 沒訂閱 CME 即時行情時自動退到 15 分鐘延遲數據（IB_MARKET_DATA_TYPE=3）。
 IB 完全沒連上時 /api/health 回 connected=false，前端就留在 mock。
 
@@ -46,6 +49,7 @@ RISK_FREE = float(os.environ.get("RISK_FREE", "0.04"))
 STRIKES_EACH_SIDE = 8      # 跟前端 mock 的 ±8 檔一致
 SNAPSHOT_WAIT_S = 6.0      # 等行情快照的秒數（延遲數據要久一點）
 CHAIN_CACHE_TTL_S = 30.0
+POSITIONS_CACHE_TTL_S = 10.0
 
 app = FastAPI(title="Options Lab IB proxy")
 app.add_middleware(
@@ -402,4 +406,54 @@ async def chain(pid: str, expiry: str):
         "rows": rows,
     }
     _cache_put(cache_key, result, CHAIN_CACHE_TTL_S)
+    return result
+
+
+@app.get("/api/positions/{pid}")
+async def positions(pid: str):
+    """該商品目前在 IB 帳戶的選擇權（FOP）部位 — 唯讀，給前端一鍵載入 legs。
+    只回 secType == FOP 且 symbol / tradingClass 對得上該商品的部位；空陣列也是合法回傳。
+    premium 換算成「點數」(averageCost / multiplier)，跟前端 legs 的 premium 慣例一致。
+    """
+    spec = _product(pid)
+    cache_key = ("positions", spec["symbol"])
+    hit = _cache_get(cache_key)
+    if hit is not None:
+        return hit
+    async with _ib_lock:
+        if not await _ensure_connected():
+            raise HTTPException(503, "IB not connected")
+        items = ib.portfolio()
+    today = date.today()
+    out = []
+    for it in items:
+        c = it.contract
+        if getattr(c, "secType", None) != "FOP":
+            continue
+        # tradingClass 對得上（新商品）或 underlying symbol 對得上（fallback）
+        tc = getattr(c, "tradingClass", None)
+        if c.symbol != spec["symbol"] and tc != spec.get("tradingClass"):
+            continue
+        pos = _f(it.position) or 0.0
+        if pos == 0:
+            continue
+        mult = float(c.multiplier) if getattr(c, "multiplier", None) else 1.0
+        avg = _f(it.averageCost) or 0.0
+        exp = c.lastTradeDateOrContractMonth or ""
+        try:
+            dte = (datetime.strptime(exp[:8], "%Y%m%d").date() - today).days
+        except (ValueError, TypeError):
+            dte = None
+        right = (c.right or "").upper()
+        out.append({
+            "type": "call" if right.startswith("C") else "put",
+            "side": "long" if pos > 0 else "short",
+            "qty": int(abs(pos)),
+            "strike": _f(c.strike) or 0.0,
+            "premium": round(avg / mult, 4) if mult else round(avg, 4),
+            "expiry": exp,
+            "dte": dte,
+        })
+    result = {"positions": out}
+    _cache_put(cache_key, result, POSITIONS_CACHE_TTL_S)
     return result

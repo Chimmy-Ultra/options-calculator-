@@ -60,6 +60,39 @@ const TXO_EXPIRIES = [
 ];
 
 
+// ── Persistence (①). One localStorage key; every value is hard-validated on
+// restore so corrupt or stale JSON can never crash the app — any doubt falls
+// back to the built-in defaults. The key is read once per page load.
+const LS_KEY = 'optionsLab.v1';
+let _savedCache; // undefined = not read yet; null = nothing / invalid saved
+function readSaved() {
+  if (_savedCache !== undefined) return _savedCache;
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    _savedCache = raw ? JSON.parse(raw) : null;
+  } catch (e) { _savedCache = null; }
+  return _savedCache;
+}
+function validLeg(l) {
+  return l && (l.side === 'long' || l.side === 'short')
+    && (l.type === 'call' || l.type === 'put')
+    && Number.isFinite(l.strike) && Number.isFinite(l.premium)
+    && Number.isFinite(l.qty) && l.qty >= 1;
+}
+function sanitizeLegs(arr) {
+  if (!Array.isArray(arr)) return null;
+  const clean = arr.filter(validLeg).map((l) => {
+    const out = { side: l.side, type: l.type, strike: l.strike, premium: l.premium, qty: l.qty };
+    if (Number.isFinite(l.dte)) out.dte = l.dte;
+    return out;
+  });
+  return clean.length ? clean : null;
+}
+function initialProductId() {
+  const s = readSaved();
+  return (s && s.productId && window.PRODUCTS.some((p) => p.id === s.productId)) ? s.productId : 'txo';
+}
+
 function Glass2({ tone = 'panel', radius = 18, padding = 18, style, children, ...rest }) {
   const styles = {
     panel: {
@@ -93,10 +126,12 @@ function Glass2({ tone = 'panel', radius = 18, padding = 18, style, children, ..
   );
 }
 
-function Eyebrow({ children, right }) {
+function Eyebrow({ children, right, hk }) {
+  const HT = window.HelpTip; // desktop-only hover help (⑧a); pass hk to enable
+  const label = (hk && HT) ? <HT k={hk}>{children}</HT> : children;
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-      <span style={{ fontSize: 10, letterSpacing: 0.8, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600 }}>{children}</span>
+      <span style={{ fontSize: 10, letterSpacing: 0.8, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600 }}>{label}</span>
       {right}
     </div>
   );
@@ -269,29 +304,106 @@ function SettlementCountdown({ dte, note = '13:30' }) {
   );
 }
 
+// Freshness stamp (②) — shows the time of the last successful live fetch and
+// turns amber "STALE" once the data is older than 45s. Its own 1s ticker keeps
+// the re-render local to the chip. Only rendered for live IB products.
+function FreshnessChip({ lastLiveAt }) {
+  const [, tick] = uS(0);
+  uE(() => {
+    const id = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+  if (!lastLiveAt) return null;
+  const stale = (Date.now() - lastLiveAt) > 45000;
+  const d = new Date(lastLiveAt);
+  const hhmmss = [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
+  return (
+    <span className="mono" title={stale ? 'live data may be stale — last update shown' : 'last live update'} style={{
+      fontSize: 9, fontWeight: 700, letterSpacing: 0.4, fontFamily: 'ui-monospace, SF Mono, monospace',
+      color: stale ? '#f0c068' : 'inherit', opacity: stale ? 0.8 : 0.5,
+      display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap', flexShrink: 0,
+    }}>
+      {stale && <span style={{ fontWeight: 800 }}>STALE</span>}{hhmmss}
+    </span>
+  );
+}
+
 function Obsidian3() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
-  const [workspace, setWorkspace] = uS('chain'); // design opens on Chain
-  const [productId, setProductId] = uS('txo');
+  const [workspace, setWorkspace] = uS(() => {
+    const s = readSaved();
+    return (s && ['chain', 'chart', 'calc', 'iv', 'pricer'].includes(s.workspace)) ? s.workspace : 'chain';
+  });
+  const [productId, setProductId] = uS(initialProductId);
   const P = window.getProduct(productId);
   const [live, setLive] = uS(null);         // { quote, expiries, health } — IB proxy 抓到的
   const [liveRows, setLiveRows] = uS(null); // 當前到期日的 IB 期權鏈 rows
+  const [lastLiveAt, setLastLiveAt] = uS(null); // ② timestamp of last successful live fetch
   const [liveBars, setLiveBars] = uS(null); // 近月期貨的 IB 歷史 K
   const [barPeriodId, setBarPeriodId] = uS('D'); // K 線週期：D / 4H / 1H
-  const [theme, setTheme] = uS('dark'); // 'dark' | 'light'（設計稿的 Light/Dark 切換）
+  const [theme, setTheme] = uS(() => {
+    const s = readSaved();
+    return (s && (s.theme === 'light' || s.theme === 'dark')) ? s.theme : 'dark';
+  }); // 'dark' | 'light'（設計稿的 Light/Dark 切換）
   const [prodMenuOpen, setProdMenuOpen] = uS(false);
   const [whatIfOpen, setWhatIfOpen] = uS(false); // collapsible What-if rail (owner: rarely used)
+  // In-app help (⑧): drawer open state + one-time discoverability hint.
+  const [helpOpen, setHelpOpen] = uS(false);
+  const [helpHintSeen, setHelpHintSeen] = uS(() => { try { return localStorage.getItem('optionsLab.helpSeen') === '1'; } catch (e) { return true; } });
+  function dismissHelpHint() {
+    if (helpHintSeen) return;
+    setHelpHintSeen(true);
+    try { localStorage.setItem('optionsLab.helpSeen', '1'); } catch (e) { /* storage disabled */ }
+  }
   const light = theme === 'light';
   // 亮色靠 body.light 的 CSS 覆蓋（tokens.css），圖表等元件則吃 theme prop 的 light 分支。
   uE(() => { document.body.classList.toggle('light', theme === 'light'); }, [theme]);
   uE(() => { setProdMenuOpen(false); }, [workspace]); // close product menu on tab change
-  const [expiryId, setExpiryId] = uS('m');
+  // Persist working state (①), debounced. Legs are kept per-product so each
+  // product restores its own. Wrapped in try/catch — quota / private mode must
+  // never crash the app. Tweaks, the What-if rail and hover are intentionally
+  // not persisted.
+  uE(() => {
+    const id = setTimeout(() => {
+      try {
+        const prev = readSaved() || {};
+        const legsByProduct = { ...(prev.legsByProduct || {}), [productId]: legs };
+        const payload = { productId, expiryId, workspace, theme, spot, iv, legsByProduct };
+        localStorage.setItem(LS_KEY, JSON.stringify(payload));
+        _savedCache = payload; // keep the read cache in sync with the latest write
+      } catch (e) { /* quota exceeded / storage disabled — skip */ }
+    }, 400);
+    return () => clearTimeout(id);
+  }, [productId, expiryId, workspace, theme, spot, iv, legs]);
+  const [expiryId, setExpiryId] = uS(() => {
+    const s = readSaved();
+    const P0 = window.getProduct(initialProductId());
+    const exps = productExpiries(P0, null); // live expiries unknown at mount → mock list
+    if (s && s.expiryId && exps.some((e) => e.id === s.expiryId)) return s.expiryId;
+    return defaultExpiryFor(P0).id;
+  });
   const expiries = productExpiries(P, live && live.expiries);
   const expiry = expiries.find((e) => e.id === expiryId) || expiries[0];
 
-  const [legs, setLegs] = uS(() => defaultLegsFor(window.getProduct('txo'), defaultExpiryFor(window.getProduct('txo')).dte));
-  const [spot, setSpot] = uS(TXO_SPOT);
-  const [iv, setIv] = uS(24);
+  const [legs, setLegs] = uS(() => {
+    const s = readSaved();
+    const pid = initialProductId();
+    const P0 = window.getProduct(pid);
+    const saved = s && s.legsByProduct && sanitizeLegs(s.legsByProduct[pid]);
+    return saved || defaultLegsFor(P0, defaultExpiryFor(P0).dte);
+  });
+  const [spot, setSpot] = uS(() => {
+    const s = readSaved();
+    const P0 = window.getProduct(initialProductId());
+    const v = (s && Number.isFinite(s.spot)) ? s.spot : P0.defaultSpot;
+    return Math.max(P0.spotMin, Math.min(P0.spotMax, v));
+  });
+  const [iv, setIv] = uS(() => {
+    const s = readSaved();
+    const P0 = window.getProduct(initialProductId());
+    const v = (s && Number.isFinite(s.iv)) ? s.iv : P0.defaultIv;
+    return Math.max(P0.ivMin, Math.min(P0.ivMax, v));
+  });
   const [view, setView] = uS('payoff');
   const [hover, setHover] = uS(null);
   const [sliceFrac, setSliceFrac] = uS(1); // 0 = now, 1 = expiry
@@ -307,6 +419,7 @@ function Obsidian3() {
     setLive(null);
     setLiveRows(null);
     setLiveBars(null);
+    setLastLiveAt(null);
     setExpiryId(e0.id);
     setSpot(p.defaultSpot);
     setIv(p.defaultIv);
@@ -326,7 +439,7 @@ function Obsidian3() {
         window.LiveData.expiries(P.id),
       ]);
       if (dead) return;
-      if (quote && quote.last > 0) setSpot(quote.last);
+      if (quote && quote.last > 0) { setSpot(quote.last); setLastLiveAt(Date.now()); }
       if (exps && exps.length) setExpiryId(exps[0].id);
       // K 棒交給下面的專屬 effect 抓（換週期會重抓，避免重複邏輯）。
       setLive({ quote, expiries: exps && exps.length ? exps : null, health });
@@ -344,9 +457,38 @@ function Obsidian3() {
       if (dead || !chain || !chain.rows || !chain.rows.length) return;
       setLiveRows(chain.rows);
       if (chain.underlying && chain.underlying.price > 0) setSpot(chain.underlying.price);
+      setLastLiveAt(Date.now());
     })();
     return () => { dead = true; };
   }, [live, expiryId]);
+
+  // ② Live auto-refresh: while connected, re-pull the quote every 10s and the
+  // option chain every 30s so intraday prices don't silently go stale. Paused
+  // when the tab is hidden; refetches immediately on becoming visible again.
+  uE(() => {
+    if (!live || !P.ib || !window.LiveData) return undefined;
+    let dead = false;
+    const pullQuote = async () => {
+      if (document.hidden) return;
+      const q = await window.LiveData.quote(P.id);
+      if (dead || !q || !(q.last > 0)) return;
+      setSpot(q.last);
+      setLastLiveAt(Date.now());
+    };
+    const pullChain = async () => {
+      if (document.hidden) return;
+      const chain = await window.LiveData.chain(P.id, expiryId);
+      if (dead || !chain || !chain.rows || !chain.rows.length) return;
+      setLiveRows(chain.rows);
+      if (chain.underlying && chain.underlying.price > 0) setSpot(chain.underlying.price);
+      setLastLiveAt(Date.now());
+    };
+    const qId = setInterval(pullQuote, 10000);
+    const cId = setInterval(pullChain, 30000);
+    const onVis = () => { if (!document.hidden) { pullQuote(); pullChain(); } };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { dead = true; clearInterval(qId); clearInterval(cId); document.removeEventListener('visibilitychange', onVis); };
+  }, [live, productId, expiryId]);
 
   // IB live：K 線依所選週期抓歷史 K 棒。剛連上 + 每次換週期都會重抓；
   // 換週期時不清舊 bars（留著顯示直到新資料到，避免閃回 mock）。
@@ -378,32 +520,36 @@ function Obsidian3() {
     if (vp.layout === 'desk' && (workspace === 'pricer' || workspace === 'compare')) setWorkspace('chain');
   }, [vp.layout, workspace]);
 
-  // P&L numbers（點數 × 商品乘數）。Valued at the same daysRem as PayoffChart
-  // so the displayed number always matches the curve.
+  // P&L numbers（點數 × 商品乘數）。Valued at the same front-expiry horizon as
+  // PayoffChart (daysElapsed = sliceFrac · T0) so the number matches the curve.
   const pnlPts = uM(() => {
-    const daysRem = Math.max(0, dte * (1 - sliceFrac));
-    return legs.reduce((acc, l) => {
-      const sign = l.side === 'long' ? 1 : -1;
-      const v = bsPrice(l.type, spot, l.strike, iv, daysRem, P.r / 100, P.model);
-      return acc + sign * l.qty * (v - l.premium);
-    }, 0);
+    const T0 = frontDte(legs, dte);
+    return portfolioValuePts(legs, spot, iv, sliceFrac * T0, dte, P.r / 100, P.model)
+      - portfolioCostPts(legs);
   }, [legs, spot, iv, dte, sliceFrac, productId]);
   const pnlNTD = pnlPts * P.mult;
+  // Max profit / loss scanned at the front expiry (T0): near legs at intrinsic,
+  // later legs keep time value. Single-expiry portfolios = Σ legPayoff as before.
   const maxProfit = uM(() => {
+    const T0 = frontDte(legs, dte), cost = portfolioCostPts(legs);
     let m = -Infinity;
-    for (let s = spot * 0.7; s <= spot * 1.3; s += P.strikeStep / 2) m = Math.max(m, legs.reduce((a, l) => a + legPayoff(l, s), 0));
+    for (let s = spot * 0.7; s <= spot * 1.3; s += P.strikeStep / 2) m = Math.max(m, portfolioValuePts(legs, s, iv, T0, dte, P.r / 100, P.model) - cost);
     return m * P.mult;
-  }, [legs, spot, productId]);
+  }, [legs, spot, iv, dte, productId]);
   const maxLoss = uM(() => {
+    const T0 = frontDte(legs, dte), cost = portfolioCostPts(legs);
     let m = Infinity;
-    for (let s = spot * 0.7; s <= spot * 1.3; s += P.strikeStep / 2) m = Math.min(m, legs.reduce((a, l) => a + legPayoff(l, s), 0));
+    for (let s = spot * 0.7; s <= spot * 1.3; s += P.strikeStep / 2) m = Math.min(m, portfolioValuePts(legs, s, iv, T0, dte, P.r / 100, P.model) - cost);
     return m * P.mult;
-  }, [legs, spot, productId]);
+  }, [legs, spot, iv, dte, productId]);
 
   // Live Greeks for the current portfolio (replaces hardcoded chips).
   const portfolioG = uM(() => portfolioGreeks(legs, spot, iv, dte, P.r / 100, P.model), [legs, spot, iv, dte, productId]);
   // Real POP from lognormal P&L distribution (replaces hardcoded 0.68).
-  const popValue = uM(() => pnlDistribution(legs, spot, iv, dte).pop, [legs, spot, iv, dte]);
+  const popValue = uM(() => pnlDistribution(legs, spot, iv, dte, { r: P.r / 100, model: P.model }).pop, [legs, spot, iv, dte, productId]);
+  // Estimated round-trip commission + tax (currency). The two P&L cards show
+  // net-of-fees numbers; charts stay gross (they show the theoretical structure).
+  const fees = uM(() => estFees(legs, P), [legs, productId]);
   // 期權鏈 rows：live（IB）優先，否則 mock。所有吃 chain 的元件都從這裡拿。
   const chainRows = uM(() => {
     if (liveRows && liveRows.length) return liveRows;
@@ -481,6 +627,7 @@ function Obsidian3() {
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
           <DataQualityPill quality={quality} />
+          {live && P.ib && <FreshnessChip lastLiveAt={lastLiveAt} />}
           <ProductDropdown
             productId={productId} P={P} spot={spot} live={live}
             open={prodMenuOpen} setOpen={setProdMenuOpen}
@@ -493,6 +640,23 @@ function Obsidian3() {
             <span style={{ fontSize: 13 }}>{light ? '☀' : '☾'}</span>
             <span style={{ fontSize: 12, fontWeight: 600 }}>{light ? 'Light' : 'Dark'}</span>
           </Glass2>
+          <div style={{ position: 'relative', flexShrink: 0 }}>
+            <Glass2 tone="chip" radius={999} padding="8px 12px" style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', border: helpOpen ? '1px solid oklch(0.66 0.16 250 / 0.6)' : undefined }}
+              onClick={() => { setHelpOpen((v) => !v); dismissHelpHint(); }} title="Help — how to read this">
+              <span style={{ fontSize: 13, fontWeight: 700 }}>?</span>
+            </Glass2>
+            {!helpHintSeen && (
+              <div style={{
+                position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 20, whiteSpace: 'nowrap',
+                display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 999,
+                background: 'rgba(240,192,104,0.16)', border: '1px solid rgba(240,192,104,0.4)',
+                fontSize: 10, fontWeight: 600, color: light ? '#8a6410' : '#f7d394',
+              }}>
+                New here? Click <b>?</b> for a guide
+                <button onClick={(e) => { e.stopPropagation(); dismissHelpHint(); }} title="dismiss" style={{ border: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 12, lineHeight: 1, padding: 0, fontFamily: 'inherit' }}>×</button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -509,7 +673,7 @@ function Obsidian3() {
       {/* WORKSPACE BODY */}
       {workspace === 'calc' && (
         <CalcWorkspace
-          P={P} theme={theme} light={light} rows={chainRows}
+          P={P} theme={theme} light={light} rows={chainRows} expiries={expiries} live={live}
           legs={legs} setLegs={setLegs}
           spot={spot} setSpot={setSpot}
           spotMin={spotMin} spotMax={spotMax}
@@ -518,7 +682,7 @@ function Obsidian3() {
           sliceFrac={sliceFrac} setSliceFrac={setSliceFrac}
           view={view} setView={setView}
           pnlPts={pnlPts} pnlNTD={pnlNTD}
-          maxProfit={maxProfit} maxLoss={maxLoss}
+          maxProfit={maxProfit} maxLoss={maxLoss} fees={fees}
           hover={hover} setHover={setHover}
           accent={accent} D={D} t={t}
           portfolioG={portfolioG} popValue={popValue} quality={quality}
@@ -527,11 +691,11 @@ function Obsidian3() {
       {workspace === 'chain' && (
         <ChainWorkspace
           P={P} rows={chainRows} theme={theme}
-          spot={spot} setSpot={setSpot} expiry={expiry}
+          spot={spot} setSpot={setSpot} expiry={expiry} expiries={expiries}
           onAddLeg={addLegFromChain}
           legs={legs} setLegs={setLegs}
           iv={iv} setIv={setIv} dte={dte}
-          pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss}
+          pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss} fees={fees}
           popValue={popValue} portfolioG={portfolioG}
           accent={accent} t={t} D={D}
           quality={quality}
@@ -553,6 +717,9 @@ function Obsidian3() {
         P={P} spot={spot} setSpot={setSpot} spotMin={spotMin} spotMax={spotMax}
         iv={iv} setIv={setIv} open={whatIfOpen} setOpen={setWhatIfOpen} theme={theme} light={light}
       />
+
+      {/* In-app help drawer (⑧) */}
+      {window.HelpDrawer && <window.HelpDrawer open={helpOpen} onClose={() => setHelpOpen(false)} workspace={workspace} />}
 
       {/* Tweaks panel */}
       <TweaksPanel title="Tweaks">
@@ -584,8 +751,31 @@ function Obsidian3() {
 }
 
 // ───────────────────────────────────────────────── CALCULATOR WORKSPACE
-function CalcWorkspace({ P, theme = 'dark', rows, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
+function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
   const light = theme === 'light';
+  // Net of estimated round-trip fees (⑤). Charts stay gross.
+  const netPnl = pnlNTD - fees;
+  const netMaxProfit = maxProfit - fees;
+  const netMaxLoss = maxLoss - fees;
+  // IB position import (④): replace the working legs with the real portfolio.
+  const canImport = !!(live && P.ib && window.LiveData && window.LiveData.positions);
+  const [importing, setImporting] = uS(false);
+  const [importNote, setImportNote] = uS(null);
+  async function importPositions() {
+    setImporting(true);
+    const res = await window.LiveData.positions(P.id);
+    setImporting(false);
+    if (res && res.positions && res.positions.length) {
+      setLegs(res.positions.map((pp) => ({
+        side: pp.side, type: pp.type, strike: pp.strike,
+        premium: pp.premium, qty: pp.qty, dte: pp.dte != null ? pp.dte : dte,
+      })));
+      setImportNote(`${res.positions.length} position${res.positions.length === 1 ? '' : 's'} loaded`);
+    } else {
+      setImportNote('no IB positions');
+    }
+    setTimeout(() => setImportNote(null), 3500);
+  }
   const hoverInfo = uM(() => {
     if (!hover) return null;
     const spotAt = (spot * (1 + hover.xn * 0.18)).toFixed(0);
@@ -629,15 +819,19 @@ function CalcWorkspace({ P, theme = 'dark', rows, legs, setLegs, spot, setSpot, 
       }}>
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow right={
-            <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 2 * P.strikeStep) / P.strikeStep) * P.strikeStep, iv, dte, P)])}>+ leg</button>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {canImport && <button style={miniBtn} disabled={importing} onClick={importPositions} title="Load your real IB option positions">{importing ? '…' : '⟳ IB'}</button>}
+              <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 2 * P.strikeStep) / P.strikeStep) * P.strikeStep, iv, dte, P)])}>+ leg</button>
+            </div>
           }>Legs</Eyebrow>
-          <LegEditor legs={legs} onChange={setLegs} theme={theme} />
+          <LegEditor legs={legs} onChange={setLegs} theme={theme} expiries={expiries} defaultDte={dte} />
+          {importNote && <div style={{ fontSize: 10, opacity: 0.6, marginTop: 6, fontFamily: 'ui-monospace, SF Mono, monospace' }}>{importNote}</div>}
         </Glass2>
 
         {/* Single-contract pricer — folded in from the removed Pricer tab.
             Auto: pick a strike, IV is pulled from the chain smile, price is live. */}
         <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{P.model === 'b76' ? 'Black-76' : 'Black-Scholes'}</span>}>Option Pricer</Eyebrow>
+          <Eyebrow hk="pricer" right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{P.model === 'b76' ? 'Black-76' : 'Black-Scholes'}</span>}>Option Pricer</Eyebrow>
           <OptionPricer key={P.id} product={P} spot={spot} iv={iv} dte={dte} rows={rows} theme={theme} accent={accent} />
         </Glass2>
       </div>
@@ -651,22 +845,27 @@ function CalcWorkspace({ P, theme = 'dark', rows, legs, setLegs, spot, setSpot, 
         <Glass2 tone="raised" padding={D.panelPad}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
-              <Eyebrow>P&L now</Eyebrow>
+              <Eyebrow hk="pnlnow">P&L now</Eyebrow>
               <div className="tnum" style={{
                 fontSize: 32, fontWeight: 600, letterSpacing: -0.6,
-                color: pnlNTD >= 0 ? (light ? 'oklch(0.60 0.13 75)' : 'oklch(0.84 0.14 75)') : (light ? 'oklch(0.50 0.10 220)' : 'oklch(0.74 0.12 220)'),
+                color: netPnl >= 0 ? (light ? 'oklch(0.60 0.13 75)' : 'oklch(0.84 0.14 75)') : (light ? 'oklch(0.50 0.10 220)' : 'oklch(0.74 0.12 220)'),
                 fontFamily: 'ui-monospace, SF Mono, monospace', lineHeight: 1,
               }}>
-                {pnlNTD >= 0 ? '+' : ''}{P.cur}{Math.abs(Math.round(pnlNTD)).toLocaleString()}
+                {netPnl >= 0 ? '+' : ''}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
               </div>
               <div className="tnum" style={{ fontSize: 10, opacity: 0.5, marginTop: 4 }}>
                 {pnlPts >= 0 ? '+' : ''}{pnlPts.toFixed(1)} pts {P.unitLabel}
               </div>
               <div className="tnum" style={{ fontSize: 11, opacity: 0.55, marginTop: 8 }}>
-                Max profit <span style={{ color: '#f0c068' }}>+{P.cur}{Math.round(maxProfit).toLocaleString()}</span>
+                Max profit <span style={{ color: '#f0c068' }}>+{P.cur}{Math.round(netMaxProfit).toLocaleString()}</span>
                 <span style={{ opacity: 0.4 }}> · </span>
-                Max loss <span style={{ color: '#5fa3d4' }}>{P.cur}{Math.round(maxLoss).toLocaleString()}</span>
+                Max loss <span style={{ color: '#5fa3d4' }}>{P.cur}{Math.round(netMaxLoss).toLocaleString()}</span>
               </div>
+              {fees > 0 && (
+                <div className="tnum" style={{ fontSize: 9, opacity: 0.45, marginTop: 4 }}>
+                  incl. est. fees {P.cur}{Math.round(fees).toLocaleString()}
+                </div>
+              )}
             </div>
             <div style={{ width: 110 }}>
               <div style={{ fontSize: 10, letterSpacing: 0.8, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600, textAlign: 'center' }}>POP</div>
@@ -727,7 +926,7 @@ function CalcWorkspace({ P, theme = 'dark', rows, legs, setLegs, spot, setSpot, 
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>at expiry</span>}>
               P&L distribution <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· lognormal</span>
             </Eyebrow>
-            <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={140} width={304} ntdMult={P.mult} cur={P.cur} />
+            <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={140} width={304} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />
           </>)}
           {view === 'attr' && (<>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>vs baseline</span>}>
@@ -749,10 +948,10 @@ function CalcWorkspace({ P, theme = 'dark', rows, legs, setLegs, spot, setSpot, 
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow right={<DataQualityPill quality={quality} />}>Greeks</Eyebrow>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <GreekChip label="Delta · Δ" value={(portfolioG.delta >= 0 ? '+' : '') + portfolioG.delta.toFixed(2)} theme={theme} emphasis={portfolioG.delta >= 0 ? 'up' : 'down'} />
-            <GreekChip label="Gamma · Γ" value={portfolioG.gamma.toFixed(4)} theme={theme} />
-            <GreekChip label="Theta · Θ" value={(portfolioG.theta >= 0 ? '+' : '') + portfolioG.theta.toFixed(2)} theme={theme} emphasis={portfolioG.theta >= 0 ? 'up' : 'down'} />
-            <GreekChip label="Vega · V" value={(portfolioG.vega >= 0 ? '+' : '') + portfolioG.vega.toFixed(2)} theme={theme} emphasis={portfolioG.vega >= 0 ? 'up' : 'down'} />
+            <GreekChip label="Delta · Δ" helpKey="delta" value={(portfolioG.delta >= 0 ? '+' : '') + portfolioG.delta.toFixed(2)} theme={theme} emphasis={portfolioG.delta >= 0 ? 'up' : 'down'} />
+            <GreekChip label="Gamma · Γ" helpKey="gamma" value={portfolioG.gamma.toFixed(4)} theme={theme} />
+            <GreekChip label="Theta · Θ" helpKey="theta" value={(portfolioG.theta >= 0 ? '+' : '') + portfolioG.theta.toFixed(2)} theme={theme} emphasis={portfolioG.theta >= 0 ? 'up' : 'down'} />
+            <GreekChip label="Vega · V" helpKey="vega" value={(portfolioG.vega >= 0 ? '+' : '') + portfolioG.vega.toFixed(2)} theme={theme} emphasis={portfolioG.vega >= 0 ? 'up' : 'down'} />
           </div>
         </Glass2>
       </div>
@@ -783,8 +982,12 @@ function CalcWorkspace({ P, theme = 'dark', rows, legs, setLegs, spot, setSpot, 
 
 // ───────────────────────────────────────────────── CHAIN WORKSPACE
 // P&L what-if card (design ⑤) — compact hero + POP gauge + max profit/loss tiles.
-function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, theme, light, D }) {
-  const profit = pnlNTD >= 0;
+function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, fees = 0, theme, light, D }) {
+  // Net of estimated round-trip fees (⑤).
+  const netPnl = pnlNTD - fees;
+  const netMaxProfit = maxProfit - fees;
+  const netMaxLoss = maxLoss - fees;
+  const profit = netPnl >= 0;
   const heroColor = profit
     ? (light ? 'oklch(0.60 0.13 75)' : 'oklch(0.84 0.14 75)')
     : (light ? 'oklch(0.50 0.10 220)' : 'oklch(0.74 0.12 220)');
@@ -793,11 +996,11 @@ function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, theme, li
     <Glass2 tone="raised" padding="14px 14px 12px" radius={16}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
         <div style={{ minWidth: 0 }}>
-          <Eyebrow>P&L what-if · {P.code}</Eyebrow>
+          <Eyebrow hk="pnlwhatif">P&L what-if · {P.code}</Eyebrow>
           <div className="tnum" style={{ fontSize: 24, fontWeight: 600, letterSpacing: -0.4, lineHeight: 1.05, marginTop: 3, fontFamily: 'ui-monospace, SF Mono, monospace', color: heroColor }}>
-            {profit ? '+' : ''}{P.cur}{Math.abs(Math.round(pnlNTD)).toLocaleString()}
+            {profit ? '+' : ''}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
           </div>
-          <div className="tnum" style={{ fontSize: 9, opacity: 0.5, marginTop: 3 }}>{pnlPts >= 0 ? '+' : ''}{pnlPts.toFixed(1)} pts {P.unitLabel}</div>
+          <div className="tnum" style={{ fontSize: 9, opacity: 0.5, marginTop: 3 }}>{pnlPts >= 0 ? '+' : ''}{pnlPts.toFixed(1)} pts {P.unitLabel}{fees > 0 ? ` · incl. est. fees ${P.cur}${Math.round(fees).toLocaleString()}` : ''}</div>
         </div>
         <div style={{ width: 74, flexShrink: 0 }}>
           <POPGauge theme={theme} size={74} value={popValue} />
@@ -808,11 +1011,11 @@ function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, theme, li
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
         <div className="lt-tile" style={tile}>
           <div style={{ fontSize: 9, letterSpacing: 0.5, textTransform: 'uppercase', opacity: 0.6 }}>Max profit</div>
-          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'ui-monospace, Menlo, monospace', color: '#f0c068' }}>+{P.cur}{Math.round(maxProfit).toLocaleString()}</div>
+          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'ui-monospace, Menlo, monospace', color: '#f0c068' }}>+{P.cur}{Math.round(netMaxProfit).toLocaleString()}</div>
         </div>
         <div className="lt-tile" style={tile}>
           <div style={{ fontSize: 9, letterSpacing: 0.5, textTransform: 'uppercase', opacity: 0.6 }}>Max loss</div>
-          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'ui-monospace, Menlo, monospace', color: '#5fa3d4' }}>{P.cur}{Math.round(maxLoss).toLocaleString()}</div>
+          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'ui-monospace, Menlo, monospace', color: '#5fa3d4' }}>{P.cur}{Math.round(netMaxLoss).toLocaleString()}</div>
         </div>
       </div>
     </Glass2>
@@ -845,8 +1048,8 @@ function LayoutToggle({ value, onChange, light }) {
   );
 }
 
-function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, onAddLeg, legs, setLegs,
-  iv, setIv, dte, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, portfolioG, accent, t, D, quality }) {
+function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiries, onAddLeg, legs, setLegs,
+  iv, setIv, dte, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, popValue, portfolioG, accent, t, D, quality }) {
   const light = theme === 'light';
   const [layout, setLayout] = uS('a');
   const lay = CHAIN_LAYOUTS[layout];
@@ -869,7 +1072,7 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, onAddL
 
         {/* pnl what-if */}
         <div style={{ gridArea: 'pnl', minWidth: 0 }}>
-          <WhatIfCard P={P} pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss} popValue={popValue} theme={theme} light={light} D={D} />
+          <WhatIfCard P={P} pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss} fees={fees} popValue={popValue} theme={theme} light={light} D={D} />
         </div>
 
         {/* payoff */}
@@ -882,10 +1085,10 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, onAddL
 
         {/* greeks */}
         <div style={{ gridArea: 'greeks', minWidth: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 8 }}>
-          <GreekChip label="Delta · Δ" value={(portfolioG.delta >= 0 ? '+' : '') + portfolioG.delta.toFixed(2)} theme={theme} emphasis={portfolioG.delta >= 0 ? 'up' : 'down'} />
-          <GreekChip label="Gamma · Γ" value={portfolioG.gamma.toFixed(4)} theme={theme} />
-          <GreekChip label="Theta · Θ" value={(portfolioG.theta >= 0 ? '+' : '') + portfolioG.theta.toFixed(2)} theme={theme} emphasis={portfolioG.theta >= 0 ? 'up' : 'down'} />
-          <GreekChip label="Vega · V" value={(portfolioG.vega >= 0 ? '+' : '') + portfolioG.vega.toFixed(2)} theme={theme} emphasis={portfolioG.vega >= 0 ? 'up' : 'down'} />
+          <GreekChip label="Delta · Δ" helpKey="delta" value={(portfolioG.delta >= 0 ? '+' : '') + portfolioG.delta.toFixed(2)} theme={theme} emphasis={portfolioG.delta >= 0 ? 'up' : 'down'} />
+          <GreekChip label="Gamma · Γ" helpKey="gamma" value={portfolioG.gamma.toFixed(4)} theme={theme} />
+          <GreekChip label="Theta · Θ" helpKey="theta" value={(portfolioG.theta >= 0 ? '+' : '') + portfolioG.theta.toFixed(2)} theme={theme} emphasis={portfolioG.theta >= 0 ? 'up' : 'down'} />
+          <GreekChip label="Vega · V" helpKey="vega" value={(portfolioG.vega >= 0 ? '+' : '') + portfolioG.vega.toFixed(2)} theme={theme} emphasis={portfolioG.vega >= 0 ? 'up' : 'down'} />
         </div>
 
         {/* legs */}
@@ -899,7 +1102,7 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, onAddL
           {legs.length === 0 ? (
             <div style={{ padding: '20px 0', textAlign: 'center', fontSize: 11, opacity: 0.5 }}>Click any chain row to add a leg</div>
           ) : (
-            <LegEditor legs={legs} onChange={setLegs} theme={theme} />
+            <LegEditor legs={legs} onChange={setLegs} theme={theme} expiries={expiries} defaultDte={dte} />
           )}
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, opacity: 0.6, marginTop: 8, fontFamily: 'ui-monospace, Menlo, monospace' }}>
             <span>{credit >= 0 ? 'Net credit' : 'Net debit'}</span>
@@ -1083,7 +1286,9 @@ function _bs(type, S, K, iv, dte, r, model) {
 function _mkLeg(side, type, S, K, iv, dte, P, qty = 1) {
   const model = (P && P.model) || 'bs';
   const r = ((P && P.r != null) ? P.r : 1.5) / 100;
-  return { side, type, strike: K, premium: _bs(type, S, K, iv, dte, r, model), qty };
+  // Store dte on the leg so calendars / diagonals value each leg at its own
+  // expiry. Single-expiry portfolios all carry the same dte → unchanged output.
+  return { side, type, strike: K, premium: _bs(type, S, K, iv, dte, r, model), qty, dte };
 }
 const STRATEGY_LIBRARY = [
   { id: 'bull-call',  name: 'Bull Call Spread',  bias: 'bullish', tag: '看小漲',
@@ -1569,7 +1774,7 @@ function MobileCalc({
         </>)}
         {view === 'dist' && (<>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>at expiry</span>}>P&L distribution</Eyebrow>
-          <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={150} width={chartW} ntdMult={P.mult} cur={P.cur} />
+          <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={150} width={chartW} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />
         </>)}
         {view === 'attr' && (<>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>vs baseline</span>}>P&L attribution</Eyebrow>

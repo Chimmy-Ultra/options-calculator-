@@ -1,7 +1,7 @@
 // Option Chain table (TXO-styled).
 // Calls on left, Puts on right, strike in middle. Click any cell adds a leg.
 
-const { useMemo: cnM, useState: cnS } = React;
+const { useMemo: cnM, useState: cnS, useEffect: cnE } = React;
 
 // Mock chain rows。product 給合約規格（strikeStep / 定價模型 / smile 方向），
 // 理論價直接走 bsPrice（'bs' 或 'b76'），跟 payoff / P&L / Pricer 同一條定價路徑。
@@ -63,6 +63,15 @@ function OptionChain({ spot, contract = 'monthly', dte, product, rows: rowsProp,
   const genRows = cnM(() => genChain({ spot, contract, dte, product }), [spot, contract, dte, product]);
   const rows = (rowsProp && rowsProp.length) ? rowsProp : genRows;
   const [hov, setHov] = cnS(null); // { row, side }
+  // Clicking a quote opens a BUY / SELL chooser anchored at the cell instead of
+  // silently adding a long leg. { strike, type: 'call'|'put', opt, x, y }.
+  const [popover, setPopover] = cnS(null);
+  cnE(() => {
+    if (!popover) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') setPopover(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [popover]);
   const dark = theme === 'dark';
   const P = product || {};
   const step = rows.length > 1 ? (rows[1].strike - rows[0].strike) : (P.strikeStep || 50);
@@ -79,9 +88,16 @@ function OptionChain({ spot, contract = 'monthly', dte, product, rows: rowsProp,
     : 0.5;
   const spotTxt = step < 5 ? spot.toFixed(2) : Math.round(spot).toLocaleString();
 
-  function cellClick(strike, side, opt) {
+  // `type` here is the chain side (call / put). The BUY/SELL choice in the
+  // popover becomes the leg's long / short side.
+  function cellClick(strike, type, opt, e) {
     if (!onAddLeg) return;
-    onAddLeg({ side: 'long', type: side, strike, premium: parseFloat(opt.last.toFixed(2)), qty: 1 });
+    setPopover({ strike, type, opt, x: e.clientX, y: e.clientY });
+  }
+  function commitLeg(legSide) {
+    if (!popover) return;
+    onAddLeg({ side: legSide, type: popover.type, strike: popover.strike, premium: parseFloat(popover.opt.last.toFixed(2)), qty: 1, dte });
+    setPopover(null);
   }
 
   const HCol = ({ children, align = 'right' }) => (
@@ -121,7 +137,7 @@ function OptionChain({ spot, contract = 'monthly', dte, product, rows: rowsProp,
             const callLeg = legAt(r.strike, 'call');
             const putLeg = legAt(r.strike, 'put');
             const Cell = ({ children, side, align = 'right' }) => (
-              <div onClick={() => cellClick(r.strike, side, side === 'call' ? r.call : r.put)}
+              <div onClick={(e) => cellClick(r.strike, side, side === 'call' ? r.call : r.put, e)}
                    onMouseEnter={() => setHov({ row: i, side })}
                    onMouseLeave={() => setHov(null)}
                    style={{
@@ -139,7 +155,7 @@ function OptionChain({ spot, contract = 'monthly', dte, product, rows: rowsProp,
               const opt = side === 'call' ? r.call : r.put;
               const ringCol = leg ? (leg.side === 'long' ? 'rgba(240,192,104,0.85)' : 'rgba(95,163,212,0.85)') : null;
               return (
-                <div onClick={() => cellClick(r.strike, side, opt)}
+                <div onClick={(e) => cellClick(r.strike, side, opt, e)}
                      onMouseEnter={() => setHov({ row: i, side })}
                      onMouseLeave={() => setHov(null)}
                      style={{
@@ -201,6 +217,31 @@ function OptionChain({ spot, contract = 'monthly', dte, product, rows: rowsProp,
           }}>spot {spotTxt}</div>
         </div>
       </div>
+
+      {/* BUY / SELL chooser popover (desktop). Click-outside overlay + Esc close. */}
+      {popover && (
+        <>
+          <div onClick={() => setPopover(null)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
+          <div style={{
+            position: 'fixed',
+            left: Math.min(popover.x, window.innerWidth - 184),
+            top: Math.min(popover.y + 6, window.innerHeight - 96),
+            zIndex: 41, width: 168, padding: 10, borderRadius: 12,
+            background: dark ? 'linear-gradient(155deg, rgba(80,90,115,0.95), rgba(36,42,58,0.97))' : 'rgba(255,255,255,0.98)',
+            border: `1px solid ${dark ? 'rgba(255,255,255,0.16)' : 'rgba(25,40,70,0.16)'}`,
+            boxShadow: '0 20px 48px -18px rgba(0,0,0,0.7)', color: dark ? '#e8eaef' : '#1c2433',
+            backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)',
+          }}>
+            <div style={{ fontSize: 10, fontFamily: 'ui-monospace, SF Mono, monospace', opacity: 0.75, marginBottom: 8, textAlign: 'center' }}>
+              {fmtStrike(popover.strike, step)} <span style={{ color: popover.type === 'call' ? '#ef5350' : '#26a69a', fontWeight: 700 }}>{popover.type === 'call' ? 'CALL' : 'PUT'}</span> @ {fmtPx(popover.opt.last, P)}
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={() => commitLeg('long')} style={{ flex: 1, padding: '8px 0', border: 'none', borderRadius: 8, cursor: 'pointer', background: '#f0c068', color: '#0a0d14', fontWeight: 800, fontSize: 11, letterSpacing: 0.6, fontFamily: 'inherit' }}>BUY</button>
+              <button onClick={() => commitLeg('short')} style={{ flex: 1, padding: '8px 0', border: 'none', borderRadius: 8, cursor: 'pointer', background: '#5fa3d4', color: '#0a0d14', fontWeight: 800, fontSize: 11, letterSpacing: 0.6, fontFamily: 'inherit' }}>SELL</button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

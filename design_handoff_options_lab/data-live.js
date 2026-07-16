@@ -46,5 +46,8 @@
       if (opts.duration) q.push('duration=' + encodeURIComponent(opts.duration));
       return get('/api/bars/' + encodeURIComponent(pid) + (q.length ? '?' + q.join('&') : ''), 15000);
     },
+    // { positions: [{ side, type, strike, premium(點數), qty, expiry, dte }] } | null
+    // 唯讀持倉，用來把真實部位載入前端 legs。失敗一律 null（房間規則）。
+    positions: (pid) => get('/api/positions/' + encodeURIComponent(pid), 8000),
   };
 })();

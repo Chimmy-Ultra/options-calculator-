@@ -223,9 +223,9 @@ function GreeksProfile({ legs, spot, iv = 24, dte = 17, theme = 'dark', height =
 // ─────────────────────────────────────────────────────────────────────────────
 // P&L Distribution Histogram — lognormal expected-P&L distribution at expiry.
 // Profit buckets red, loss buckets teal. Vertical zero line. Stats row above.
-function PnLDistribution({ legs, spot, iv = 24, dte = 17, theme = 'dark', height = 160, width = 304, ntdMult = 50, cur = 'NT$' }) {
+function PnLDistribution({ legs, spot, iv = 24, dte = 17, theme = 'dark', height = 160, width = 304, ntdMult = 50, cur = 'NT$', model = 'bs', r = 0.015 }) {
   const W = width, H = height, pad = 14;
-  const dist = useMemoM(() => window.pnlDistribution(legs, spot, iv, dte), [legs, spot, iv, dte]);
+  const dist = useMemoM(() => window.pnlDistribution(legs, spot, iv, dte, { r, model }), [legs, spot, iv, dte, model, r]);
   const buckets = dist.buckets;
   const maxW = Math.max(...buckets.map((b) => b.weight), 1e-9);
   const lo = dist.lo, hi = dist.hi;

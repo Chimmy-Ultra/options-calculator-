@@ -59,7 +59,7 @@ This is **not a typical React app.** Skim these before touching code, or you'll 
 
 ### File extensions matter — do not rename casually
 
-- `.jsx` files are loaded with `<script type="text/babel">` and parsed by Babel. They use JSX syntax.
+- `.jsx` files are loaded with `<script type="text/babel">` and parsed by Babel. They use JSX syntax. (`atoms.jsx`, `charts.jsx`, `option-chain.jsx`, `help.jsx`, `obsidian3.jsx`, `tweaks-panel.jsx` — `help.jsx` holds the in-app tooltips + help drawer.)
 - `.js` files (`surface3d.js`, `iv-surface.js`, `service-worker.js`) are plain ES5/ES6, loaded as `<script src>`. **They must stay `.js`** — see commit `56009a0` ("rename plain-JS files to .js so CDN serves correct MIME"). Renaming breaks the CDN content-type and the file silently fails to execute.
 - No `import`/`export`. Modules communicate via globals on `window` and shared React hooks (`const { useState, useEffect, useRef, useMemo } = React;` at the top of each `.jsx`).
 
@@ -68,7 +68,7 @@ This is **not a typical React app.** Skim these before touching code, or you'll 
 - A build step (Vite, Webpack, Next.js, esbuild). The whole point of this prototype is zero-install.
 - TypeScript, package managers, linters as files in the **frontend**. If you want types, use JSDoc comments inline. (`server/` is Python with its own `requirements.txt` — the one sanctioned exception.)
 - Imports between modules. Add to the existing global / `window.*` pattern instead.
-- New backends. All P&L / Greeks / IV math stays as pure frontend functions. The ONE backend is `server/` (FastAPI + ib_async) — a read-only market-data proxy to the user's local IB TWS/Gateway for CBOT grain options. The frontend must always work without it: `data-live.js` (`window.LiveData`) returns `null` on any failure and everything falls back to mock.
+- New backends. All P&L / Greeks / IV math stays as pure frontend functions. The ONE backend is `server/` (FastAPI + ib_async) — a **read-only** proxy to the user's local IB TWS/Gateway: market data (quote / expiries / chain / bars) **and account positions** (`GET /api/positions/{pid}`, `window.LiveData.positions`), never orders. Don't add order/trade endpoints. The frontend must always work without it: `data-live.js` (`window.LiveData`) returns `null` on any failure and everything falls back to mock.
 
 ### Products (multi-product since the IB integration)
 
@@ -77,7 +77,14 @@ Product specs live in `products.js` (`window.PRODUCTS` / `window.getProduct`). E
 - **TXO** 台指選擇權 — Black-Scholes on spot (`model: 'bs'`), NT$, ×50/pt, strike step 50.
 - **ZC / ZS / ZW** CBOT 玉米/黃豆/小麥期貨選擇權 — **Black-76 on futures** (`model: 'b76'`), US$, 報價 cents/bushel, 5,000 bu → 1¢ = $50/口. Strike steps: ZC/ZW 10¢, ZS 20¢. `eighth: true` → quotes show 1/8-cent ticks (462.875). Grain IV smiles skew to CALLS (drought risk) — opposite of TXO's put skew (`P.skew`).
 - **ES / GC / CL / NG** — S&P 500 E-mini, Gold, WTI Crude, Natural Gas futures options (Black-76, US$). Multipliers ×US$50/pt, ×US$100/oz, ×US$1,000/bbl, ×US$10,000/pt. NG uses fractional strikes (step 0.1) — the chain shows two-decimal strikes. These are registry-only entries: adding a product is a `products.js` entry plus a `server/main.py` `PRODUCTS` row; nothing else changes.
-- Live data: futures products pull real quotes/expiries/chains from IB via `server/` (see `server/README.md`). Live chain rows replace `genChain` mock rows but keep the same row shape — keep it that way.
+- Live data: futures products pull real quotes/expiries/chains from IB via `server/` (see `server/README.md`). Live chain rows replace `genChain` mock rows but keep the same row shape — keep it that way. While connected, quotes re-poll every 10s and the chain every 30s (paused when the tab is hidden); a top-bar freshness chip goes amber `STALE` past 45s.
+- Each product also carries a `fees: { perSide, taxRate }` field (broker-dependent, tunable). `estFees(legs, P)` estimates round-trip commission + tax; the Calculator "P&L now" and Chain "P&L what-if" cards show P&L **net of fees**, charts stay gross.
+- **Legs carry an optional per-leg `dte`** so calendars / diagonals work. Shared math values each leg at its own expiry and evaluates "at expiry" metrics at the front expiry `T0` (earliest leg) via `portfolioValuePts`. Legs without `dte` fall back to the workspace dte, so single-expiry portfolios are unchanged.
+
+### Persistence & state
+
+- Working state (product, expiry, workspace, theme, spot, IV, per-product legs) is saved to the `optionsLab.v1` localStorage key (debounced) and hard-validated on restore — corrupt / stale state falls back to defaults, never crashes. Tweaks, the What-if rail and hover are not persisted.
+- In-app help: a `?` chip opens a per-workspace help drawer (`help.jsx`); Greek tiles and key labels have hover tooltips. A one-time "New here?" hint uses the `optionsLab.helpSeen` flag.
 
 ### TXO domain conventions (Taiwan index options)
 
