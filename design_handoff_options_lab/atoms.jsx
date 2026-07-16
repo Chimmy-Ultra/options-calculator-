@@ -581,7 +581,8 @@ function LegEditor({ legs, onChange, theme = 'light', expiries, defaultDte }) {
   const rowBg = dark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.55)';
   const rowBorder = dark ? 'rgba(255,255,255,0.06)' : 'rgba(20,30,60,0.06)';
   const withExp = !!(expiries && expiries.length);
-  const cols = withExp ? '52px 40px minmax(0,1fr) minmax(0,0.9fr) 58px 28px 22px' : '54px 46px 1fr 1fr 32px 24px';
+  const cols = withExp ? '44px 30px minmax(0,1fr) minmax(0,1fr) 46px 24px 20px' : '54px 46px 1fr 1fr 32px 24px';
+  const gap = withExp ? 4 : 6;
   const selStyle = {
     width: '100%', padding: '3px 2px', borderRadius: 6, border: `1px solid ${rowBorder}`,
     background: 'transparent', color: dark ? '#e8eaef' : '#1d1d22',
@@ -597,12 +598,12 @@ function LegEditor({ legs, onChange, theme = 'light', expiries, defaultDte }) {
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 6, fontSize: 10, letterSpacing: 0.6, textTransform: 'uppercase', color: headerColor, padding: '0 4px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: cols, gap, fontSize: 10, letterSpacing: 0.6, textTransform: 'uppercase', color: headerColor, padding: '0 4px' }}>
         <span>Side</span><span>Type</span><span>Strike</span><span>Premium</span>{withExp && <span>Exp</span>}<span style={{ textAlign: 'right' }}>Qty</span><span></span>
       </div>
       {legs.map((leg, i) => (
         <div key={i} style={{
-          display: 'grid', gridTemplateColumns: cols, gap: 6,
+          display: 'grid', gridTemplateColumns: cols, gap,
           padding: '8px 6px 8px 8px', borderRadius: 10, background: rowBg, border: `1px solid ${rowBorder}`, alignItems: 'center'
         }}>
           <button

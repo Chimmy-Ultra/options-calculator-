@@ -513,7 +513,7 @@ function Obsidian3() {
       {/* WORKSPACE BODY */}
       {workspace === 'calc' && (
         <CalcWorkspace
-          P={P} theme={theme} light={light} rows={chainRows} expiries={expiries}
+          P={P} theme={theme} light={light} rows={chainRows} expiries={expiries} live={live}
           legs={legs} setLegs={setLegs}
           spot={spot} setSpot={setSpot}
           spotMin={spotMin} spotMax={spotMax}
@@ -588,12 +588,31 @@ function Obsidian3() {
 }
 
 // ───────────────────────────────────────────────── CALCULATOR WORKSPACE
-function CalcWorkspace({ P, theme = 'dark', rows, expiries, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
+function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
   const light = theme === 'light';
   // Net of estimated round-trip fees (⑤). Charts stay gross.
   const netPnl = pnlNTD - fees;
   const netMaxProfit = maxProfit - fees;
   const netMaxLoss = maxLoss - fees;
+  // IB position import (④): replace the working legs with the real portfolio.
+  const canImport = !!(live && P.ib && window.LiveData && window.LiveData.positions);
+  const [importing, setImporting] = uS(false);
+  const [importNote, setImportNote] = uS(null);
+  async function importPositions() {
+    setImporting(true);
+    const res = await window.LiveData.positions(P.id);
+    setImporting(false);
+    if (res && res.positions && res.positions.length) {
+      setLegs(res.positions.map((pp) => ({
+        side: pp.side, type: pp.type, strike: pp.strike,
+        premium: pp.premium, qty: pp.qty, dte: pp.dte != null ? pp.dte : dte,
+      })));
+      setImportNote(`${res.positions.length} position${res.positions.length === 1 ? '' : 's'} loaded`);
+    } else {
+      setImportNote('no IB positions');
+    }
+    setTimeout(() => setImportNote(null), 3500);
+  }
   const hoverInfo = uM(() => {
     if (!hover) return null;
     const spotAt = (spot * (1 + hover.xn * 0.18)).toFixed(0);
@@ -637,9 +656,13 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, legs, setLegs, spot,
       }}>
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow right={
-            <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 2 * P.strikeStep) / P.strikeStep) * P.strikeStep, iv, dte, P)])}>+ leg</button>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {canImport && <button style={miniBtn} disabled={importing} onClick={importPositions} title="Load your real IB option positions">{importing ? '…' : '⟳ IB'}</button>}
+              <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 2 * P.strikeStep) / P.strikeStep) * P.strikeStep, iv, dte, P)])}>+ leg</button>
+            </div>
           }>Legs</Eyebrow>
           <LegEditor legs={legs} onChange={setLegs} theme={theme} expiries={expiries} defaultDte={dte} />
+          {importNote && <div style={{ fontSize: 10, opacity: 0.6, marginTop: 6, fontFamily: 'ui-monospace, SF Mono, monospace' }}>{importNote}</div>}
         </Glass2>
 
         {/* Single-contract pricer — folded in from the removed Pricer tab.
