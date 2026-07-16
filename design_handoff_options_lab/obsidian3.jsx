@@ -564,6 +564,23 @@ function Obsidian3() {
     return window.genBars ? window.genBars({ spot, n: per.n, volScale: per.volScale, product: P }) : [];
   }, [liveBars, productId, barPeriodId]);
 
+  // 20-day historical (realized) volatility, annualized %, from daily closes.
+  // Live daily bars when available; otherwise a mock walk at the product's
+  // default vol (so mock mode reads roughly "fairly priced"). Compared against
+  // ATM IV in the IV workspace — the classic premium rich / cheap gauge.
+  const hvLive = !!(liveBars && liveBars.length && barPeriodId === 'D');
+  const hv20 = uM(() => {
+    const daily = hvLive ? liveBars
+      : (window.genBars ? window.genBars({ spot: P.defaultSpot, n: 40, volScale: 1, product: P }) : []);
+    const closes = daily.map((b) => b.c).filter((c) => c > 0);
+    if (closes.length < 21) return null;
+    const rets = [];
+    for (let i = closes.length - 20; i < closes.length; i++) rets.push(Math.log(closes[i] / closes[i - 1]));
+    const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
+    const varr = rets.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (rets.length - 1);
+    return Math.sqrt(varr * 252) * 100;
+  }, [liveBars, hvLive, productId]);
+
   // Add leg from chain
   function addLegFromChain(leg) {
     setLegs((prev) => [...prev, leg]);
@@ -709,7 +726,7 @@ function Obsidian3() {
         />
       )}
       {workspace === 'iv' && (
-        <IVWorkspace D={D} P={P} spot={spot} iv={iv} expiry={expiry} expiries={expiries} light={light} theme={theme} />
+        <IVWorkspace D={D} P={P} spot={spot} iv={iv} expiry={expiry} expiries={expiries} rows={chainRows} hv20={hv20} hvLive={hvLive} light={light} theme={theme} />
       )}
 
       {/* Global collapsible What-if rail — on every tab */}
@@ -821,6 +838,7 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
           <Eyebrow right={
             <div style={{ display: 'flex', gap: 4 }}>
               {canImport && <button style={miniBtn} disabled={importing} onClick={importPositions} title="Load your real IB option positions">{importing ? '…' : '⟳ IB'}</button>}
+              <StrategyMenu P={P} spot={spot} iv={iv} dte={dte} onPick={setLegs} light={light} />
               <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 2 * P.strikeStep) / P.strikeStep) * P.strikeStep, iv, dte, P)])}>+ leg</button>
             </div>
           }>Legs</Eyebrow>
@@ -1095,6 +1113,7 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiri
         {glassArea('legs', (<>
           <Eyebrow right={
             <div style={{ display: 'flex', gap: 4 }}>
+              <StrategyMenu P={P} spot={spot} iv={iv} dte={dte} onPick={setLegs} light={light} />
               <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 2 * P.strikeStep) / P.strikeStep) * P.strikeStep, iv, dte, P)])}>+ leg</button>
               {legs.length > 0 && <button style={miniBtn} onClick={() => setLegs([])}>clear</button>}
             </div>
@@ -1168,31 +1187,102 @@ function ChartWorkspace({ P, bars, barsLive, theme, light, barPeriodId, setBarPe
 }
 
 // ───────────────────────────────────────────────── IV SURFACE WORKSPACE
-function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, light = false, theme = 'dark' }) {
+function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv20, hvLive, light = false, theme = 'dark' }) {
   const ref = uR(null);
+  const instRef = uR(null);
   const [ivView, setIvView] = uS('3d'); // '3d' | 'heat'
+
+  // Strike × expiry IV grid from real chain data. The current expiry uses the
+  // live rows when IB is connected (rows prop = chainRows, live-or-mock); the
+  // other expiries come from the mock generator at the same spot — IB only
+  // loads one expiry's chain at a time. IV per cell = mid of call/put IV.
+  const grid = uM(() => {
+    const base = (rows && rows.length) ? rows
+      : (window.genChain ? window.genChain({ spot, contract: expiry.type, dte: expiry.dte, product: P }) : []);
+    if (!base.length) return null;
+    const strikes = base.map((r) => r.strike);
+    const cellIv = (r) => {
+      if (!r) return null;
+      const c = r.call.iv, p = r.put.iv;
+      if (c > 0 && p > 0) return (c + p) / 2;
+      return c || p || null;
+    };
+    const exps = expiries.map((e) => {
+      const rws = (e.id === expiry.id) ? base
+        : (window.genChain ? window.genChain({ spot, contract: e.type, dte: e.dte, product: P }) : []);
+      const ivRow = strikes.map((k) => {
+        let best = null, bd = Infinity;
+        for (const r of rws) { const d = Math.abs(r.strike - k); if (d < bd) { bd = d; best = r; } }
+        return cellIv(best);
+      });
+      return { label: e.label, dte: e.dte, iv: ivRow };
+    });
+    return { strikes, exps, base };
+  }, [rows, expiry, spot, expiries, P]);
+
+  // ATM IV per expiry (term structure) — the strike nearest spot.
+  const term = uM(() => {
+    if (!grid) return [];
+    let atmIdx = 0, bd = Infinity;
+    grid.strikes.forEach((k, i) => { const d = Math.abs(k - spot); if (d < bd) { bd = d; atmIdx = i; } });
+    return grid.exps.map((e) => ({ label: e.label, dte: e.dte, iv: e.iv[atmIdx] }));
+  }, [grid, spot]);
+
+  // 25Δ skew on the current expiry: IV(put Δ≈−.25) − IV(call Δ≈+.25).
+  // Positive → put skew (index-style downside hedging); negative → call skew
+  // (grain-style upside risk premium).
+  const skew = uM(() => {
+    if (!grid || !grid.base.length) return null;
+    let call = null, cd = Infinity, put = null, pd = Infinity;
+    for (const r of grid.base) {
+      if (r.call.iv > 0 && Number.isFinite(r.call.delta)) {
+        const d = Math.abs(r.call.delta - 0.25);
+        if (d < cd) { cd = d; call = r.call.iv; }
+      }
+      if (r.put.iv > 0 && Number.isFinite(r.put.delta)) {
+        const d = Math.abs(r.put.delta + 0.25);
+        if (d < pd) { pd = d; put = r.put.iv; }
+      }
+    }
+    if (call == null || put == null) return null;
+    return put - call;
+  }, [grid]);
+
+  // 3D: mount once per view switch, then push data updates in place — the
+  // What-if spot slider regenerates the grid and a WebGL remount per tick
+  // would be far too heavy.
+  const surfaceData = uM(() => {
+    if (!grid) return null;
+    return { strikes: grid.strikes, expiries: grid.exps.map((e) => ({ label: e.label, dte: e.dte })), iv: grid.exps.map((e) => e.iv) };
+  }, [grid]);
   uE(() => {
     if (ivView !== '3d' || !ref.current || !window.IVSurface3D) return;
-    const inst = window.IVSurface3D.make({ container: ref.current });
-    return () => inst && inst.destroy && inst.destroy();
+    instRef.current = window.IVSurface3D.make({ container: ref.current, data: surfaceData });
+    return () => { if (instRef.current) { instRef.current.destroy(); instRef.current = null; } };
   }, [ivView]);
+  uE(() => {
+    if (instRef.current && instRef.current.setData && surfaceData) instRef.current.setData(surfaceData);
+  }, [surfaceData]);
 
-  // Heatmap: IV across expiry (rows) × strike (cols). Every 2nd strike, 10 cols.
+  // Heatmap shares the grid: every 2nd strike, up to 10 columns.
   const heat = uM(() => {
-    const atmIv = iv || (P ? P.defaultIv : 24);
-    const cols = (e) => (window.genChain
-      ? window.genChain({ spot, contract: e.type, dte: e.dte, product: P }).filter((_, i) => i % 2 === 0).slice(0, 10)
-      : []);
-    const header = cols(expiry).map((r) => window.fmtStrike(r.strike, (P && P.strikeStep) || 50));
-    const rows = expiries.map((e) => ({
+    if (!grid) return { header: [], rows: [] };
+    const colIdx = grid.strikes.map((_, i) => i).filter((i) => i % 2 === 0).slice(0, 10);
+    const vals = grid.exps.flatMap((e) => colIdx.map((i) => e.iv[i])).filter((v) => v != null);
+    const lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+    const span = Math.max(hi - lo, 0.5);
+    const header = colIdx.map((i) => window.fmtStrike(grid.strikes[i], (P && P.strikeStep) || 50));
+    const rowsOut = grid.exps.map((e) => ({
       exp: e.label,
-      cells: cols(e).map((r) => {
-        const a = Math.max(0.05, Math.min(0.6, ((r.call.iv - (atmIv - 1.8)) / 4.5) * 0.55));
-        return { v: r.call.iv.toFixed(1), bg: `rgba(240,192,104,${a.toFixed(2)})` };
+      cells: colIdx.map((i) => {
+        const v = e.iv[i];
+        if (v == null) return { v: '—', bg: 'transparent' };
+        const a = Math.max(0.05, Math.min(0.6, 0.05 + ((v - lo) / span) * 0.55));
+        return { v: v.toFixed(1), bg: `rgba(240,192,104,${a.toFixed(2)})` };
       }),
     }));
-    return { header, rows };
-  }, [spot, iv, expiries, expiry, P]);
+    return { header, rows: rowsOut };
+  }, [grid, P]);
 
   const viewChip = (id, label) => {
     const active = ivView === id;
@@ -1241,32 +1331,57 @@ function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, light = 
         )}
       </Glass2>
       <div style={{ width: 280, display: 'flex', flexDirection: 'column', gap: D.gap }}>
+        {/* IV vs realized — is premium rich or cheap? */}
+        {hv20 != null && (
+          <Glass2 tone="raised" padding={D.panelPad}>
+            <Eyebrow hk="hv" right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{hvLive ? 'IB daily bars' : 'mock'}</span>}>IV vs HV · 20d</Eyebrow>
+            <div className="tnum" style={{ fontSize: 20, fontWeight: 600, fontFamily: 'ui-monospace, SF Mono, monospace', display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <span>{iv.toFixed(1)}%</span>
+              <span style={{ opacity: 0.4, fontSize: 13 }}>vs</span>
+              <span style={{ opacity: 0.75 }}>{hv20.toFixed(1)}%</span>
+              <span style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 700, color: iv / hv20 > 1.15 ? '#f0c068' : iv / hv20 < 0.85 ? '#5fa3d4' : (light ? 'rgba(20,30,50,0.6)' : 'rgba(255,255,255,0.6)') }}>
+                ×{(iv / hv20).toFixed(2)}
+              </span>
+            </div>
+            <div style={{ fontSize: 11, opacity: 0.6, marginTop: 6 }}>
+              {iv / hv20 > 1.15 ? 'IV above realized — premium rich, favors sellers'
+                : iv / hv20 < 0.85 ? 'IV below realized — premium cheap, favors buyers'
+                : 'IV ≈ realized — options fairly priced'}
+            </div>
+          </Glass2>
+        )}
         <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow>Term structure</Eyebrow>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>ATM IV</span>}>Term structure</Eyebrow>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {expiries.map((e) => {
-              const ivAtm = ((P ? P.defaultIv : 24) - 2) + (1 - e.dte / 60) * 6;
-              return (
-                <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                  <span style={{ opacity: 0.7 }}>{e.label} · {e.dte}d</span>
-                  <span className="mono" style={{ fontFamily: 'ui-monospace, SF Mono, monospace', fontWeight: 600, color: e.id === expiry.id ? '#f0c068' : '#cdd3df' }}>{ivAtm.toFixed(1)}%</span>
-                </div>
-              );
-            })}
+            {term.map((e) => (
+              <div key={e.label + e.dte} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                <span style={{ opacity: 0.7 }}>{e.label} · {e.dte}d</span>
+                <span className="mono" style={{ fontFamily: 'ui-monospace, SF Mono, monospace', fontWeight: 600, color: e.dte === expiry.dte ? '#f0c068' : (light ? '#3a4658' : '#cdd3df') }}>
+                  {e.iv != null ? e.iv.toFixed(1) + '%' : '—'}
+                </span>
+              </div>
+            ))}
           </div>
         </Glass2>
         <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow>Skew · 25Δ</Eyebrow>
-          <div className="tnum" style={{ fontSize: 22, fontWeight: 600, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
-            <span style={{ color: '#5fa3d4' }}>+4.2</span><span style={{ opacity: 0.4, fontSize: 14 }}> vol pts</span>
-          </div>
-          <div style={{ fontSize: 11, opacity: 0.55, marginTop: 6 }}>Put skew elevated · downside hedging</div>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>}>Skew · 25Δ</Eyebrow>
+          {skew != null ? (<>
+            <div className="tnum" style={{ fontSize: 22, fontWeight: 600, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
+              <span style={{ color: skew >= 0 ? '#5fa3d4' : '#f0c068' }}>{skew >= 0 ? '+' : ''}{skew.toFixed(1)}</span>
+              <span style={{ opacity: 0.4, fontSize: 14 }}> vol pts</span>
+            </div>
+            <div style={{ fontSize: 11, opacity: 0.55, marginTop: 6 }}>
+              {skew >= 0 ? 'Put skew · downside hedging priced in' : 'Call skew · upside risk premium'}
+            </div>
+          </>) : (
+            <div style={{ fontSize: 11, opacity: 0.5 }}>No usable 25Δ quotes on this expiry</div>
+          )}
         </Glass2>
         <Glass2 tone="chip" padding={D.panelPad}>
           <div style={{ fontSize: 11, opacity: 0.65, lineHeight: 1.55 }}>
             {ivView === '3d'
-              ? <><strong>Drag</strong> to orbit · <strong>scroll</strong> to zoom. Surface shows IV across all listed strikes & expiries — lower-left = short-dated puts (highest IV); upper-right = long-dated calls.</>
-              : <>Heatmap: each cell is the call IV at that strike (columns) and expiry (rows). Warmer = higher IV. Mock IV for expiries other than the loaded live chain.</>}
+              ? <><strong>Drag</strong> to orbit · <strong>scroll</strong> to zoom. Height = IV at each strike (X) × expiry (depth, front = nearest). Built from the chain's per-strike IVs — expiries beyond the loaded chain use the model smile.</>
+              : <>Heatmap: each cell is the IV (call/put mid) at that strike (columns) and expiry (rows). Warmer = higher IV. Expiries beyond the loaded live chain use the model smile.</>}
           </div>
         </Glass2>
       </div>
@@ -1508,6 +1623,47 @@ const miniBtn = {
   padding: '4px 8px', borderRadius: 6, border: '1px solid rgba(128,140,170,0.28)',
   background: 'rgba(128,140,170,0.12)', color: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap',
 };
+
+// Strategy template picker (desktop). One click replaces the working legs with
+// a classic template from STRATEGY_LIBRARY, built at the current ATM / IV /
+// selected expiry. Mobile keeps its own chip strip.
+function StrategyMenu({ P, spot, iv, dte, onPick, light }) {
+  const [open, setOpen] = uS(false);
+  const biasColor = { bullish: '#ef5350', bearish: '#26a69a', neutral: '#a78bfa', volatile: '#f0c068' };
+  return (
+    <div style={{ position: 'relative' }}>
+      {open && <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 30 }} />}
+      <button style={miniBtn} onClick={() => setOpen(!open)} title="Load a strategy template">≡ strategy</button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 31, width: 212, padding: 6, borderRadius: 12,
+          backdropFilter: 'blur(36px) saturate(160%)', WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+          background: light ? 'rgba(255,255,255,0.97)' : 'linear-gradient(155deg, rgba(80,90,115,0.92), rgba(36,42,58,0.95))',
+          border: `1px solid ${light ? 'rgba(25,40,70,0.16)' : 'rgba(255,255,255,0.14)'}`,
+          boxShadow: '0 24px 48px -20px rgba(0,0,0,0.7)', color: light ? '#1c2433' : '#e8eaef',
+          display: 'flex', flexDirection: 'column', gap: 1, maxHeight: 320, overflowY: 'auto',
+        }}>
+          {STRATEGY_LIBRARY.map((s) => (
+            <button key={s.id} onClick={() => {
+              onPick(s.build(Math.round(spot / P.strikeStep) * P.strikeStep, iv, dte, P));
+              setOpen(false);
+            }} style={{
+              display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 8,
+              border: 'none', textAlign: 'left', cursor: 'pointer', background: 'transparent',
+              color: 'inherit', fontFamily: 'inherit', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap',
+            }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = light ? 'rgba(20,40,80,0.08)' : 'rgba(255,255,255,0.10)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
+              <span style={{ width: 6, height: 6, borderRadius: 3, background: biasColor[s.bias], flexShrink: 0 }} />
+              {s.name}
+              <span style={{ marginLeft: 'auto', fontSize: 9, opacity: 0.45, textTransform: 'uppercase' }}>{s.bias}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ═════════════════════════════════════════════════════════════════════════════
 // MOBILE / FOLDABLE LAYOUT

@@ -18,6 +18,7 @@ const HELP_COPY = {
   oi:     { term: 'Open interest', short: 'Contracts currently outstanding at that strike. Higher = more liquidity and standing interest.' },
   vol:    { term: 'Volume',     short: 'Contracts traded so far in the session at that strike.' },
   iv:     { term: 'Implied volatility', short: 'The volatility the market’s price implies for the underlying. Higher IV = pricier options.' },
+  hv:     { term: 'IV vs historical volatility', short: 'HV is how much the underlying actually moved — the annualized volatility of the last 20 daily returns. IV above HV means options price in more movement than has been happening (premium rich); IV below HV means premium is cheap.', example: 'IV 24% vs HV 18% → ×1.33, premium rich' },
   dte:    { term: 'Days to expiry', short: 'Calendar days until the option expires. Less time left = faster time decay (theta).' },
   breakeven: { term: 'Break-even', short: 'The underlying price(s) where the position’s P&L crosses zero at expiry.' },
   maxprofit: { term: 'Max profit', short: 'Best P&L the position can reach at the front expiry, net of estimated fees.' },
@@ -67,8 +68,10 @@ const HELP_SECTIONS = [
     'The P&L cards are shown net of an estimated round-trip commission + tax. The numbers are broker-dependent and can be tuned per product.',
   ] },
   { id: 'iv', tabs: ['iv'], title: 'IV surface', paras: [
-    'Implied volatility across strike (X axis) and expiry (depth). Grain options skew to calls (upside / drought risk); index options like TXO skew to puts (downside hedging).',
+    'Implied volatility across strike (X axis) and expiry (depth), built from the chain’s per-strike IVs. Grain options skew to calls (upside / drought risk); index options like TXO skew to puts (downside hedging).',
     'Drag to orbit and scroll to zoom, or switch to the HEATMAP view for a flat grid.',
+    'IV vs HV compares implied volatility with how much the underlying actually moved over the last 20 days. Above ×1 the market prices more movement than realized (premium rich — favors sellers); below ×1, premium is cheap (favors buyers).',
+    'Term structure lists the at-the-money IV per expiry; Skew · 25Δ is the IV gap between the 25-delta put and call — positive means downside protection costs more.',
   ] },
 ];
 
