@@ -359,22 +359,6 @@ function Obsidian3() {
   // 亮色靠 body.light 的 CSS 覆蓋（tokens.css），圖表等元件則吃 theme prop 的 light 分支。
   uE(() => { document.body.classList.toggle('light', theme === 'light'); }, [theme]);
   uE(() => { setProdMenuOpen(false); }, [workspace]); // close product menu on tab change
-  // Persist working state (①), debounced. Legs are kept per-product so each
-  // product restores its own. Wrapped in try/catch — quota / private mode must
-  // never crash the app. Tweaks, the What-if rail and hover are intentionally
-  // not persisted.
-  uE(() => {
-    const id = setTimeout(() => {
-      try {
-        const prev = readSaved() || {};
-        const legsByProduct = { ...(prev.legsByProduct || {}), [productId]: legs };
-        const payload = { productId, expiryId, workspace, theme, spot, iv, legsByProduct };
-        localStorage.setItem(LS_KEY, JSON.stringify(payload));
-        _savedCache = payload; // keep the read cache in sync with the latest write
-      } catch (e) { /* quota exceeded / storage disabled — skip */ }
-    }, 400);
-    return () => clearTimeout(id);
-  }, [productId, expiryId, workspace, theme, spot, iv, legs]);
   const [expiryId, setExpiryId] = uS(() => {
     const s = readSaved();
     const P0 = window.getProduct(initialProductId());
@@ -407,6 +391,25 @@ function Obsidian3() {
   const [view, setView] = uS('payoff');
   const [hover, setHover] = uS(null);
   const [sliceFrac, setSliceFrac] = uS(1); // 0 = now, 1 = expiry
+
+  // Persist working state (①), debounced. Must sit below every piece of state it
+  // reads — the dependency array is evaluated during render, so declaring this
+  // effect earlier would touch those consts in their temporal dead zone.
+  // Legs are kept per-product so each product restores its own. Wrapped in
+  // try/catch — quota / private mode must never crash the app. Tweaks, the
+  // What-if rail and hover are intentionally not persisted.
+  uE(() => {
+    const id = setTimeout(() => {
+      try {
+        const prev = readSaved() || {};
+        const legsByProduct = { ...(prev.legsByProduct || {}), [productId]: legs };
+        const payload = { productId, expiryId, workspace, theme, spot, iv, legsByProduct };
+        localStorage.setItem(LS_KEY, JSON.stringify(payload));
+        _savedCache = payload; // keep the read cache in sync with the latest write
+      } catch (e) { /* quota exceeded / storage disabled — skip */ }
+    }, 400);
+    return () => clearTimeout(id);
+  }, [productId, expiryId, workspace, theme, spot, iv, legs]);
 
   const dte = expiry.dte;
 
