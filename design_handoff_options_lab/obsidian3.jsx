@@ -2,6 +2,9 @@
 
 const { useState: uS, useMemo: uM, useEffect: uE, useRef: uR } = React;
 
+// Live data providers, keyed by the product's `live` field (products.js).
+const BROKER = { ib: 'IB', sinopac: 'SinoPac' };
+
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "scheme": "diverging",
   "density": "comfortable",
@@ -182,8 +185,8 @@ function ProductDropdown({ productId, P, spot, live, open, setOpen, onPick, ligh
         style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap', cursor: 'pointer', border: '1px solid oklch(0.66 0.16 250 / 0.55)' }}>
         <span className="lt-prodsel" style={{ fontSize: 10, fontWeight: 700, padding: '2px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)' }}>{P.code} ▾</span>
         <span className="tnum" style={{ fontSize: 13, fontWeight: 600 }}>{spot.toLocaleString()}</span>
-        {P.ib ? (
-          <span className={`mono ${live ? '' : 'lt-mock'}`} title={live ? 'IB connected (delayed/realtime per subscription)' : 'no local IB proxy — mock data'} style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.5, color: live ? '#4dd0c8' : 'rgba(255,255,255,0.45)' }}>{live ? '● IB' : '○ MOCK'}</span>
+        {P.live ? (
+          <span className={`mono ${live ? '' : 'lt-mock'}`} title={live ? `${BROKER[P.live]} connected (delayed/realtime per subscription)` : `no local data proxy — mock data`} style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.5, color: live ? '#4dd0c8' : 'rgba(255,255,255,0.45)' }}>{live ? `● ${BROKER[P.live]}` : '○ MOCK'}</span>
         ) : (
           <span className="tnum" style={{ fontSize: 11, color: 'oklch(0.78 0.14 145)' }}>+0.84%</span>
         )}
@@ -433,9 +436,9 @@ function Obsidian3() {
   // proxy 不在 / IB 沒連線 → 安靜留在 mock。
   uE(() => {
     let dead = false;
-    if (!P.ib || !window.LiveData) return undefined;
+    if (!P.live || !window.LiveData) return undefined;
     (async () => {
-      const health = await window.LiveData.probe();
+      const health = await window.LiveData.probe(P.id);
       if (dead || !health || !health.connected) return;
       const [quote, exps] = await Promise.all([
         window.LiveData.quote(P.id),
@@ -454,7 +457,7 @@ function Obsidian3() {
   uE(() => {
     let dead = false;
     setLiveRows(null);
-    if (!live || !P.ib || !window.LiveData) return undefined;
+    if (!live || !P.live || !window.LiveData) return undefined;
     (async () => {
       const chain = await window.LiveData.chain(P.id, expiryId);
       if (dead || !chain || !chain.rows || !chain.rows.length) return;
@@ -469,7 +472,7 @@ function Obsidian3() {
   // option chain every 30s so intraday prices don't silently go stale. Paused
   // when the tab is hidden; refetches immediately on becoming visible again.
   uE(() => {
-    if (!live || !P.ib || !window.LiveData) return undefined;
+    if (!live || !P.live || !window.LiveData) return undefined;
     let dead = false;
     const pullQuote = async () => {
       if (document.hidden) return;
@@ -497,7 +500,7 @@ function Obsidian3() {
   // 換週期時不清舊 bars（留著顯示直到新資料到，避免閃回 mock）。
   uE(() => {
     let dead = false;
-    if (!live || !P.ib || !window.LiveData) return undefined;
+    if (!live || !P.live || !window.LiveData) return undefined;
     const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
     (async () => {
       const hist = await window.LiveData.bars(P.id, { bar: per.bar, duration: per.duration });
@@ -650,7 +653,7 @@ function Obsidian3() {
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
           <DataQualityPill quality={quality} />
-          {live && P.ib && <FreshnessChip lastLiveAt={lastLiveAt} />}
+          {live && P.live && <FreshnessChip lastLiveAt={lastLiveAt} />}
           <ProductDropdown
             productId={productId} P={P} spot={spot} live={live}
             open={prodMenuOpen} setOpen={setProdMenuOpen}
@@ -781,7 +784,7 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
   const netMaxProfit = maxProfit - fees;
   const netMaxLoss = maxLoss - fees;
   // IB position import (④): replace the working legs with the real portfolio.
-  const canImport = !!(live && P.ib && window.LiveData && window.LiveData.positions);
+  const canImport = !!(live && P.livePositions && window.LiveData && window.LiveData.positions);
   const [importing, setImporting] = uS(false);
   const [importNote, setImportNote] = uS(null);
   async function importPositions() {
@@ -795,7 +798,7 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
       })));
       setImportNote(`${res.positions.length} position${res.positions.length === 1 ? '' : 's'} loaded`);
     } else {
-      setImportNote('no IB positions');
+      setImportNote(`no ${BROKER[P.live]} positions`);
     }
     setTimeout(() => setImportNote(null), 3500);
   }
@@ -843,7 +846,7 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow right={
             <div style={{ display: 'flex', gap: 4 }}>
-              {canImport && <button style={miniBtn} disabled={importing} onClick={importPositions} title="Load your real IB option positions">{importing ? '…' : '⟳ IB'}</button>}
+              {canImport && <button style={miniBtn} disabled={importing} onClick={importPositions} title={`Load your real ${BROKER[P.live]} option positions`}>{importing ? '…' : `⟳ ${BROKER[P.live]}`}</button>}
               <StrategyMenu P={P} spot={spot} iv={iv} dte={dte} onPick={setLegs} light={light} />
               <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 2 * P.strikeStep) / P.strikeStep) * P.strikeStep, iv, dte, P)])}>+ leg</button>
             </div>
@@ -1728,9 +1731,9 @@ function MobileApp({
             </select>
             <span className="tnum" style={{ fontSize: 12, fontWeight: 600 }}>{spot.toLocaleString()}</span>
             <span style={{ fontSize: 9, color: '#f0c068' }}>{dte}d</span>
-            {P.ib && (
+            {P.live && (
               <span className="mono" style={{ fontSize: 8, fontWeight: 700, letterSpacing: 0.4, color: live ? '#4dd0c8' : 'rgba(255,255,255,0.45)' }}>
-                {live ? '●IB' : '○MOCK'}
+                {live ? `●${BROKER[P.live]}` : '○MOCK'}
               </span>
             )}
           </Glass2>

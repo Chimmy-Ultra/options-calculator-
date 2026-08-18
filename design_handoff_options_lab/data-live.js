@@ -28,8 +28,9 @@
   }
 
   window.LiveData = {
-    // { connected, host, port, marketDataType } | null
-    probe: () => get('/api/health', 2000),
+    // { connected, source, ib:{...}, sinopac:{...} } | null
+    // 帶 pid 時只回報「服務該商品的那個資料源」的狀態（IB 或永豐）。
+    probe: (pid) => get('/api/health' + (pid ? '?pid=' + encodeURIComponent(pid) : ''), 2000),
     // { symbol, last, bid, ask, close, chgPct, month } | null
     quote: (pid) => get('/api/quote/' + encodeURIComponent(pid)),
     // [{ id, label, dte, type, date }] | null — id = YYYYMMDD

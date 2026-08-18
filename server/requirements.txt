@@ -1,3 +1,7 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
 ib_async>=1.0.1
+
+# Optional: only needed for TXO 台指選擇權 via 永豐金 Shioaji.
+# The IB-only path runs fine without it (sinopac.py imports it lazily).
+shioaji>=1.2

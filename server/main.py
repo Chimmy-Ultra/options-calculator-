@@ -1,4 +1,8 @@
-"""Options Lab IB proxy — 連本機 TWS / IB Gateway，把 CBOT 農產品期貨選擇權餵給前端。
+"""Options Lab 行情代理 — 唯讀，把兩個券商的期權行情餵給前端。
+
+資料源（每個商品在 PRODUCTS 裡用 "source" 指定）：
+  ib      → 本機 TWS / IB Gateway，期貨選擇權（ZC/ZS/ZW/ES/GC/CL/NG）
+  sinopac → 永豐金 Shioaji，TXO 台指選擇權（見 sinopac.py）
 
 前端（design_handoff_options_lab/data-live.js）打這裡的端點：
   GET /api/health            → 連線狀態
@@ -8,9 +12,9 @@
   GET /api/bars/{pid}        → 近月期貨歷史 K 棒
   GET /api/positions/{pid}   → 目前帳戶的選擇權部位（唯讀，載入前端 legs 用）
 
-唯讀行情 + 部位代理：只讀 IB 的行情與持倉，不下單、不改單（沒有任何下單端點）。
+唯讀行情 + 部位代理：只讀行情與持倉，不下單、不改單（沒有任何下單端點）。
 沒訂閱 CME 即時行情時自動退到 15 分鐘延遲數據（IB_MARKET_DATA_TYPE=3）。
-IB 完全沒連上時 /api/health 回 connected=false，前端就留在 mock。
+資料源沒連上時 /api/health 回 connected=false，前端就留在 mock。
 
 啟動：uvicorn main:app --host 127.0.0.1 --port 8720
 """
@@ -25,18 +29,25 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from ib_async import IB, Future, FuturesOption
 
+import pricing
+import sinopac
+
 # Standard (monthly) options trading class; weeklies not wired yet.
 # tradingClass for the newer products is a best-guess for the standard monthly
 # class — _sec_def() falls back to the class with the most expirations if it
 # doesn't match, so a wrong guess degrades gracefully.
+# "source" selects the data backend: "ib" = Interactive Brokers (futures
+# options), "sinopac" = 永豐金 Shioaji (TXO 台指選擇權). Both are read-only.
 PRODUCTS = {
-    "zc": {"symbol": "ZC", "exchange": "CBOT", "tradingClass": "OZC", "strikeStep": 10.0},
-    "zs": {"symbol": "ZS", "exchange": "CBOT", "tradingClass": "OZS", "strikeStep": 20.0},
-    "zw": {"symbol": "ZW", "exchange": "CBOT", "tradingClass": "OZW", "strikeStep": 10.0},
-    "es": {"symbol": "ES", "exchange": "CME", "tradingClass": "ES", "strikeStep": 25.0},
-    "gc": {"symbol": "GC", "exchange": "COMEX", "tradingClass": "OG", "strikeStep": 25.0},
-    "cl": {"symbol": "CL", "exchange": "NYMEX", "tradingClass": "LO", "strikeStep": 1.0},
-    "ng": {"symbol": "NG", "exchange": "NYMEX", "tradingClass": "ON", "strikeStep": 0.1},
+    "txo": {"source": "sinopac", "symbol": "TXO", "exchange": "TAIFEX", "strikeStep": 50.0,
+            "index": ("TSE", "001"), "underlyingFuture": "TXF", "monthlyCategory": "TXO"},
+    "zc": {"source": "ib", "symbol": "ZC", "exchange": "CBOT", "tradingClass": "OZC", "strikeStep": 10.0},
+    "zs": {"source": "ib", "symbol": "ZS", "exchange": "CBOT", "tradingClass": "OZS", "strikeStep": 20.0},
+    "zw": {"source": "ib", "symbol": "ZW", "exchange": "CBOT", "tradingClass": "OZW", "strikeStep": 10.0},
+    "es": {"source": "ib", "symbol": "ES", "exchange": "CME", "tradingClass": "ES", "strikeStep": 25.0},
+    "gc": {"source": "ib", "symbol": "GC", "exchange": "COMEX", "tradingClass": "OG", "strikeStep": 25.0},
+    "cl": {"source": "ib", "symbol": "CL", "exchange": "NYMEX", "tradingClass": "LO", "strikeStep": 1.0},
+    "ng": {"source": "ib", "symbol": "NG", "exchange": "NYMEX", "tradingClass": "ON", "strikeStep": 0.1},
 }
 
 IB_HOST = os.environ.get("IB_HOST", "127.0.0.1")
@@ -82,48 +93,6 @@ def _f(x):
     except (TypeError, ValueError):
         return None
     return None if math.isnan(x) else x
-
-
-def _norm_cdf(x: float) -> float:
-    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
-
-
-def _b76_price(right: str, f: float, k: float, sigma: float, t: float, r: float) -> float:
-    """Black-76：期貨選擇權理論價（跟前端 atoms.jsx 的 model='b76' 同式）。"""
-    t = max(t, 1e-6)
-    sigma = max(sigma, 1e-6)
-    srt = sigma * math.sqrt(t)
-    df = math.exp(-r * t)
-    d1 = (math.log(f / k) + sigma * sigma * t / 2.0) / srt
-    d2 = d1 - srt
-    if right == "C":
-        return df * (f * _norm_cdf(d1) - k * _norm_cdf(d2))
-    return df * (k * _norm_cdf(-d2) - f * _norm_cdf(-d1))
-
-
-def _b76_delta(right: str, f: float, k: float, sigma: float, t: float, r: float) -> float:
-    t = max(t, 1e-6)
-    sigma = max(sigma, 1e-6)
-    srt = sigma * math.sqrt(t)
-    df = math.exp(-r * t)
-    d1 = (math.log(f / k) + sigma * sigma * t / 2.0) / srt
-    return df * _norm_cdf(d1) if right == "C" else -df * _norm_cdf(-d1)
-
-
-def _implied_vol(right: str, f: float, k: float, price: float, t: float, r: float):
-    """從權利金反推 IV（bisection）。無解回 None。"""
-    if not price or price <= 0 or f <= 0 or k <= 0:
-        return None
-    lo, hi = 0.01, 3.0
-    if not (_b76_price(right, f, k, lo, t, r) <= price <= _b76_price(right, f, k, hi, t, r)):
-        return None
-    for _ in range(60):
-        mid = (lo + hi) / 2.0
-        if _b76_price(right, f, k, mid, t, r) < price:
-            lo = mid
-        else:
-            hi = mid
-    return (lo + hi) / 2.0
 
 
 async def _ensure_connected() -> bool:
@@ -203,15 +172,35 @@ def _month_label(yyyymm: str) -> str:
     return datetime.strptime(yyyymm[:6], "%Y%m").strftime("%b").upper()
 
 
+async def _from_sinopac(coro, what: str):
+    """Await a SinoPac call and turn a null result into the same 503 the IB path
+    raises, so the frontend's null-on-failure → mock fallback is unchanged."""
+    data = await coro
+    if data is None:
+        raise HTTPException(503, f"SinoPac (Shioaji) {what} unavailable — check SINOPAC_API_KEY / SINOPAC_SECRET_KEY")
+    return data
+
+
 @app.get("/api/health")
-async def health():
-    async with _ib_lock:
-        ok = await _ensure_connected()
+async def health(pid: str | None = None):
+    """Connection status. With ?pid= the answer is for that product's own data
+    source, so the frontend only shows a live badge when the backend that
+    actually serves that product is up; without it, connected means "any source"."""
+    src = PRODUCTS.get((pid or "").lower(), {}).get("source") if pid else None
+
+    sino_ok = await sinopac.ensure_connected() if (src in (None, "sinopac")) else False
+    ib_ok = False
+    if src in (None, "ib"):
+        async with _ib_lock:
+            ib_ok = await _ensure_connected()
+
+    connected = sino_ok if src == "sinopac" else ib_ok if src == "ib" else (ib_ok or sino_ok)
     return {
-        "connected": ok,
-        "host": IB_HOST,
-        "port": _port_in_use,
-        "marketDataType": MARKET_DATA_TYPE,
+        "connected": connected,
+        "source": src,
+        "ib": {"connected": ib_ok, "host": IB_HOST, "port": _port_in_use, "marketDataType": MARKET_DATA_TYPE},
+        "sinopac": {"connected": sino_ok, "configured": sinopac.configured(),
+                    "installed": sinopac.installed(), "simulation": sinopac.SIMULATION},
         "serverTime": datetime.now().isoformat(timespec="seconds"),
     }
 
@@ -219,6 +208,8 @@ async def health():
 @app.get("/api/quote/{pid}")
 async def quote(pid: str):
     spec = _product(pid)
+    if spec.get("source") == "sinopac":
+        return await _from_sinopac(sinopac.quote(spec), "quote")
     async with _ib_lock:
         if not await _ensure_connected():
             raise HTTPException(503, "IB not connected")
@@ -244,6 +235,8 @@ async def quote(pid: str):
 @app.get("/api/expiries/{pid}")
 async def expiries(pid: str):
     spec = _product(pid)
+    if spec.get("source") == "sinopac":
+        return await _from_sinopac(sinopac.expiries(spec), "expiries")
     async with _ib_lock:
         if not await _ensure_connected():
             raise HTTPException(503, "IB not connected")
@@ -276,6 +269,8 @@ async def bars(pid: str, duration: str = "3 M", bar: str = "1 day"):
     if duration not in {"1 M", "3 M", "6 M", "1 Y"} or bar not in {"1 day", "1 hour", "4 hours"}:
         raise HTTPException(400, "duration ∈ {1 M,3 M,6 M,1 Y}, bar ∈ {1 day,1 hour,4 hours}")
     spec = _product(pid)
+    if spec.get("source") == "sinopac":
+        return await _from_sinopac(sinopac.bars(spec, duration, bar), "history")
     cache_key = ("bars", spec["symbol"], duration, bar)
     hit = _cache_get(cache_key)
     if hit:
@@ -314,6 +309,8 @@ async def bars(pid: str, duration: str = "3 M", bar: str = "1 day"):
 @app.get("/api/chain/{pid}")
 async def chain(pid: str, expiry: str):
     spec = _product(pid)
+    if spec.get("source") == "sinopac":
+        return await _from_sinopac(sinopac.chain(spec, expiry), "option chain")
     cache_key = ("chain", spec["symbol"], expiry)
     hit = _cache_get(cache_key)
     if hit:
@@ -369,11 +366,11 @@ async def chain(pid: str, expiry: str):
         mg = tk.modelGreeks if tk else None
         iv = _f(mg.impliedVol) if mg else None
         if not iv:
-            iv = _implied_vol(c.right, und_px, c.strike, mid or last, t_years, RISK_FREE)
+            iv = pricing.implied_vol(c.right, und_px, c.strike, mid or last, t_years, RISK_FREE, "b76")
         iv = iv or 0.0
         delta = _f(mg.delta) if mg else None
         if delta is None:
-            delta = _b76_delta(c.right, und_px, c.strike, max(iv, 1e-4), t_years, RISK_FREE)
+            delta = pricing.delta(c.right, und_px, c.strike, max(iv, 1e-4), t_years, RISK_FREE, "b76")
         oi = _f(tk.callOpenInterest if c.right == "C" else tk.putOpenInterest) if tk else None
         vol = _f(tk.volume) if tk else None
         return {
@@ -416,6 +413,10 @@ async def positions(pid: str):
     premium 換算成「點數」(averageCost / multiplier)，跟前端 legs 的 premium 慣例一致。
     """
     spec = _product(pid)
+    if spec.get("source") == "sinopac":
+        # Account data needs the electronic certificate, which research-only
+        # setup deliberately skips — an empty list, not an error.
+        return await sinopac.positions(spec)
     cache_key = ("positions", spec["symbol"])
     hit = _cache_get(cache_key)
     if hit is not None:

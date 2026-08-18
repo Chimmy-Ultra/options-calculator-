@@ -1,14 +1,20 @@
-# IB Proxy — 期貨選擇權即時資料 + 帳戶部位（唯讀）
+# 行情代理 — 期貨選擇權 + 台指選擇權（唯讀）
 
-把你本機 **TWS 或 IB Gateway** 的期貨選擇權行情（以及你的部位）餵給 Options Lab 前端。
-前端偵測到這個 proxy 活著就自動切到真實數據（頂欄顯示 `● IB`），偵測不到就留在 mock（`○ MOCK`）。
+把兩個券商的期權行情餵給 Options Lab 前端。前端偵測到這個 proxy 活著就自動切到真實
+數據（頂欄顯示 `● IB` 或 `● SinoPac`），偵測不到就留在 mock（`○ MOCK`）。
 
-支援商品：**ZC / ZS / ZW**（CBOT 玉米/黃豆/小麥）、**ES**（CME 小型標普500）、
-**GC**（COMEX 黃金）、**CL / NG**（NYMEX 原油/天然氣）。
-（TXO 台指不走 IB，永遠是 Black-Scholes mock。各商品規格見 `../docs/products.md`。）
+| 資料源 | 商品 | 需要 |
+|---|---|---|
+| **IB**（Interactive Brokers）| ZC / ZS / ZW（CBOT 穀物）、ES（CME 小標普）、GC（COMEX 黃金）、CL / NG（NYMEX 原油/天然氣）| 本機開著 TWS 或 IB Gateway |
+| **SinoPac**（永豐金 Shioaji）| **TXO 台指選擇權** | API key + secret key（不用憑證）|
+
+每個商品在 `main.py` 的 `PRODUCTS` 用 `source` 欄位指定走哪一邊，前端則看 `products.js`
+的 `live` 欄位。各商品合約規格見 `../docs/products.md`。
 
 ```
-瀏覽器 ──HTTP──▶ 這個 proxy (FastAPI, :8720) ──TWS API──▶ TWS / IB Gateway ──▶ IB
+                       ┌─ TWS API ─▶ TWS / IB Gateway ─▶ IB
+瀏覽器 ─HTTP─▶ proxy ──┤
+              (:8720)  └─ Shioaji ──▶ 永豐金
 ```
 
 ## 只做研究、不下單 — 這樣接就對了
@@ -27,7 +33,33 @@
 會踩到的實際上限：串流報價「行數」IB 預設約 100 條（鏈一次抓 ~34 個合約收完就取消，不會爆）；
 歷史 K 棒有 pacing 限制（proxy 快取 5 分鐘）。
 
-## 1. TWS / IB Gateway 設定（一次性）
+## 1a. 永豐 Shioaji 設定（TXO，一次性）
+
+純研究只要 **API key + secret key**，**不需要電子憑證**（憑證只有下單和查帳務才要）。
+
+1. 到永豐 [Shioaji 憑證與金鑰頁](https://sinotrade.github.io/zh_TW/tutor/prepare/token/) 產生
+   API key / secret key。行情權限即可，不必開「交易」權限。
+2. 裝套件並設環境變數後啟動 proxy：
+
+```bash
+pip install shioaji                      # 只有要用 TXO 才需要
+export SINOPAC_API_KEY=你的_api_key
+export SINOPAC_SECRET_KEY=你的_secret_key
+export SINOPAC_SIMULATION=1              # 1=模擬(預設，不碰真錢) 0=正式行情
+uvicorn main:app --host 127.0.0.1 --port 8720
+```
+
+檢查：`curl "http://127.0.0.1:8720/api/health?pid=txo"` → `"connected": true`。
+回傳的 `sinopac` 區塊會分別告訴你 `installed`（套件裝了沒）和 `configured`（金鑰設了沒），
+方便判斷是哪一步沒到位。
+
+**這條路徑的已知限制**
+- Shioaji 快照**不含未平倉量（OI）**，所以 TXO live 模式下 OI Profile / Max Pain 沒有資料
+  （前端偵測到整條鏈都沒 OI 時，流動性評分會自動改用買賣價差判斷，不會誤標成「乾涸」）。
+- 快照也不含希臘值 → IV 由權利金反推（Black-Scholes on 加權指數，跟前端 TXO 定價同一套）。
+- **不提供部位匯入**：帳務要憑證，唯讀研究刻意不設，所以 TXO 沒有 `⟳` 匯入鈕。
+
+## 1b. TWS / IB Gateway 設定（期貨選擇權，一次性）
 
 1. 登入 TWS（或 IB Gateway）。
 2. **File → Global Configuration → API → Settings**：
@@ -55,7 +87,7 @@ cd design_handoff_options_lab
 python3 -m http.server 8080
 ```
 
-瀏覽器開 `http://localhost:8080`，頂欄商品切到 **ZC / ZS / ZW / ES / GC / CL / NG**：
+瀏覽器開 `http://localhost:8080`，切商品：**TXO** 走永豐、其餘走 IB。
 
 - 到期日列會換成 IB 的真實月選到期日
 - Chain 頁是真實報價（bid/ask/last/IV/OI/Δ）
@@ -67,6 +99,11 @@ python3 -m http.server 8080
 
 | 變數 | 預設 | 說明 |
 |---|---|---|
+| `SINOPAC_API_KEY` | — | 永豐 API key（TXO 必需）|
+| `SINOPAC_SECRET_KEY` | — | 永豐 secret key |
+| `SINOPAC_SIMULATION` | `1` | 1=模擬 0=正式行情 |
+| `SINOPAC_TXO_CATEGORIES` | `TXO,TX1,TX2,TX4,TX5` | 要收的選擇權類別（月選 + 週選）|
+| `RISK_FREE_TW` | `0.015` | TXO 反推 IV 用的無風險利率 |
 | `IB_HOST` | `127.0.0.1` | TWS / Gateway 位址 |
 | `IB_PORTS` | `7497,7496,4002,4001` | 依序嘗試的 port |
 | `IB_CLIENT_ID` | `27` | API client id（跟其他程式撞了就換一個） |
@@ -75,11 +112,12 @@ python3 -m http.server 8080
 
 ## 端點（全部唯讀）
 
-`{pid}` = `zc` / `zs` / `zw` / `es` / `gc` / `cl` / `ng`。
+`{pid}` = `txo`（永豐）/ `zc` / `zs` / `zw` / `es` / `gc` / `cl` / `ng`（IB）。
+端點形狀兩邊一致，前端不需要知道背後是哪個券商。
 
 | 端點 | 回傳 |
 |---|---|
-| `GET /api/health` | `{connected, host, port, marketDataType}` |
+| `GET /api/health?pid=` | `{connected, source, ib:{...}, sinopac:{...}}` — 帶 `pid` 時只回報服務該商品的那個資料源 |
 | `GET /api/quote/{pid}` | 近月期貨報價 `{last, bid, ask, close, chgPct, month}` |
 | `GET /api/expiries/{pid}` | `[{id: "20260821", label: "SEP", dte, date}]` |
 | `GET /api/chain/{pid}?expiry=20260821` | `{underlying: {month, price}, rows: [...]}`（rows 跟前端 genChain 同形狀） |
@@ -91,8 +129,9 @@ python3 -m http.server 8080
 
 ## 已知限制
 
-- 只接標準月選（trading class `OZC` / `OZS` / `OZW` / `ES` / `OG` / `LO` / `ON`），weekly 先不接。
+- IB 路徑只接標準月選（trading class `OZC` / `OZS` / `OZW` / `ES` / `OG` / `LO` / `ON`），weekly 先不接。
   新商品的 tradingClass 是標準月選的最佳猜測；對不上時 `_sec_def()` 會退到到期日最多的那個 class。
+  （永豐路徑的 TXO 月選 + 週選都收。）
 - IV Surface 3D 仍是造型化 mock，還沒接真實曲面。
 - 期權鏈快照等 6 秒收一輪，延遲數據偶爾會有缺格（顯示 0）；30 秒內重複請求走快取。
 - 期貨選擇權理論價用歐式 Black-76 近似（真實是美式），OI 靠 generic tick 101。
