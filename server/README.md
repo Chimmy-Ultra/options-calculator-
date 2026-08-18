@@ -49,9 +49,17 @@ export SINOPAC_SIMULATION=1              # 1=模擬(預設，不碰真錢) 0=正
 uvicorn main:app --host 127.0.0.1 --port 8720
 ```
 
-檢查：`curl "http://127.0.0.1:8720/api/health?pid=txo"` → `"connected": true`。
-回傳的 `sinopac` 區塊會分別告訴你 `installed`（套件裝了沒）和 `configured`（金鑰設了沒），
-方便判斷是哪一步沒到位。
+**接不上時先跑自我檢查**（逐步檢查套件 → 金鑰 → 登入 → 合約 → 報價）：
+
+```bash
+python3 check_sinopac.py
+```
+
+它會告訴你確切卡在哪一步，並針對常見原因給建議（金鑰帶到引號、沒開行情權限、
+模擬環境沒申請、連不到伺服器…）。**輸出只顯示金鑰長度、不含金鑰內容**，可以安全貼給別人求助。
+
+proxy 起來後也能查：`curl "http://127.0.0.1:8720/api/health?pid=txo"` → `"connected": true`。
+回傳的 `sinopac` 區塊會分別告訴你 `installed`（套件裝了沒）和 `configured`（金鑰設了沒）。
 
 **這條路徑的已知限制**
 - Shioaji 快照**不含未平倉量（OI）**，所以 TXO live 模式下 OI Profile / Max Pain 沒有資料
