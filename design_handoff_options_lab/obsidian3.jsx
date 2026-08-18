@@ -636,8 +636,11 @@ function Obsidian3() {
         backgroundSize: '32px 32px',
       }} />
 
-      {/* Top bar */}
-      <div style={{ position: 'absolute', top: 18, left: 24, right: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 10, gap: 12 }}>
+      {/* Top bar. Sits above the expiry strip: both rows are positioned siblings and
+          the bar creates a stacking context, so the bar's own z-index — not the
+          dropdown's — decides whether the product menu nested inside it is clickable.
+          At equal z-index the later strip won and covered the menu's first rows. */}
+      <div style={{ position: 'absolute', top: 18, left: 24, right: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 20, gap: 12 }}>
         <Glass2 tone="chip" radius={999} padding="8px 14px" style={{ display: 'flex', alignItems: 'center', gap: 10, whiteSpace: 'nowrap', flexShrink: 0 }}>
           <div style={{ width: 22, height: 22, borderRadius: 6, background: `linear-gradient(135deg, oklch(0.78 0.14 75), ${accent})`, boxShadow: `0 0 12px -2px ${accent}` }} />
           <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: -0.2 }}>Options Lab</span>
