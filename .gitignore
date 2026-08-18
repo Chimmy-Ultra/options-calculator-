@@ -5,3 +5,6 @@ __pycache__/
 # Local virtualenv for the IB proxy (see server/README.md)
 server/.venv/
 .venv/
+
+# Shioaji writes a runtime log next to the process
+shioaji.log
