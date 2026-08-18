@@ -1,0 +1,7 @@
+# Python bytecode cache (server/ is the only Python in the repo)
+__pycache__/
+*.py[cod]
+
+# Local virtualenv for the IB proxy (see server/README.md)
+server/.venv/
+.venv/
