@@ -132,7 +132,7 @@ function HelpDrawer({ open, onClose, workspace }) {
   const dark = !document.body.classList.contains('light');
   return (
     <div style={{
-      position: 'fixed', right: 24, top: 110, bottom: 20, width: 320, zIndex: 55,
+      position: 'fixed', right: 24, top: 110, bottom: 20, width: 'min(320px, calc(100vw - 48px))', zIndex: 55,
       borderRadius: 16, overflow: 'hidden', display: 'flex', flexDirection: 'column',
       background: dark ? 'linear-gradient(155deg, rgba(80,90,115,0.55), rgba(30,36,50,0.55))' : 'rgba(255,255,255,0.85)',
       border: `1px solid ${dark ? 'rgba(255,255,255,0.14)' : 'rgba(25,40,70,0.14)'}`,

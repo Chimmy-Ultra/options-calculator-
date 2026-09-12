@@ -598,7 +598,10 @@ function Obsidian3() {
       <MobileApp
         vp={vp}
         workspace={workspace} setWorkspace={setWorkspace}
+        theme={theme} setTheme={setTheme}
+        helpOpen={helpOpen} setHelpOpen={setHelpOpen}
         P={P} switchProduct={switchProduct} live={live}
+        lastLiveAt={lastLiveAt} fees={fees}
         expiries={expiries} chainRows={chainRows}
         bars={bars} barsLive={!!liveBars}
         barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
@@ -1676,8 +1679,9 @@ function StrategyMenu({ P, spot, iv, dte, onPick, light }) {
 // ═════════════════════════════════════════════════════════════════════════════
 function MobileApp({
   vp, workspace, setWorkspace,
-  theme = 'dark',
-  P, switchProduct, live,
+  theme = 'dark', setTheme,
+  helpOpen, setHelpOpen,
+  P, switchProduct, live, lastLiveAt, fees = 0,
   expiries, chainRows,
   bars, barsLive, barPeriodId, setBarPeriodId,
   spotMin, spotMax,
@@ -1690,12 +1694,16 @@ function MobileApp({
   accent, t, setTweak,
 }) {
   const isFold = vp.layout === 'fold';
+  const light = theme === 'light';
   const chartW = Math.max(280, Math.min(vp.width - 48, isFold ? 560 : 400));
   return (
     <div style={{
       width: '100%', minHeight: '100vh', position: 'relative',
-      fontFamily: 'var(--font-display)', color: '#e8eaef',
-      background: `
+      fontFamily: 'var(--font-display)', color: light ? '#1c2433' : '#e8eaef',
+      background: light ? `
+        radial-gradient(ellipse 90% 50% at 50% 0%, ${t.showAuroraBlobs ? `oklch(0.90 0.045 ${t.accentHue}) 0%` : 'transparent 0%'}, transparent 55%),
+        linear-gradient(180deg, #eef1f6 0%, #e4e9f2 100%)
+      ` : `
         radial-gradient(ellipse 90% 50% at 50% 0%, ${t.showAuroraBlobs ? `oklch(0.32 0.10 ${t.accentHue}) 0%` : 'transparent 0%'}, transparent 55%),
         linear-gradient(180deg, #0a0d14 0%, #11151f 100%)
       `,
@@ -1705,35 +1713,44 @@ function MobileApp({
       <div style={{
         position: 'sticky', top: 0, zIndex: 10,
         padding: '10px 12px 8px',
-        background: 'linear-gradient(180deg, rgba(10,13,20,0.92), rgba(10,13,20,0.55) 80%, transparent)',
+        background: light
+          ? 'linear-gradient(180deg, rgba(238,241,246,0.94), rgba(238,241,246,0.6) 80%, transparent)'
+          : 'linear-gradient(180deg, rgba(10,13,20,0.92), rgba(10,13,20,0.55) 80%, transparent)',
         backdropFilter: 'blur(10px)',
         WebkitBackdropFilter: 'blur(10px)',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-          <Glass2 tone="chip" radius={999} padding="6px 10px" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+          <Glass2 tone="chip" radius={999} padding="6px 10px" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', flexShrink: 0 }}>
             <div style={{ width: 16, height: 16, borderRadius: 4, background: `linear-gradient(135deg, oklch(0.78 0.14 75), ${accent})` }} />
-            <span style={{ fontSize: 11, fontWeight: 600 }}>Options Lab</span>
+            {isFold && <span style={{ fontSize: 11, fontWeight: 600 }}>Options Lab</span>}
           </Glass2>
-          <Glass2 tone="chip" radius={999} padding="6px 10px" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <select
-              value={P.id}
-              onChange={(e) => switchProduct(e.target.value)}
-              title={P.name}
-              style={{
-                fontSize: 9, fontWeight: 700, padding: '1px 3px', borderRadius: 3,
-                background: 'rgba(255,255,255,0.06)', color: '#e8eaef',
-                border: 'none', outline: 'none', cursor: 'pointer', fontFamily: 'inherit',
-              }}>
-              {window.PRODUCTS.map((p) => <option key={p.id} value={p.id}>{p.code}</option>)}
-            </select>
-            <span className="tnum" style={{ fontSize: 12, fontWeight: 600 }}>{spot.toLocaleString()}</span>
-            <span style={{ fontSize: 9, color: '#f0c068' }}>{dte}d</span>
-            {P.live && (
-              <span className="mono" style={{ fontSize: 8, fontWeight: 700, letterSpacing: 0.4, color: live ? '#4dd0c8' : 'rgba(255,255,255,0.45)' }}>
-                {live ? `●${BROKER[P.live]}` : '○MOCK'}
-              </span>
-            )}
-          </Glass2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+            <Glass2 tone="chip" radius={999} padding="6px 9px" style={{ cursor: 'pointer', flexShrink: 0, border: helpOpen ? '1px solid oklch(0.66 0.16 250 / 0.6)' : undefined }}
+              onClick={() => setHelpOpen((v) => !v)} title="Help">
+              <span style={{ fontSize: 12, fontWeight: 700 }}>?</span>
+            </Glass2>
+            <Glass2 tone="chip" radius={999} padding="6px 9px" style={{ cursor: 'pointer', flexShrink: 0 }}
+              onClick={() => setTheme(light ? 'dark' : 'light')} title="Light / dark">
+              <span style={{ fontSize: 12 }}>{light ? '☀' : '☾'}</span>
+            </Glass2>
+            <Glass2 tone="chip" radius={999} padding="6px 10px" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+              <select
+                className="lt-prodsel"
+                value={P.id}
+                onChange={(e) => switchProduct(e.target.value)}
+                title={P.name}
+                style={{
+                  fontSize: 9, fontWeight: 700, padding: '1px 3px', borderRadius: 3,
+                  background: 'rgba(255,255,255,0.06)', color: '#e8eaef',
+                  border: 'none', outline: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                }}>
+                {window.PRODUCTS.map((p) => <option key={p.id} value={p.id}>{p.code}</option>)}
+              </select>
+              <span className="tnum" style={{ fontSize: 12, fontWeight: 600 }}>{spot.toLocaleString()}</span>
+              <span style={{ fontSize: 9, color: light ? '#8a6410' : '#f0c068' }}>{dte}d</span>
+              {P.live && <MobileLiveBadge live={live} P={P} lastLiveAt={lastLiveAt} light={light} />}
+            </Glass2>
+          </div>
         </div>
 
         {/* Workspace toggle (mobile = Calc / Chain / Pricer / IV) */}
@@ -1749,8 +1766,8 @@ function MobileApp({
               <button key={it.id} onClick={() => setWorkspace(it.id)} style={{
                 flex: 1, padding: '8px 6px', borderRadius: 10, border: 'none',
                 fontSize: 12, fontWeight: 700, letterSpacing: 0.2,
-                background: active ? `linear-gradient(150deg, ${accent}, oklch(0.55 0.18 240))` : 'rgba(255,255,255,0.05)',
-                color: active ? '#fff' : 'rgba(255,255,255,0.65)',
+                background: active ? `linear-gradient(150deg, ${accent}, oklch(0.55 0.18 240))` : (light ? 'rgba(20,40,80,0.06)' : 'rgba(255,255,255,0.05)'),
+                color: active ? '#fff' : (light ? 'rgba(20,30,50,0.6)' : 'rgba(255,255,255,0.65)'),
                 boxShadow: active ? '0 4px 12px -4px rgba(0,0,0,0.6)' : 'none',
                 cursor: 'pointer', fontFamily: 'inherit',
               }}>{it.label}</button>
@@ -1770,9 +1787,9 @@ function MobileApp({
               <button key={e.id} onClick={() => setExpiryId(e.id)} style={{
                 flexShrink: 0,
                 padding: '5px 10px', borderRadius: 8, border: '1px solid',
-                borderColor: active ? (isMonthly ? '#f0c068' : 'rgba(255,255,255,0.18)') : 'rgba(255,255,255,0.08)',
-                background: active ? (isMonthly ? 'rgba(240,192,104,0.16)' : 'rgba(255,255,255,0.10)') : 'rgba(255,255,255,0.02)',
-                color: active ? (isMonthly ? '#f7d394' : '#fff') : 'rgba(255,255,255,0.55)',
+                borderColor: active ? (isMonthly ? '#f0c068' : (light ? 'rgba(20,40,80,0.3)' : 'rgba(255,255,255,0.18)')) : (light ? 'rgba(25,40,70,0.14)' : 'rgba(255,255,255,0.08)'),
+                background: active ? (isMonthly ? 'rgba(240,192,104,0.16)' : (light ? 'rgba(20,40,80,0.10)' : 'rgba(255,255,255,0.10)')) : (light ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.02)'),
+                color: active ? (isMonthly ? (light ? '#8a6410' : '#f7d394') : (light ? '#1c2433' : '#fff')) : (light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)'),
                 fontFamily: 'inherit', fontSize: 11, fontWeight: 600, cursor: 'pointer',
                 display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap',
                 position: 'relative',
@@ -1790,8 +1807,8 @@ function MobileApp({
       <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         {workspace === 'calc' && (
           <MobileCalc
-            isFold={isFold} chartW={chartW}
-            P={P} bars={bars} barsLive={barsLive}
+            isFold={isFold} chartW={chartW} theme={theme}
+            P={P} bars={bars} barsLive={barsLive} expiries={expiries} fees={fees}
             barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
             legs={legs} setLegs={setLegs}
             spot={spot} setSpot={setSpot}
@@ -1805,12 +1822,12 @@ function MobileApp({
         )}
         {workspace === 'chain' && (
           <MobileChain
-            isFold={isFold} chartW={chartW}
+            isFold={isFold} chartW={chartW} theme={theme}
             P={P} rows={chainRows}
-            spot={spot} expiry={expiry}
+            spot={spot} expiry={expiry} expiries={expiries}
             legs={legs} setLegs={setLegs}
             addLegFromChain={addLegFromChain}
-            quality={quality}
+            quality={quality} fees={fees}
           />
         )}
         {workspace === 'pricer' && (
@@ -1831,10 +1848,12 @@ function MobileApp({
       <div style={{
         position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 20,
         padding: '10px 12px 14px',
-        background: 'linear-gradient(0deg, rgba(10,13,20,0.95) 0%, rgba(10,13,20,0.85) 70%, transparent 100%)',
+        background: light
+          ? 'linear-gradient(0deg, rgba(238,241,246,0.97) 0%, rgba(238,241,246,0.88) 70%, transparent 100%)'
+          : 'linear-gradient(0deg, rgba(10,13,20,0.95) 0%, rgba(10,13,20,0.85) 70%, transparent 100%)',
         backdropFilter: 'blur(12px)',
         WebkitBackdropFilter: 'blur(12px)',
-        borderTop: '1px solid rgba(255,255,255,0.06)',
+        borderTop: `1px solid ${light ? 'rgba(25,40,70,0.10)' : 'rgba(255,255,255,0.06)'}`,
       }}>
         <div style={{ display: 'grid', gridTemplateColumns: workspace !== 'chain' ? '1fr 1fr' : '1fr', gap: 16 }}>
           <Slider label="Spot" value={spot} min={spotMin} max={spotMax} step={P.spotStep} onChange={setSpot} format={(v) => v.toLocaleString()} theme={theme} />
@@ -1843,19 +1862,46 @@ function MobileApp({
           )}
         </div>
       </div>
+
+      {window.HelpDrawer && <window.HelpDrawer open={helpOpen} onClose={() => setHelpOpen(false)} workspace={workspace} />}
     </div>
+  );
+}
+
+// Live badge for the phone top bar. The desktop shows broker + a separate
+// freshness chip; there is no room for both here, so the badge itself turns
+// amber STALE once the feed stops updating.
+function MobileLiveBadge({ live, P, lastLiveAt, light }) {
+  const [, tick] = uS(0);
+  uE(() => {
+    if (!live) return;
+    const id = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [live]);
+  if (!live) {
+    return <span className="mono" style={{ fontSize: 8, fontWeight: 700, letterSpacing: 0.4, color: light ? 'rgba(20,30,50,0.45)' : 'rgba(255,255,255,0.45)' }}>○MOCK</span>;
+  }
+  const stale = lastLiveAt && (Date.now() - lastLiveAt) > 45000;
+  return (
+    <span className="mono" title={stale ? 'live data may be stale' : 'live'} style={{
+      fontSize: 8, fontWeight: 700, letterSpacing: 0.4,
+      color: stale ? '#f0c068' : '#4dd0c8',
+    }}>{stale ? '●STALE' : `●${BROKER[P.live]}`}</span>
   );
 }
 
 function MobileCalc({
   isFold, chartW, theme = 'dark',
-  P, bars, barsLive, barPeriodId, setBarPeriodId,
+  P, bars, barsLive, barPeriodId, setBarPeriodId, expiries,
   legs, setLegs, spot, setSpot, iv, setIv, dte,
   view, setView, sliceFrac, setSliceFrac,
-  pnlPts, pnlNTD, maxProfit, maxLoss,
+  pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0,
   portfolioG, popValue, quality,
   accent, t,
 }) {
+  const light = theme === 'light';
+  // Net of estimated round-trip fees, matching the desktop card. Charts stay gross.
+  const netPnl = pnlNTD - fees;
   return (
     <>
       {/* P&L now card */}
@@ -1865,16 +1911,23 @@ function MobileCalc({
             <Eyebrow right={<DataQualityPill quality={quality} />}>P&L now</Eyebrow>
             <div className="tnum" style={{
               fontSize: 26, fontWeight: 700, letterSpacing: -0.4,
-              color: pnlNTD >= 0 ? 'oklch(0.84 0.14 75)' : 'oklch(0.74 0.12 220)',
+              color: netPnl >= 0
+                ? (light ? 'oklch(0.60 0.13 75)' : 'oklch(0.84 0.14 75)')
+                : (light ? 'oklch(0.50 0.10 220)' : 'oklch(0.74 0.12 220)'),
               fontFamily: 'ui-monospace, SF Mono, monospace', lineHeight: 1.05,
             }}>
-              {pnlNTD >= 0 ? '+' : ''}{P.cur}{Math.abs(Math.round(pnlNTD)).toLocaleString()}
+              {netPnl >= 0 ? '+' : ''}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
             </div>
             <div className="tnum" style={{ fontSize: 10, opacity: 0.55, marginTop: 4 }}>
-              Max <span style={{ color: '#f0c068' }}>+{P.cur}{Math.round(maxProfit).toLocaleString()}</span>
+              Max <span style={{ color: light ? '#8a6410' : '#f0c068' }}>+{P.cur}{Math.round(maxProfit - fees).toLocaleString()}</span>
               <span style={{ opacity: 0.4 }}> · </span>
-              Min <span style={{ color: '#5fa3d4' }}>{P.cur}{Math.round(maxLoss).toLocaleString()}</span>
+              Min <span style={{ color: light ? '#2b6a99' : '#5fa3d4' }}>{P.cur}{Math.round(maxLoss - fees).toLocaleString()}</span>
             </div>
+            {fees > 0 && (
+              <div className="tnum" style={{ fontSize: 9, opacity: 0.42, marginTop: 2 }}>
+                incl. est. fees {P.cur}{Math.round(fees).toLocaleString()}
+              </div>
+            )}
           </div>
           <div style={{ width: 84, flexShrink: 0 }}>
             <div style={{ fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600, textAlign: 'center', marginBottom: 2 }}>POP</div>
@@ -1903,8 +1956,8 @@ function MobileCalc({
             flex: '1 0 auto', minWidth: 64,
             fontSize: 11, fontWeight: 600, padding: '7px 10px', borderRadius: 999,
             border: 'none', cursor: 'pointer',
-            background: view === tab.id ? 'rgba(255,255,255,0.10)' : 'transparent',
-            color: view === tab.id ? '#fff' : 'rgba(255,255,255,0.55)',
+            background: view === tab.id ? (light ? 'rgba(20,40,80,0.10)' : 'rgba(255,255,255,0.10)') : 'transparent',
+            color: view === tab.id ? (light ? '#1c2433' : '#fff') : (light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)'),
             fontFamily: 'inherit', whiteSpace: 'nowrap',
           }}>{tab.label}</button>
         ))}
@@ -1927,7 +1980,7 @@ function MobileCalc({
           </div>
         </>)}
         {view === 'kbar' && (<>
-          <Eyebrow right={<KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} />}>K線 · {P.code} <span style={{ color: 'rgba(255,255,255,0.5)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· {barsLive ? 'IB' : 'mock'}</span></Eyebrow>
+          <Eyebrow right={<KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} light={light} />}>K線 · {P.code} <span style={{ opacity: 0.5, fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· {barsLive ? (BROKER[P.live] || 'live') : 'mock'}</span></Eyebrow>
           <KBarChart bars={bars} theme={theme} height={160} width={chartW} />
         </>)}
         {view === 'greeks' && (<>
@@ -1976,7 +2029,7 @@ function MobileCalc({
         <div style={{
           display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 8, marginBottom: 8,
           WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          borderBottom: `1px solid ${light ? 'rgba(25,40,70,0.10)' : 'rgba(255,255,255,0.06)'}`,
         }}>
           {STRATEGY_LIBRARY.map((s) => {
             const c = { bullish: '#ef5350', bearish: '#26a69a', neutral: '#a78bfa', volatile: '#f0c068' }[s.bias];
@@ -1988,7 +2041,7 @@ function MobileCalc({
                   padding: '5px 9px', borderRadius: 999,
                   border: `1px solid ${c}55`,
                   background: `${c}14`,
-                  color: '#e8eaef', fontFamily: 'inherit',
+                  color: 'inherit', fontFamily: 'inherit',
                   fontSize: 10, fontWeight: 600, cursor: 'pointer',
                   display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap',
                 }}>
@@ -2004,7 +2057,7 @@ function MobileCalc({
             No legs yet · pick a strategy above or go to Chain
           </div>
         ) : (
-          <LegEditor legs={legs} onChange={setLegs} theme={theme} />
+          <LegEditor legs={legs} onChange={setLegs} theme={theme} expiries={expiries} defaultDte={dte} />
         )}
       </Glass2>
 
@@ -2024,8 +2077,8 @@ function MobileCalc({
               setIv(Math.max(P.ivMin, Math.min(P.ivMax, P.defaultIv + s.iv)));
             }} style={{
               padding: '10px 6px', borderRadius: 8, fontSize: 11, fontWeight: 600,
-              border: '1px solid rgba(255,255,255,0.10)', cursor: 'pointer',
-              background: 'rgba(255,255,255,0.03)', color: '#e8eaef', fontFamily: 'inherit',
+              border: `1px solid ${light ? 'rgba(25,40,70,0.12)' : 'rgba(255,255,255,0.10)'}`, cursor: 'pointer',
+              background: light ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.03)', color: 'inherit', fontFamily: 'inherit',
             }}>{s.label}</button>
           ))}
         </div>
@@ -2097,7 +2150,12 @@ function MobileIV({ expiry, expiries = TXO_EXPIRIES, P, spot, rows, theme = 'dar
   );
 }
 
-function MobileChain({ isFold, chartW, P, rows, spot, expiry, legs, setLegs, addLegFromChain, quality, theme = 'dark' }) {
+function MobileChain({ isFold, chartW, P, rows, spot, expiry, expiries, legs, setLegs, addLegFromChain, quality, fees = 0, theme = 'dark' }) {
+  const light = theme === 'light';
+  // Tapping a quote used to always BUY. The desktop chain got a buy/sell
+  // popover; on touch a persistent segmented control is steadier than a
+  // popover, and it shows which way the next tap goes before you tap.
+  const [side, setSide] = uS('long');
   return (
     <>
       {/* Net premium card */}
@@ -2112,6 +2170,7 @@ function MobileChain({ isFold, chartW, P, rows, spot, expiry, legs, setLegs, add
               {legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0) >= 0 ? 'credit received' : 'debit paid'}
               <span style={{ opacity: 0.4 }}> · </span>
               {legs.length} leg{legs.length === 1 ? '' : 's'}
+              {fees > 0 && <><span style={{ opacity: 0.4 }}> · </span>est. fees {P.cur}{Math.round(fees).toLocaleString()}</>}
             </div>
           </div>
           {legs.length > 0 && (
@@ -2122,10 +2181,27 @@ function MobileChain({ isFold, chartW, P, rows, spot, expiry, legs, setLegs, add
 
       {/* Option chain (compact: hides OI/Vol on phone, only IV + BID/ASK + Strike) */}
       <Glass2 tone="panel" padding={10} style={{ overflow: 'auto' }}>
-        <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>}>
+        <Eyebrow right={
+          <div style={{ display: 'inline-flex', gap: 3, alignItems: 'center' }}>
+            {[{ id: 'long', label: 'BUY' }, { id: 'short', label: 'SELL' }].map((o) => {
+              const on = side === o.id;
+              const c = o.id === 'long' ? '#ef5350' : '#26a69a';
+              return (
+                <button key={o.id} onClick={() => setSide(o.id)} style={{
+                  padding: '3px 8px', borderRadius: 999, cursor: 'pointer', fontFamily: 'inherit',
+                  fontSize: 9, fontWeight: 700, letterSpacing: 0.4,
+                  border: `1px solid ${on ? c : (light ? 'rgba(25,40,70,0.14)' : 'rgba(255,255,255,0.10)')}`,
+                  background: on ? `${c}22` : 'transparent',
+                  color: on ? c : (light ? 'rgba(20,30,50,0.5)' : 'rgba(255,255,255,0.5)'),
+                }}>{o.label}</button>
+              );
+            })}
+            <span className="mono" style={{ fontSize: 9, opacity: 0.5, marginLeft: 3 }}>{expiry.label} · {expiry.dte}d</span>
+          </div>
+        }>
           Option chain
         </Eyebrow>
-        <MobileChainTable spot={spot} contract={expiry.type} rows={rows} onAddLeg={addLegFromChain} />
+        <MobileChainTable spot={spot} contract={expiry.type} rows={rows} onAddLeg={addLegFromChain} side={side} dte={expiry.dte} light={light} />
       </Glass2>
 
       {/* OI Profile */}
@@ -2144,7 +2220,7 @@ function MobileChain({ isFold, chartW, P, rows, spot, expiry, legs, setLegs, add
       {legs.length > 0 && (
         <Glass2 tone="panel" padding={12}>
           <Eyebrow>Current legs</Eyebrow>
-          <LegEditor legs={legs} onChange={setLegs} theme={theme} />
+          <LegEditor legs={legs} onChange={setLegs} theme={theme} expiries={expiries} defaultDte={expiry.dte} />
         </Glass2>
       )}
     </>
@@ -2152,7 +2228,8 @@ function MobileChain({ isFold, chartW, P, rows, spot, expiry, legs, setLegs, add
 }
 
 // Compact chain table for phone — drops OI/Vol columns, keeps IV / BID-ASK / Strike.
-function MobileChainTable({ spot, contract, rows: rowsProp, onAddLeg }) {
+function MobileChainTable({ spot, contract, rows: rowsProp, onAddLeg, side = 'long', dte, light = false }) {
+  const hc = hCell(light), cc = cCell(light);
   const genRows = uM(() => {
     if (rowsProp && rowsProp.length) return [];
     return window.genChain ? window.genChain({ spot, contract }) : [];
@@ -2165,51 +2242,51 @@ function MobileChainTable({ spot, contract, rows: rowsProp, onAddLeg }) {
       fontFamily: 'ui-monospace, SF Mono, monospace',
       fontSize: 11, fontVariantNumeric: 'tabular-nums',
       borderRadius: 8, overflow: 'hidden',
-      border: '1px solid rgba(255,255,255,0.06)',
+      border: `1px solid ${light ? 'rgba(25,40,70,0.10)' : 'rgba(255,255,255,0.06)'}`,
     }}>
       {/* header */}
-      <div style={hCell}>IV</div>
-      <div style={hCell}>BID/ASK</div>
-      <div style={{ ...hCell, textAlign: 'center' }}>STRIKE</div>
-      <div style={{ ...hCell, textAlign: 'left' }}>BID/ASK</div>
-      <div style={{ ...hCell, textAlign: 'left' }}>IV</div>
+      <div style={hc}>IV</div>
+      <div style={hc}>BID/ASK</div>
+      <div style={{ ...hc, textAlign: 'center' }}>STRIKE</div>
+      <div style={{ ...hc, textAlign: 'left' }}>BID/ASK</div>
+      <div style={{ ...hc, textAlign: 'left' }}>IV</div>
       {rows.map((r) => {
         const callBg = r.itmCall ? 'rgba(239,83,80,0.08)' : 'transparent';
         const putBg  = r.itmPut  ? 'rgba(38,166,154,0.08)' : 'transparent';
         return (
           <React.Fragment key={r.strike}>
-            <div onClick={() => onAddLeg({ side: 'long', type: 'call', strike: r.strike, premium: parseFloat(r.call.last.toFixed(2)), qty: 1 })}
-              style={{ ...cCell, background: callBg, color: 'rgba(255,255,255,0.6)' }}>{r.call.iv.toFixed(0)}%</div>
-            <div onClick={() => onAddLeg({ side: 'long', type: 'call', strike: r.strike, premium: parseFloat(r.call.last.toFixed(2)), qty: 1 })}
-              style={{ ...cCell, background: callBg, color: '#ef5350', fontWeight: 600 }}>{r.call.bid.toFixed(0)}/{r.call.ask.toFixed(0)}</div>
+            <div onClick={() => onAddLeg({ side, type: 'call', strike: r.strike, premium: parseFloat(r.call.last.toFixed(2)), qty: 1, dte })}
+              style={{ ...cc, background: callBg, opacity: 0.6 }}>{r.call.iv.toFixed(0)}%</div>
+            <div onClick={() => onAddLeg({ side, type: 'call', strike: r.strike, premium: parseFloat(r.call.last.toFixed(2)), qty: 1, dte })}
+              style={{ ...cc, background: callBg, color: '#ef5350', fontWeight: 600 }}>{r.call.bid.toFixed(0)}/{r.call.ask.toFixed(0)}</div>
             <div style={{
-              ...cCell, textAlign: 'center', fontWeight: r.atm ? 700 : 500,
-              background: r.atm ? 'rgba(240,192,104,0.08)' : 'rgba(255,255,255,0.02)',
-              color: r.atm ? '#f7d394' : '#cdd3df',
-              borderLeft: '1px solid rgba(255,255,255,0.04)',
-              borderRight: '1px solid rgba(255,255,255,0.04)',
+              ...cc, textAlign: 'center', fontWeight: r.atm ? 700 : 500,
+              background: r.atm ? 'rgba(240,192,104,0.08)' : (light ? 'rgba(20,40,80,0.03)' : 'rgba(255,255,255,0.02)'),
+              color: r.atm ? (light ? '#8a6410' : '#f7d394') : (light ? '#3a4658' : '#cdd3df'),
+              borderLeft: `1px solid ${light ? 'rgba(25,40,70,0.07)' : 'rgba(255,255,255,0.04)'}`,
+              borderRight: `1px solid ${light ? 'rgba(25,40,70,0.07)' : 'rgba(255,255,255,0.04)'}`,
               fontSize: r.atm ? 12 : 11,
             }}>{r.strike}</div>
-            <div onClick={() => onAddLeg({ side: 'long', type: 'put', strike: r.strike, premium: parseFloat(r.put.last.toFixed(2)), qty: 1 })}
-              style={{ ...cCell, background: putBg, color: '#26a69a', fontWeight: 600, textAlign: 'left' }}>{r.put.bid.toFixed(0)}/{r.put.ask.toFixed(0)}</div>
-            <div onClick={() => onAddLeg({ side: 'long', type: 'put', strike: r.strike, premium: parseFloat(r.put.last.toFixed(2)), qty: 1 })}
-              style={{ ...cCell, background: putBg, color: 'rgba(255,255,255,0.6)', textAlign: 'left' }}>{r.put.iv.toFixed(0)}%</div>
+            <div onClick={() => onAddLeg({ side, type: 'put', strike: r.strike, premium: parseFloat(r.put.last.toFixed(2)), qty: 1, dte })}
+              style={{ ...cc, background: putBg, color: '#26a69a', fontWeight: 600, textAlign: 'left' }}>{r.put.bid.toFixed(0)}/{r.put.ask.toFixed(0)}</div>
+            <div onClick={() => onAddLeg({ side, type: 'put', strike: r.strike, premium: parseFloat(r.put.last.toFixed(2)), qty: 1, dte })}
+              style={{ ...cc, background: putBg, opacity: 0.6, textAlign: 'left' }}>{r.put.iv.toFixed(0)}%</div>
           </React.Fragment>
         );
       })}
     </div>
   );
 }
-const hCell = {
+const hCell = (light) => ({
   padding: '6px 8px', fontSize: 9, letterSpacing: 0.4, textTransform: 'uppercase',
-  color: 'rgba(255,255,255,0.45)', fontWeight: 600, textAlign: 'right',
-  background: 'rgba(255,255,255,0.04)',
-  borderBottom: '1px solid rgba(255,255,255,0.08)',
-};
-const cCell = {
+  color: light ? 'rgba(20,30,50,0.45)' : 'rgba(255,255,255,0.45)', fontWeight: 600, textAlign: 'right',
+  background: light ? 'rgba(20,40,80,0.05)' : 'rgba(255,255,255,0.04)',
+  borderBottom: `1px solid ${light ? 'rgba(25,40,70,0.12)' : 'rgba(255,255,255,0.08)'}`,
+});
+const cCell = (light) => ({
   padding: '8px', textAlign: 'right', cursor: 'pointer',
-  borderTop: '1px solid rgba(255,255,255,0.04)',
+  borderTop: `1px solid ${light ? 'rgba(25,40,70,0.07)' : 'rgba(255,255,255,0.04)'}`,
   transition: 'background .12s',
-};
+});
 
 window.Obsidian3 = Obsidian3;
