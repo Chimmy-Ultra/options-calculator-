@@ -11,11 +11,12 @@ should start from.
   籌碼差額, 主力成本線, 關卡價, a 盤中聊天室 and 語音通知. Options-specific
   readings (價平和, max-OI 支撐/壓力) are **not** in its feature list — those
   are standard tools found on 玩股網 / OP凱文 / 選擇權搖錢樹 / 康和 apps.
-- Everything you named is buildable on the stack we already have, with one hard
-  limit: **open interest is end-of-day data**. TAIFEX publishes per-strike OI
-  once after the close; no free source has intraday OI, and broker apps show
-  the same T-1 number. Max-OI levels are therefore "yesterday's walls", which
-  is exactly how day traders use them.
+- Everything you named is buildable on the stack we already have, with one
+  limit to pin down: **open interest is published end-of-day** by TAIFEX's
+  daily report, and broker apps show that T-1 number. Max-OI levels are
+  "yesterday's walls", which is how day traders use them. One open question:
+  TAIFEX's own 行情資訊網 quote API (`mis.taifex.com.tw`) may carry OI during
+  the session — step 4 of the probe checks that on your machine.
 - 價平和 is computable **live right now** from the Shioaji chain we already
   fetch (ATM call last + ATM put last). Its intraday history needs a small
   sampler in the proxy, or `api.ticks()` on the two ATM contracts.
@@ -24,8 +25,13 @@ should start from.
   成本線 drawn as horizontal lines — plus the K-line with the same lines
   overlaid. The 3D P&L / IV surfaces move to a "Lab" tab.
 - Nothing here was verified from this container: every Taiwanese finance
-  domain (TAIFEX, CMoney, 玩股網 …) is blocked by its egress proxy. Run
-  `server/check_taifex.py` on your machine to turn "feasible" into "verified".
+  domain (TAIFEX, CMoney, 玩股網 …) is blocked by its egress proxy, for the
+  browser as well as for fetches. Run `server/check_taifex.py` on your machine
+  to turn "feasible" into "verified". To let a future session actually look at
+  those sites, widen the environment's network policy (claude.ai/code →
+  environment → network access) to include `cmoney.tw`, `wantgoo.com`,
+  `optree.tw`, `opkevin.cc`, `taifex.com.tw`, `mis.taifex.com.tw`,
+  `openapi.taifex.com.tw`, `histock.tw`, `ptt.cc`.
 
 ## 1. What 多空指南針 actually is
 
@@ -107,13 +113,20 @@ to spread-only for TXO.
 | Source | What | Latency | Notes |
 |---|---|---|---|
 | `https://openapi.taifex.com.tw/v1/…` (JSON, [Swagger](https://openapi.taifex.com.tw/)) | `DailyMarketReportFut` (futures OHLC + OI), `PutCallRatio`, `MarketDataOfMajorInstitutionalTradersDetailsOfFuturesContractsBytheDate` (三大法人), `OpenInterestOfLargeTradersFutures` (大額交易人), `IndexFuturesAndOptionsMargining`, and an options daily report with per-strike 未沖銷契約量 (exact path: read it from `swagger.json`; the probe script does this) | **Latest trading day only**, published after the close | Endpoint names confirmed from [edwardhu/future_prediction](https://github.com/edwardhu/future_prediction) and [twjackysu/TWSEMCPServer](https://github.com/twjackysu/TWSEMCPServer); both note "僅最新一個交易日" |
-| `https://www.taifex.com.tw/cht/3/optDataDown` (CSV) | Historical options daily report, per strike, incl. OI. Params `down_type=1`, `commodity_id=TXO`, `queryStartDate`, `queryEndDate` (yyyy/mm/dd) | Daily | For OI-change vs yesterday and for backfilling. See [PTT thread](https://www.ptt.cc/bbs/Python/M.1646569595.A.6B8.html), [Medium](https://minkuanchen.medium.com/python-%E7%88%AC%E8%9F%B2%E5%8F%B0%E6%8C%87%E9%81%B8%E6%93%87%E6%AC%8A%E5%8F%8A%E5%A4%A7%E7%9B%A4%E5%A0%B1%E5%83%B9-873dd4a3978a) |
+| `https://www.taifex.com.tw/cht/3/dlOptDataDown` (POST → CSV) | Historical options daily report, per strike. Params `down_type=1`, `commodity_id=TXO`, `queryStartDate`, `queryEndDate` (yyyy/mm/dd, ≤ 30 days per request). Columns: 交易日期, 契約, 到期月份(週別), 履約價, 買賣權, 開/高/低/收盤價, 成交量, 結算價, **未沖銷契約數** (= OI) | Daily | For OI-change vs yesterday and for backfilling. Columns confirmed from [histockhero's notebook](https://github.com/histockhero/youtube_code/blob/main/Part4_%E9%81%B8%E6%93%87%E6%AC%8A%E8%B3%87%E6%96%99%E4%B8%8B%E8%BC%89%EF%BC%86%E6%8A%80%E8%A1%93%E5%88%86%E6%9E%90/4.2%E9%81%B8%E6%93%87%E6%AC%8A%E6%8A%80%E8%A1%93%E5%88%86%E6%9E%90/%E5%8F%B0%E6%8C%87%E9%81%B8%E6%94%AF%E6%92%90%E5%A3%93%E5%8A%9B%E5%9C%96(%E5%90%AB%E5%B7%AE%E5%80%BC).ipynb); older code calls it `optDataDown` ([PTT](https://www.ptt.cc/bbs/Python/M.1646569595.A.6B8.html)) |
+| `https://mis.taifex.com.tw/futures/api/getQuoteList` (POST JSON `{MarketType:"0", SymbolType:"F"/"O", KindID:"1", CID:"TXF"/"TXO"}`) | The quote list behind TAIFEX's 行情資訊網: bid/ask, last, volume, open/high/low, reference. [TaiexChipAnalyzer](https://github.com/joekisoul-code/TaiexChipAnalyzer) reports it also carries OI for TXF | Real-time | **Unverified whether the OI value is intraday or the last settlement.** If it moves during the session, the "end-of-day" limit above disappears for TXO too |
 | `data.gov.tw` datasets [11320](https://data.gov.tw/dataset/11320) 選擇權每日交易行情, [45746](https://data.gov.tw/dataset/45746) 未平倉量增減, [11322](https://data.gov.tw/dataset/11322) P/C ratio, [11600](https://data.gov.tw/dataset/11600) 三大法人選擇權 | Same data, catalogued | Daily | Point at the same TAIFEX resources |
 
-**Hard limit**: OI is a settlement-time number. No free source — and no
-retail broker app — has intraday OI. Design around "levels from yesterday's
-close", refreshed once when TAIFEX publishes (day session ~15:00; the file
-for the combined session lands the next morning).
+**Working assumption**: OI is a settlement-time number — design the levels
+as "yesterday's walls", refreshed once when TAIFEX publishes (day session
+~15:00; the combined-session file lands the next morning). If the MIS quote
+list turns out to update OI intraday, the same panel simply re-polls it.
+
+**Deployment note**: the daily TAIFEX numbers do not need the local proxy at
+all. TaiexChipAnalyzer's pattern — a GitHub Actions cron fetches TAIFEX, writes
+static JSON into the repo, GitHub Pages / Vercel serves it — means the
+deployed site can show OI walls, P/C ratio and 三大法人 for every visitor,
+with the local proxy only needed for live quotes and 價平和.
 
 ### Per-indicator verdict
 
@@ -177,6 +190,8 @@ python3 check_taifex.py
 
 It reads TAIFEX's `swagger.json`, prints every options-related path, calls
 the daily report(s) and the CSV download, and tells you which one carries a
-per-strike OI column and how many rows came back. No credentials, nothing is
+per-strike OI column and how many rows came back. Step 4 posts to the MIS
+quote list for TXF and TXO and prints any OI-like key — run it twice a few
+minutes apart during a session to see whether that number moves. No credentials, nothing is
 written. Paste the output back and the P0 `taifex.py` can be written against
 the real field names instead of guesses.
