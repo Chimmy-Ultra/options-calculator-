@@ -143,3 +143,18 @@ python3 -m http.server 8080
 - IV Surface 3D 仍是造型化 mock，還沒接真實曲面。
 - 期權鏈快照等 6 秒收一輪，延遲數據偶爾會有缺格（顯示 0）；30 秒內重複請求走快取。
 - 期貨選擇權理論價用歐式 Black-76 近似（真實是美式），OI 靠 generic tick 101。
+
+## TAIFEX open data (probe)
+
+Open interest is not part of the Shioaji feed; TAIFEX publishes it once a
+day after the close. Before wiring a `taifex.py` source, check what your
+machine can reach:
+
+```bash
+python3 check_taifex.py
+```
+
+It lists the options-related paths in TAIFEX's OpenAPI, calls the daily
+reports and the historical CSV download, and reports which of them carries a
+per-strike OI column. No credentials; nothing is written. The design that
+would consume it is in `docs/daytrade-redesign.md`.
