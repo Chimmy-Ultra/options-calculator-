@@ -315,8 +315,15 @@ builder move under a **Lab** tab. They keep working unchanged.
   numbers, K-line MA5/10/20/60 + 日盤/全日盤, and the **Lab tab** (3D P&L
   surface and IV surface demoted out of the working tabs; Calculator's centre
   is now the full-size payoff chart).
-- **P1**: 價平和 intraday sampler; 關卡價 and 成本線; P/C ratio and 三大法人
-  tiles.
+- **Done 2026-09-13**: 關卡價 (§7 — only 一壘 verified, the rest labelled as
+  this site's definition) and, from a survey of Western tools (SpotGamma /
+  SqueezeMetrics, OptionStrat, tastytrade, thinkorswim, optioncharts,
+  IVolatility): dealer gamma exposure per strike with Call / Put gamma walls
+  and the zero-gamma flip, max pain on the ladder, ±1σ expected-move tile, a
+  probability cone on the K-line, a price × date P&L heatmap in Calculator,
+  and a 5/10/20/60-day volatility cone in Lab.
+- **P1**: 價平和 intraday sampler; 成本線 (VWAP re-anchored on volume
+  spikes — needs ticks); 多空差額 (needs bid/ask ticks on a trading day).
 - **P2**: 籌碼差額 proxy from ticks; weekly/monthly ladder toggle; Lab tab
   reshuffle and mobile layout of the ladder.
 

@@ -128,7 +128,7 @@ python3 -m http.server 8080
 | 端點 | 回傳 |
 |---|---|
 | `GET /api/health?pid=` | `{connected, source, ib:{...}, sinopac:{...}}` — 帶 `pid` 時只回報服務該商品的那個資料源 |
-| `GET /api/quote/{pid}` | 近月期貨報價 `{last, bid, ask, close, chgPct, month}` |
+| `GET /api/quote/{pid}` | 近月期貨報價 `{last, bid, ask, close, chgPct, month, open, high, low}`（`open/high/low` = 今日盤中高低，關卡價的基準；來源沒給就是 `null`） |
 | `GET /api/expiries/{pid}` | `[{id: "20260821", label: "SEP", dte, date}]` |
 | `GET /api/chain/{pid}?expiry=20260821` | `{underlying: {month, price}, rows: [...]}`（rows 跟前端 genChain 同形狀） |
 | `GET /api/bars/{pid}?bar=1 day&duration=3 M` | 近月期貨歷史 K 棒 `{bars: [{t,o,h,l,c,v}]}` |
