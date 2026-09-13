@@ -191,6 +191,11 @@ async def quote(spec: dict):
                 "ask": _f(s.sell_price),
                 "close": (last - ref) if (last is not None and ref is not None) else None,
                 "chgPct": _f(s.change_rate),
+                # Today's running session range (the 關卡價 base). Snapshot
+                # fields per the Shioaji docs; guarded in case a build lacks them.
+                "open": _f(getattr(s, "open", None)),
+                "high": _f(getattr(s, "high", None)),
+                "low": _f(getattr(s, "low", None)),
             }
         return await asyncio.to_thread(work)
 

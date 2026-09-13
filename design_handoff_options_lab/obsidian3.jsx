@@ -376,6 +376,8 @@ function Obsidian3() {
   const [marketData, setMarketData] = uS(null); // daily positioning (P/C ratio, 外資, top-10) — same source
   const [lastLiveAt, setLastLiveAt] = uS(null); // ② timestamp of last successful live fetch
   const [liveBars, setLiveBars] = uS(null); // 近月期貨的 IB 歷史 K
+  const [liveDayBars, setLiveDayBars] = uS(null); // daily 日盤 bars regardless of the K-line toggles — the 關卡價 input
+  const [quoteNow, setQuoteNow] = uS(null); // latest live quote (last / open / high / low) — today's running range
   const [barPeriodId, setBarPeriodId] = uS('D'); // K 線週期：D / 4H / 1H
   const [barSession, setBarSession] = uS('day'); // 'day' 日盤 | 'full' 全日盤（含夜盤）— sources with a night session only
   const [theme, setTheme] = uS(() => {
@@ -530,6 +532,7 @@ function Obsidian3() {
       const q = await window.LiveData.quote(P.id);
       if (dead || !q || !(q.last > 0)) return;
       setSpot(q.last);
+      setQuoteNow(q);
       setLastLiveAt(Date.now());
     };
     const pullChain = async () => {
@@ -557,9 +560,21 @@ function Obsidian3() {
       const hist = await window.LiveData.bars(P.id, { bar: per.bar, duration: per.duration, session: barSession });
       if (dead || !hist || !hist.bars || !hist.bars.length) return;
       setLiveBars(hist.bars);
+      if (per.bar === '1 day' && barSession === 'day') setLiveDayBars(hist.bars);
     })();
     return () => { dead = true; };
   }, [live, barPeriodId, barSession]);
+  // 關卡價 always reads the daily 日盤 series, whatever the K-line shows.
+  uE(() => {
+    let dead = false;
+    if (!live || !P.live || !window.LiveData) { setLiveDayBars(null); return undefined; }
+    (async () => {
+      const hist = await window.LiveData.bars(P.id, { bar: '1 day', duration: '3 M', session: 'day' });
+      if (dead || !hist || !hist.bars || !hist.bars.length) return;
+      setLiveDayBars(hist.bars);
+    })();
+    return () => { dead = true; };
+  }, [live, productId]);
 
   // live 報價可能落在預設 slider 範圍外 → 動態放寬邊界。
   const spotMin = Math.min(P.spotMin, Math.floor(spot * 0.9));
@@ -617,6 +632,19 @@ function Obsidian3() {
   const quality = uM(() => dataQuality(legs, chainRows), [legs, chainRows]);
   // Levels (價平和 band + max-OI walls) from the rows on screen + the OI table.
   const levels = uM(() => computeLevels({ spot, rows: chainRows, oi: oiData, P }), [spot, chainRows, oiData, productId]);
+  // 關卡價 from the daily 日盤 bars: live series when connected, else the mock
+  // walk (labelled). Today's running high / low come from the live quote when
+  // the source reports them; otherwise the last bar's own range stands in.
+  const dayBars = uM(() => {
+    if (liveDayBars && liveDayBars.length) return liveDayBars;
+    if (liveBars && liveBars.length) return null; // connected but no daily 日盤 series yet — never mix in mock
+    return window.genBars ? window.genBars({ spot: P.defaultSpot, n: 60, volScale: 1, product: P }) : null;
+  }, [liveDayBars, liveBars, productId]);
+  const rangeLevels = uM(() => {
+    const q = quoteNow || (live && live.quote);
+    const today = (q && q.high > 0 && q.low > 0) ? { date: taipeiDate(), high: q.high, low: q.low } : { date: taipeiDate() };
+    return computeRangeLevels({ bars: dayBars, today });
+  }, [dayBars, quoteNow, live]);
   // K 線：live（IB 日K）優先，否則 mock 隨機漫步。
   // 刻意不依賴 spot — 拉 slider 屬於情境模擬，不該重繪歷史走勢。
   const bars = uM(() => {
@@ -759,6 +787,7 @@ function Obsidian3() {
       {workspace === 'levels' && (
         <LevelsWorkspace
           P={P} theme={theme} light={light} spot={spot} expiry={expiry} levels={levels} live={live} market={marketData}
+          rangeLevels={rangeLevels} dayBarsLive={!!liveDayBars}
           bars={bars} barsLive={!!liveBars} barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
           barSession={barSession} setBarSession={setBarSession}
           D={D}
@@ -1318,7 +1347,100 @@ function computeLevels({ spot, rows, oi, P }) {
   };
 }
 
-const LEVEL_COLORS = { up: '#ef5350', down: '#26a69a', band: '#a78bfa', spot: '#f0c068' };
+const LEVEL_COLORS = { up: '#ef5350', down: '#26a69a', band: '#a78bfa', spot: '#f0c068', range: '#60a5fa' };
+
+// 關卡價 — the range-derived targets of 自由人's 多空指南針 (一壘 / 二壘 /
+// 三壘 / 全壘 / 場外, above and below). His public description: the app
+// "tracks daily volume and range, takes the largest and smallest range of the
+// last month, and derives the day's target levels" (CMoney product page).
+// What we could verify against TAIFEX history (docs/daytrade-redesign.md §6):
+//   一壘 below = today's high − the smallest daily range (day session) of the
+//   previous ~20 sessions. Exact on both dated screenshots (2023/06/09: 16888 −
+//   67 = 16821; 2024/08/28: 22211 − 170 = 22041); window anywhere in 14–26
+//   sessions reproduces them, 20 = "一個月".
+// The other four distances are this site's definition, chosen to match the one
+// screenshot that shows all five within a point where a natural statistic
+// does: 二壘 = 30th percentile (his own statistic: "二壘打出現的機率大約是
+// 70%"), 三壘 = mean (124 vs his 124), 全壘 = mean + 1σ (164 vs his 164),
+// 場外 = the largest range (244 vs his 260 — not his formula). Above-levels
+// mirror below: today's low + the same distances.
+// bars: daily OHLC in time order; today: { date, high, low } from the live
+// quote when the session is running, else the last completed bar stands in.
+const RANGE_LEVEL_N = 20;
+const RANGE_LEVEL_NAMES = ['一壘', '二壘', '三壘', '全壘', '場外'];
+function computeRangeLevels({ bars, today, N = RANGE_LEVEL_N }) {
+  if (!bars || bars.length < N + 1) return null;
+  const last = bars[bars.length - 1];
+  // A bar dated today is the running session: its own range is not history.
+  const lastIsToday = !!(today && today.date && String(last.t).slice(0, 8) === today.date);
+  const hist = lastIsToday ? bars.slice(0, -1) : bars;
+  if (hist.length < N) return null;
+  const win = hist.slice(-N);
+  const ranges = win.map((b) => b.h - b.l).filter((r) => Number.isFinite(r) && r > 0);
+  if (ranges.length < N) return null;
+  const sorted = [...ranges].sort((a, b) => a - b);
+  const mean = ranges.reduce((a, b) => a + b, 0) / ranges.length;
+  const sd = Math.sqrt(ranges.reduce((a, b) => a + (b - mean) * (b - mean), 0) / ranges.length);
+  const pct = (q) => { const pos = q * (sorted.length - 1), i = Math.floor(pos); return sorted[i] + (sorted[Math.min(i + 1, sorted.length - 1)] - sorted[i]) * (pos - i); };
+  const dists = [sorted[0], pct(0.3), mean, mean + sd, sorted[sorted.length - 1]].map((d) => Math.round(d));
+  // Base: the running session's high / low when we have it, else the last bar.
+  const base = (today && today.high > 0 && today.low > 0)
+    ? { high: today.high, low: today.low, date: today.date, running: true }
+    : { high: last.h, low: last.l, date: String(last.t).slice(0, 8), running: lastIsToday };
+  const up = dists.map((d, i) => ({ name: RANGE_LEVEL_NAMES[i], dist: d, price: base.low + d }));
+  const down = dists.map((d, i) => ({ name: RANGE_LEVEL_NAMES[i], dist: d, price: base.high - d }));
+  return { base, up, down, n: ranges.length, min: sorted[0], max: sorted[sorted.length - 1], mean, sd, from: String(win[0].t).slice(0, 8), to: String(win[win.length - 1].t).slice(0, 8) };
+}
+
+// Today's date in Taiwan (YYYYMMDD) — bars are stamped in exchange time.
+function taipeiDate() {
+  return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10).replace(/-/g, '');
+}
+
+// The two lists side by side, 場外 at the far ends and 一壘 nearest the base
+// row in the middle — read it like a ladder. The next unreached level on
+// each side is highlighted; reached ones dim.
+function RangeLevelsPanel({ P, spot, R, light, sourceLabel }) {
+  const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
+  const dim = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
+  const line = light ? 'rgba(25,40,70,0.18)' : 'rgba(255,255,255,0.12)';
+  if (!R) return <div className="mono" style={{ fontSize: 11, color: dim, padding: '6px 0' }}>需要 {RANGE_LEVEL_N + 1} 根以上的日K才能計算。</div>;
+  const nextUp = R.up.find((l) => l.price > spot);
+  const nextDown = [...R.down].find((l) => l.price < spot);
+  const Row = ({ l, side, hot }) => {
+    const reached = side === 'up' ? spot >= l.price : spot <= l.price;
+    const col = side === 'up' ? LEVEL_COLORS.up : LEVEL_COLORS.down;
+    const d = l.price - spot;
+    return (
+      <div title={`振幅 ${fmtP(l.dist)} 點`} style={{ display: 'grid', gridTemplateColumns: '34px 1fr auto', gap: 6, alignItems: 'baseline', padding: '4px 8px', borderRadius: 8, opacity: reached ? 0.45 : 1, whiteSpace: 'nowrap',
+        background: hot ? (side === 'up' ? 'rgba(239,83,80,0.10)' : 'rgba(38,166,154,0.10)') : 'transparent', border: `1px solid ${hot ? col : 'transparent'}` }}>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: col }}>{l.name}</span>
+        <span className="tnum" style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--font-mono)', color: reached ? dim : 'inherit' }}>{fmtP(l.price)}</span>
+        <span className="tnum" style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: dim }}>{`${d >= 0 ? '+' : '−'}${fmtP(Math.abs(d))}`}</span>
+      </div>
+    );
+  };
+  return (
+    <div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: LEVEL_COLORS.up, margin: '0 8px 4px', whiteSpace: 'nowrap' }}>上方關卡價<div className="tnum" style={{ color: dim, fontWeight: 500, fontSize: 9.5 }}>{R.base.running ? '今' : '前'}低 {fmtP(R.base.low)} ＋ 振幅</div></div>
+          {[...R.up].reverse().map((l) => <Row key={l.name} l={l} side="up" hot={nextUp && nextUp.name === l.name} />)}
+        </div>
+        <div>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: LEVEL_COLORS.down, margin: '0 8px 4px', whiteSpace: 'nowrap' }}>下方關卡價<div className="tnum" style={{ color: dim, fontWeight: 500, fontSize: 9.5 }}>{R.base.running ? '今' : '前'}高 {fmtP(R.base.high)} － 振幅</div></div>
+          {R.down.map((l) => <Row key={l.name} l={l} side="down" hot={nextDown && nextDown.name === l.name} />)}
+        </div>
+      </div>
+      <div className="mono tnum" style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${line}`, fontSize: 9.5, color: dim, display: 'flex', flexWrap: 'wrap', gap: '2px 12px' }}>
+        <span>近{R.n}日日盤振幅：最小 {fmtP(R.min)} · 三成分位 {fmtP(R.up[1].dist)} · 平均 {fmtP(Math.round(R.mean))} · 平均＋1σ {fmtP(R.up[3].dist)} · 最大 {fmtP(R.max)}</span>
+        <span>{R.from.slice(4, 6)}/{R.from.slice(6)}–{R.to.slice(4, 6)}/{R.to.slice(6)} · {sourceLabel}</span>
+        <span>一壘＝驗證自由人公式；其餘為本站統計定義</span>
+      </div>
+    </div>
+  );
+}
+
 
 // Signed change, Taiwan colors (up = red, down = teal). fmt formats the magnitude.
 function Chg({ v, fmt = (x) => x.toLocaleString(), suffix = '' }) {
@@ -1414,7 +1536,7 @@ function LevelsLadder({ P, spot, L, light }) {
   );
 }
 
-function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, levels: L, live, market: M, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D }) {
+function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, levels: L, live, market: M, rangeLevels: R, dayBarsLive, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D }) {
   const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
   const chg = (v) => (v == null ? '' : `（${v > 0 ? '+' : ''}${v.toLocaleString()}）`);
@@ -1435,6 +1557,20 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
     chartLevels.push({ price: L.atm.strike - L.straddle, label: '價平－和', color: LEVEL_COLORS.band });
   }
   if (L.support) chartLevels.push({ price: L.support.strike, label: '支撐 Put OI最大', color: LEVEL_COLORS.down });
+  // 關卡價: only the two 一壘 lines go on the chart — ten would bury the candles.
+  if (R) {
+    chartLevels.push({ price: R.up[0].price, label: '一壘↑', color: LEVEL_COLORS.range });
+    chartLevels.push({ price: R.down[0].price, label: '一壘↓', color: LEVEL_COLORS.range });
+  }
+  // The nearer unreached 一壘 for the strip tile — his header's 「距一壘 … 差 N 點」.
+  const near1B = (() => {
+    if (!R) return null;
+    const cands = [{ side: '上', price: R.up[0].price }, { side: '下', price: R.down[0].price }]
+      .filter((c) => (c.side === '上' ? c.price > spot : c.price < spot));
+    if (!cands.length) return null;
+    return cands.reduce((a, b) => (Math.abs(a.price - spot) <= Math.abs(b.price - spot) ? a : b));
+  })();
+  const rangeSource = dayBarsLive ? `● ${liveLabel(live, P)} 日K` : '○ 模擬日K';
   // OI table centered on the strike nearest spot, walls highlighted.
   let atmK = null;
   for (const r of L.oiRows) if (atmK == null || Math.abs(r.strike - spot) < Math.abs(atmK - spot)) atmK = r.strike;
@@ -1466,6 +1602,9 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
           value={t10 ? `${t10.net > 0 ? '+' : ''}${t10.net.toLocaleString()}` : '—'}
           color={t10 ? (t10.net >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down) : undefined}
           sub={t10 ? <>較前日 <Chg v={t10.chg} /></> : noMkt} light={light} />
+        <LevelTile label="距一壘" hk="rangelevels" color={LEVEL_COLORS.range}
+          value={near1B ? fmtP(near1B.price) : '—'}
+          sub={near1B ? <>{near1B.side}方一壘 · 差 <b>{fmtP(Math.abs(near1B.price - spot))}</b> 點</> : (R ? '兩側一壘皆已到達' : '日K不足')} light={light} />
         <LevelTile label="P/C 比（全市場）" hk="pcratio"
           value={pc ? pc.ratio.toFixed(2) : '—'}
           color={pc ? (pc.ratio >= 1 ? LEVEL_COLORS.down : LEVEL_COLORS.up) : undefined}
@@ -1481,6 +1620,10 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
           <div className="mono" style={{ marginTop: 10, fontSize: 9.5, color: dim, display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
             <span>{oiLabel}</span>
             <span>權利金：{isLive ? `● ${liveLabel(live, P)}` : '○ 模擬'}</span>
+          </div>
+          <div style={{ marginTop: D.gap, paddingTop: D.gap, borderTop: `1px solid ${light ? 'rgba(25,40,70,0.18)' : 'rgba(255,255,255,0.12)'}` }}>
+            <Eyebrow hk="rangelevels" right={<span className="mono tnum" style={{ fontSize: 9, opacity: 0.5 }}>近{RANGE_LEVEL_N}日振幅</span>}>關卡價 · 振幅</Eyebrow>
+            <RangeLevelsPanel P={P} spot={spot} R={R} light={light} sourceLabel={rangeSource} />
           </div>
         </Glass2>
 

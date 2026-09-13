@@ -236,6 +236,10 @@ async def quote(pid: str):
         "ask": _f(t.ask) if t else None,
         "close": close,
         "chgPct": round((last - close) / close * 100, 2) if last and close else None,
+        # Today's running session range (the 關卡價 base).
+        "open": _f(t.open) if t else None,
+        "high": _f(t.high) if t else None,
+        "low": _f(t.low) if t else None,
     }
 
 

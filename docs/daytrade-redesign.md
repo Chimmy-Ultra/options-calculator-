@@ -334,3 +334,43 @@ quote list for TXF and TXO and prints any OI-like key — run it twice a few
 minutes apart during a session to see whether that number moves. No credentials, nothing is
 written. Paste the output back and the P0 `taifex.py` can be written against
 the real field names instead of guesses.
+
+## 7. 關卡價 — what could be reverse-engineered (2026-09-13)
+
+自由人 publishes no formula. CMoney's product copy says the app "tracks daily
+volume and range, takes the largest and smallest range of the last month and
+derives the day's target levels", and that "二壘 is reached on about 70% of
+days" (both quoted on cmoney.tw; a third-party write-up of his book's
+日振幅操盤法 uses a 5-day window instead — that variant does **not** fit the
+app's numbers below). So the screenshots were matched against TAIFEX's own TX
+daily history (front month = highest-volume contract, day session):
+
+| Screenshot | Date found | Evidence |
+|---|---|---|
+| PC, 下方關卡價 16628 / 16724 / 16764 / 16790 / 16821, 成交價 16888 ▲171 | **2023/06/09** close | TX 202306: open 16802, high = close 16888, prev settle 16717 → +171 ✓ |
+| APP 日盤, 成交價 22087 ▼65, 開 22181, 昨 22152, 距一壘 22041 差 46 | **2024/08/28** 10:36 | TX 202409: open 22181, prev settle 22152 ✓; running high 22211 |
+| APP 周振幅, 近周低 21998 / 近周振幅 452, upper 22340 / 22691 / 22929 / 23287 / 24267 | week of **2024/08/26** | day-session low 21998 (8/27), high 22450 (8/26) → 452 ✓ |
+
+Brute force over bases (open / high / low / prev close / prev settle / night
+H-L) × range statistics (min / max / mean / median / σ / quantiles over 1–40
+sessions, day / night / full session, calendar-month and weekly variants) ×
+multipliers gave exactly **one** combination that fits both day-mode samples
+with multiplier 1:
+
+    下方一壘 = 今日高 − min(日盤振幅 of the previous N sessions), any N in 14–26
+    2023/06/09: 16888 − 67  (5/22's range) = 16821 ✓
+    2024/08/28: 22211 − 170 (8/16's range) = 22041 ✓
+
+N = 20 ("一個月") is what the app uses. The other four levels have only one
+5-level sample, so they are **this site's definition**, chosen to be natural
+statistics of the same 20 ranges and to land within a point where that is
+possible: 二壘 = 30th percentile (his "70%" statement; 16791 vs his 16790),
+三壘 = mean (16765 vs 16764), 全壘 = mean + 1σ (16724 = 16724), 場外 = max
+(16644 vs his 16628 — his 場外 is wider; not reproduced). Upper levels mirror
+the lower ones from today's low. The 周振幅 tab could not be reproduced at all
+(no weekly-range statistic gives 342 above the week's low); it is not built.
+
+The app labels this: "一壘＝驗證自由人公式；其餘為本站統計定義". More dated
+screenshots (any day, both lists visible) would pin down the rest — the
+matching scripts live in the session scratchpad (`re/find_dates.py`,
+`re/consistent.py`).
