@@ -631,7 +631,10 @@ function Obsidian3() {
   }, [liveRows, spot, expiry.type, dte, productId]);
   const quality = uM(() => dataQuality(legs, chainRows), [legs, chainRows]);
   // Levels (價平和 band + max-OI walls) from the rows on screen + the OI table.
-  const levels = uM(() => computeLevels({ spot, rows: chainRows, oi: oiData, P }), [spot, chainRows, oiData, productId]);
+  const levels = uM(() => computeLevels({ spot, rows: chainRows, oi: oiData, P, iv, dte }), [spot, chainRows, oiData, productId, iv, dte]);
+  // Dealer gamma exposure for the expiry on screen (the full TAIFEX strike
+  // range when loaded, else the chain rows).
+  const gex = uM(() => computeGex({ spot, oiRows: levels.oiRows, chainRows, iv, dte, P }), [spot, levels, chainRows, iv, dte, productId]);
   // 關卡價 from the daily 日盤 bars: live series when connected, else the mock
   // walk (labelled). Today's running high / low come from the live quote when
   // the source reports them; otherwise the last bar's own range stands in.
@@ -787,7 +790,7 @@ function Obsidian3() {
       {workspace === 'levels' && (
         <LevelsWorkspace
           P={P} theme={theme} light={light} spot={spot} expiry={expiry} levels={levels} live={live} market={marketData}
-          rangeLevels={rangeLevels} dayBarsLive={!!liveDayBars}
+          rangeLevels={rangeLevels} dayBarsLive={!!liveDayBars} gex={gex}
           bars={bars} barsLive={!!liveBars} barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
           barSession={barSession} setBarSession={setBarSession}
           D={D}
@@ -1316,10 +1319,15 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiri
 // loaded, else the chain rows' own OI — IB or mock). prevStraddle = the same
 // two contracts' previous-session settlement prices (TAIFEX), the 前盤價平和
 // the straddle is compared against.
-function computeLevels({ spot, rows, oi, P }) {
+function computeLevels({ spot, rows, oi, P, iv, dte }) {
   let atm = null;
   for (const r of rows) if (!atm || Math.abs(r.strike - spot) < Math.abs(atm.strike - spot)) atm = r;
   const straddle = (atm && atm.call.last > 0 && atm.put.last > 0) ? atm.call.last + atm.put.last : null;
+  // Expected move (tastytrade / thinkorswim idiom): 1σ = S · IV · √(T/365) with
+  // the ATM IV from the chain (average of the call and put) — the workspace IV
+  // when the chain carries none. The straddle × 0.85 rule of thumb rides along.
+  const atmIv = (atm && atm.call.iv > 0 && atm.put.iv > 0) ? (atm.call.iv + atm.put.iv) / 2 : (iv > 0 ? iv : null);
+  const sigma1 = (atmIv && dte > 0) ? spot * (atmIv / 100) * Math.sqrt(dte / 365) : null;
   // Reference = the session before the premiums on screen: TAIFEX's latest
   // settlement under a live feed, or the previous session's settlement when
   // the premiums themselves are the end-of-day snapshot (prevSettle).
@@ -1339,15 +1347,141 @@ function computeLevels({ spot, rows, oi, P }) {
     callOi: oiRows.reduce((a, r) => a + r.call.oi, 0),
     putOi: oiRows.reduce((a, r) => a + r.put.oi, 0),
   };
+  // Max pain: the settlement price that minimises what option holders collect
+  // (Σ call OI · max(0, S − K) + Σ put OI · max(0, K − S)) — optioncharts.io's
+  // definition, evaluated at each listed strike.
+  let maxPain = null;
+  if (oiRows.length > 1) {
+    let best = null;
+    for (const rk of oiRows) {
+      let pain = 0;
+      for (const ri of oiRows) {
+        if (rk.strike > ri.strike) pain += ri.call.oi * (rk.strike - ri.strike);
+        if (rk.strike < ri.strike) pain += ri.put.oi * (ri.strike - rk.strike);
+      }
+      if (!best || pain < best.pain) best = { strike: rk.strike, pain };
+    }
+    if (best && best.pain > 0) maxPain = best;
+  }
   return {
-    atm, straddle, prevStraddle,
+    atm, straddle, prevStraddle, atmIv, sigma1, maxPain,
     resistance: wall('call'), support: wall('put'),
     totals, oiRows,
     oiSource: oi ? oi.source : null, oiDate: oi ? oi.date : null,
   };
 }
 
-const LEVEL_COLORS = { up: '#ef5350', down: '#26a69a', band: '#a78bfa', spot: '#f0c068', range: '#60a5fa' };
+const LEVEL_COLORS = { up: '#ef5350', down: '#26a69a', band: '#a78bfa', spot: '#f0c068', range: '#60a5fa', gex: '#fb923c' };
+
+// Dealer gamma exposure per strike — SqueezeMetrics' GEX as SpotGamma shows it:
+//   GEX_i = γ_i · OI_i · multiplier · S² · 0.01, calls +, puts −
+// (currency per 1% move of the underlying), under the white paper's inventory
+// convention that dealers are long the calls customers sold and short the puts
+// customers bought. Gamma from the same pricing model as everything else, at
+// the strike's own chain IV (nearest chain strike's IV outside the chain, the
+// workspace IV when the chain carries none). Call Wall / Put Wall = the strike
+// with the largest call / put gamma·OI; flip = the spot where total GEX
+// re-priced across a grid crosses zero (LuxAlgo's statement of the SpotGamma
+// definition). One expiry at a time — the chain on screen.
+function computeGex({ spot, oiRows, chainRows, iv, dte, P }) {
+  if (!oiRows || oiRows.length < 2 || !(spot > 0) || !(dte > 0)) return null;
+  const r = P.r / 100, model = P.model, mult = P.mult;
+  const ivAt = (K) => {
+    let best = null;
+    for (const c of chainRows || []) {
+      const v = (c.call.iv > 0 && c.put.iv > 0) ? (c.call.iv + c.put.iv) / 2 : (c.call.iv > 0 ? c.call.iv : c.put.iv);
+      if (!(v > 0)) continue;
+      if (!best || Math.abs(c.strike - K) < Math.abs(best.strike - K)) best = { strike: c.strike, iv: v };
+    }
+    return best ? best.iv : (iv > 0 ? iv : null);
+  };
+  const scale = (S) => mult * S * S * 0.01;
+  const rows = [];
+  for (const o of oiRows) {
+    const v = ivAt(o.strike);
+    if (!(v > 0)) continue;
+    const g = bsGreeks('call', spot, o.strike, v, dte, r, model).gamma;
+    const call = g * o.call.oi * scale(spot);
+    const put = -g * o.put.oi * scale(spot);
+    rows.push({ strike: o.strike, iv: v, call, put, net: call + put });
+  }
+  if (!rows.length) return null;
+  const total = rows.reduce((a, x) => a + x.net, 0);
+  const callWall = rows.reduce((a, x) => (x.call > (a ? a.call : 0) ? x : a), null);
+  const putWall = rows.reduce((a, x) => (x.put < (a ? a.put : 0) ? x : a), null);
+  // Flip: total GEX as a function of spot, nearest zero crossing to spot.
+  let flip = null, prev = null;
+  const step = Math.max(P.strikeStep / 2, spot * 0.001);
+  for (let S = spot * 0.9; S <= spot * 1.1; S += step) {
+    let tot = 0;
+    for (const x of rows) {
+      const o = oiRows.find((q) => q.strike === x.strike);
+      const g = bsGreeks('call', S, x.strike, x.iv, dte, r, model).gamma;
+      tot += g * (o.call.oi - o.put.oi) * scale(S);
+    }
+    if (prev && Math.sign(prev.tot) !== Math.sign(tot) && tot !== 0) {
+      const z = prev.S + (S - prev.S) * (prev.tot / (prev.tot - tot));
+      if (flip == null || Math.abs(z - spot) < Math.abs(flip - spot)) flip = z;
+    }
+    prev = { S, tot };
+  }
+  return { rows, total, callWall, putWall, flip };
+}
+
+// Money in the product's currency at the scale GEX comes in: 億 for NT$, M for US$.
+function fmtBig(v, P) {
+  if (v == null || !Number.isFinite(v)) return '—';
+  const big = P.cur === 'NT$' ? 1e8 : 1e6, unit = P.cur === 'NT$' ? '億' : 'M';
+  const a = Math.abs(v) / big;
+  return `${v < 0 ? '−' : ''}${a >= 100 ? a.toFixed(0) : a >= 10 ? a.toFixed(1) : a.toFixed(2)}${unit}`;
+}
+
+// Net GEX by strike, centred on the ATM strike like the OI table: positive
+// (dealers long gamma — they sell rallies and buy dips, damping) grows to the
+// right in call red, negative (short gamma — hedging chases the move) to the
+// left in put teal. Walls and the flip are called out.
+function GexProfile({ P, spot, G, theme = 'dark', light = false, maxRows = 15 }) {
+  const txt = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
+  const rows = G.rows;
+  let ci = 0;
+  for (let i = 1; i < rows.length; i++) if (Math.abs(rows[i].strike - spot) < Math.abs(rows[ci].strike - spot)) ci = i;
+  const half = Math.floor(maxRows / 2);
+  const visible = rows.slice(Math.max(0, ci - half), Math.min(rows.length, ci + half + 1));
+  const maxAbs = Math.max(...visible.map((x) => Math.abs(x.net)), 1e-9);
+  return (
+    <div style={{ width: '100%' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 9, opacity: 0.55, marginBottom: 6, fontWeight: 600, letterSpacing: 0.4 }}>
+        <span style={{ color: LEVEL_COLORS.down }}>− 空 Gamma（追價）</span>
+        <span>履約價 · 淨 GEX / 1%</span>
+        <span style={{ color: LEVEL_COLORS.up }}>+ 多 Gamma（壓抑）</span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {visible.map((x) => {
+          const w = (Math.abs(x.net) / maxAbs) * 100;
+          const pos = x.net >= 0;
+          const isCW = G.callWall && x.strike === G.callWall.strike, isPW = G.putWall && x.strike === G.putWall.strike;
+          const atm = x.strike === rows[ci].strike;
+          return (
+            <div key={x.strike} title={`${x.strike} · Call ${fmtBig(x.call, P)} · Put ${fmtBig(x.put, P)} · IV ${x.iv.toFixed(1)}%`}
+              style={{ display: 'grid', gridTemplateColumns: '1fr 56px 1fr', alignItems: 'center', gap: 6, height: 16, borderRadius: atm ? 4 : 0,
+                background: atm ? 'rgba(240,192,104,0.08)' : 'transparent', border: atm ? '1px solid rgba(240,192,104,0.25)' : '1px solid transparent' }}>
+              <div style={{ position: 'relative', height: 8, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4 }}>
+                {!pos && <span className="tnum" style={{ fontSize: 9, color: isPW ? LEVEL_COLORS.down : txt, fontWeight: isPW ? 700 : 500, fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>{fmtBig(x.net, P)}</span>}
+                {!pos && <div style={{ width: `${w * 0.7}%`, height: 8, borderRadius: '4px 0 0 4px', background: isPW ? LEVEL_COLORS.down : `linear-gradient(270deg, ${LEVEL_COLORS.down}cc, ${LEVEL_COLORS.down}55)` }} />}
+              </div>
+              <div className="tnum" style={{ fontSize: 11, fontFamily: 'var(--font-mono)', textAlign: 'center', fontWeight: (atm || isCW || isPW) ? 700 : 500,
+                color: atm ? '#f7d394' : isCW ? LEVEL_COLORS.up : isPW ? LEVEL_COLORS.down : 'inherit' }}>{x.strike}</div>
+              <div style={{ position: 'relative', height: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
+                {pos && <div style={{ width: `${w * 0.7}%`, height: 8, borderRadius: '0 4px 4px 0', background: isCW ? LEVEL_COLORS.up : `linear-gradient(90deg, ${LEVEL_COLORS.up}cc, ${LEVEL_COLORS.up}55)` }} />}
+                {pos && <span className="tnum" style={{ fontSize: 9, color: isCW ? LEVEL_COLORS.up : txt, fontWeight: isCW ? 700 : 500, fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>{fmtBig(x.net, P)}</span>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 // 關卡價 — the range-derived targets of 自由人's 多空指南針 (一壘 / 二壘 /
 // 三壘 / 全壘 / 場外, above and below). His public description: the app
@@ -1492,7 +1626,7 @@ function LevelTile({ label, hk, value, sub, color, right, light }) {
 // squash the straddle band when a wall sits thousands of points away — the
 // K-line beside it carries the real scale). Each row: price, what it is,
 // distance from spot.
-function LevelsLadder({ P, spot, L, light }) {
+function LevelsLadder({ P, spot, L, G, light }) {
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
   const chg = (v) => (v == null ? '' : `（${v > 0 ? '+' : ''}${v.toLocaleString()}）`);
   const rows = [];
@@ -1503,6 +1637,12 @@ function LevelsLadder({ P, spot, L, light }) {
   }
   rows.push({ price: spot, label: `現價 ${P.code}`, detail: L.straddle != null ? `價平和 ${window.fmtPx(L.straddle, P)} · 價平 ${fmtP(L.atm.strike)}` : '沒有價平權利金', color: LEVEL_COLORS.spot, isSpot: true });
   if (L.support) rows.push({ price: L.support.strike, label: '支撐', detail: `Put OI 最大 ${L.support.oi.toLocaleString()}${chg(L.support.oiChg)}`, color: LEVEL_COLORS.down });
+  if (L.maxPain) rows.push({ price: L.maxPain.strike, label: '最大痛苦點', detail: '買方到期損失最大的結算價', color: LEVEL_COLORS.gex });
+  if (G) {
+    if (G.callWall && G.callWall.call > 0) rows.push({ price: G.callWall.strike, label: 'Call Gamma 牆', detail: `Call γ·OI 最大 ${fmtBig(G.callWall.call, P)}/1%`, color: LEVEL_COLORS.gex });
+    if (G.putWall && G.putWall.put < 0) rows.push({ price: G.putWall.strike, label: 'Put Gamma 牆', detail: `Put γ·OI 最大 ${fmtBig(G.putWall.put, P)}/1%`, color: LEVEL_COLORS.gex });
+    if (G.flip != null) rows.push({ price: G.flip, label: '零 Gamma 翻轉', detail: `以上造市者多 Gamma、以下空 Gamma · 總 GEX ${fmtBig(G.total, P)}`, color: LEVEL_COLORS.gex });
+  }
   rows.sort((a, b) => b.price - a.price);
   const dim = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
   const line = light ? 'rgba(25,40,70,0.18)' : 'rgba(255,255,255,0.12)';
@@ -1536,7 +1676,7 @@ function LevelsLadder({ P, spot, L, light }) {
   );
 }
 
-function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, levels: L, live, market: M, rangeLevels: R, dayBarsLive, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D }) {
+function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, levels: L, live, market: M, rangeLevels: R, dayBarsLive, gex: G, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D }) {
   const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
   const chg = (v) => (v == null ? '' : `（${v > 0 ? '+' : ''}${v.toLocaleString()}）`);
@@ -1557,6 +1697,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
     chartLevels.push({ price: L.atm.strike - L.straddle, label: '價平－和', color: LEVEL_COLORS.band });
   }
   if (L.support) chartLevels.push({ price: L.support.strike, label: '支撐 Put OI最大', color: LEVEL_COLORS.down });
+  if (G && G.flip != null) chartLevels.push({ price: G.flip, label: '零Gamma', color: LEVEL_COLORS.gex });
   // 關卡價: only the two 一壘 lines go on the chart — ten would bury the candles.
   if (R) {
     chartLevels.push({ price: R.up[0].price, label: '一壘↑', color: LEVEL_COLORS.range });
@@ -1602,6 +1743,9 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
           value={t10 ? `${t10.net > 0 ? '+' : ''}${t10.net.toLocaleString()}` : '—'}
           color={t10 ? (t10.net >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down) : undefined}
           sub={t10 ? <>較前日 <Chg v={t10.chg} /></> : noMkt} light={light} />
+        <LevelTile label="預期波動 ±1σ" hk="expmove" color={LEVEL_COLORS.band}
+          value={L.sigma1 != null ? `±${fmtP(Math.round(L.sigma1))}` : '—'}
+          sub={L.sigma1 != null ? <>{fmtP(Math.round(spot - L.sigma1))}–{fmtP(Math.round(spot + L.sigma1))} · IV {L.atmIv.toFixed(1)}% · {expiry.dte}d{L.straddle != null ? ` · 價平和×0.85 ${window.fmtPx(L.straddle * 0.85, P)}` : ''}</> : '沒有 IV'} light={light} />
         <LevelTile label="距一壘" hk="rangelevels" color={LEVEL_COLORS.range}
           value={near1B ? fmtP(near1B.price) : '—'}
           sub={near1B ? <>{near1B.side}方一壘 · 差 <b>{fmtP(Math.abs(near1B.price - spot))}</b> 點</> : (R ? '兩側一壘皆已到達' : '日K不足')} light={light} />
@@ -1616,7 +1760,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
         {/* ladder */}
         <Glass2 tone="panel" padding={D.panelPad} style={{ minWidth: 0 }}>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>}>關卡 · {P.code}</Eyebrow>
-          <LevelsLadder P={P} spot={spot} L={L} light={light} />
+          <LevelsLadder P={P} spot={spot} L={L} G={G} light={light} />
           <div className="mono" style={{ marginTop: 10, fontSize: 9.5, color: dim, display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
             <span>{oiLabel}</span>
             <span>權利金：{isLive ? `● ${liveLabel(live, P)}` : '○ 模擬'}</span>
@@ -1641,6 +1785,15 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
           <Glass2 tone="panel" padding={D.panelPad}>
             <Eyebrow hk="oichg" right={<span className="mono tnum" style={{ fontSize: 9.5, opacity: 0.6 }}>{pcExpiry != null ? `本到期日 P/C ${pcExpiry.toFixed(2)} · ` : ''}{oiLabel}</span>}>各履約價未平倉 · 對前日增減</Eyebrow>
             <OIProfile spot={spot} contract={expiry.type} rows={oiRows} theme={theme} maxRows={15} showChange walls={walls} />
+          </Glass2>
+
+          {/* Dealer gamma exposure by strike (SpotGamma-style), same expiry */}
+          <Glass2 tone="panel" padding={D.panelPad}>
+            <Eyebrow hk="gex" right={<span className="mono tnum" style={{ fontSize: 9.5, opacity: 0.6 }}>{G ? <>總 GEX <b style={{ color: G.total >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down }}>{fmtBig(G.total, P)}</b>/1%{G.flip != null ? ` · 零 Gamma ${fmtP(Math.round(G.flip))}` : ''} · </> : ''}{oiLabel}</span>}>Gamma 曝險 · 各履約價（本到期日）</Eyebrow>
+            {G ? <GexProfile P={P} spot={spot} G={G} theme={theme} light={light} maxRows={15} /> : <div className="mono" style={{ fontSize: 11, color: dim }}>沒有 OI 或 IV，無法計算。</div>}
+            <div className="mono" style={{ marginTop: 8, fontSize: 9.5, color: dim }}>
+              GEX = γ × OI × {P.mult} × S² × 1%，Call 為正、Put 為負（SqueezeMetrics 的造市者存貨慣例：Call 多 Gamma／Put 空 Gamma）。零 Gamma 以上造市者順勢對沖壓抑波動，以下追價放大波動。OI 為前一交易日。
+            </div>
           </Glass2>
         </div>
       </div>
