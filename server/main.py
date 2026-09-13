@@ -14,6 +14,7 @@
   GET /api/oi/{pid}          → ?expiry=YYYYMMDD 的每檔未平倉（TAIFEX 每日行情，見 taifex.py）
   GET /api/market/{pid}      → 籌碼：P/C 比、外資淨未平倉、十大交易人（TAIFEX 每日，見 taifex.py）
   GET /api/top20/{pid}       → 權值股 TOP20：期交所成分股權重 + 證交所日收盤（見 taifex.py）
+  GET /api/intraday/{pid}    → 1 分 K + 成本線 (高+低)/2 + 多空差額（永豐逐筆 tick_type，或期交所逐筆 tick rule 近似）
 
 唯讀行情 + 部位代理：只讀行情與持倉，不下單、不改單（沒有任何下單端點）。
 沒訂閱 CME 即時行情時自動退到 15 分鐘延遲數據（IB_MARKET_DATA_TYPE=3）。
@@ -454,6 +455,29 @@ async def market(pid: str):
     data = await taifex.market()
     if data is None:
         raise HTTPException(503, "TAIFEX daily reports unavailable")
+    return data
+
+
+@app.get("/api/intraday/{pid}")
+async def intraday(pid: str, date: str | None = None):
+    """1-minute bars with 自由人's 成本線 ((session high + low) / 2) and the
+    多空差額 (running 外盤 − 內盤). With a Shioaji session the exchange's own
+    tick_type decides 外盤 / 內盤 (flow: "tick-type"); otherwise TAIFEX's daily
+    tick file with the tick rule (flow: "tick-rule", an approximation).
+    `date` = YYYYMMDD, default the latest available."""
+    spec = _product(pid)
+    if spec.get("oi") != "taifex":
+        raise HTTPException(404, f"no intraday source for {pid!r}")
+    if spec.get("source") == "sinopac" and sinopac.installed():
+        try:
+            exact = await sinopac.intraday(spec, date)
+        except Exception:
+            exact = None
+        if exact:
+            return exact
+    data = await taifex.intraday(date)
+    if data is None:
+        raise HTTPException(503, "no tick file for that date")
     return data
 
 

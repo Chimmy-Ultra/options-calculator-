@@ -367,9 +367,10 @@ const GRID_DEFAULTS = {
     { i: 'ladder', x: 0, y: 4,  w: 4,  h: 19 },
     { i: 'range',  x: 0, y: 23, w: 4,  h: 10 },
     { i: 'kline',  x: 4, y: 4,  w: 8,  h: 14 },
-    { i: 'oi',     x: 4, y: 18, w: 8,  h: 10 },
-    { i: 'top20',  x: 4, y: 28, w: 8,  h: 8 },
-    { i: 'gex',    x: 4, y: 36, w: 8,  h: 11 },
+    { i: 'oi',       x: 4, y: 18, w: 8,  h: 10 },
+    { i: 'intraday', x: 4, y: 28, w: 8,  h: 12 },
+    { i: 'top20',    x: 4, y: 40, w: 8,  h: 8 },
+    { i: 'gex',      x: 4, y: 48, w: 8,  h: 11 },
   ],
   chart: [{ i: 'kline', x: 0, y: 0, w: 12, h: 19 }],
   chain: [
@@ -418,6 +419,7 @@ function Obsidian3() {
   const [oiData, setOiData] = uS(null);     // per-strike OI for the current expiry (TAIFEX via proxy; products with oiSource)
   const [marketData, setMarketData] = uS(null); // daily positioning (P/C ratio, 外資, top-10) — same source
   const [top20Data, setTop20Data] = uS(null);   // 權值股 TOP20: TAIFEX index weights + TWSE daily quotes
+  const [intradayData, setIntradayData] = uS(null); // 1-min bars + 成本線 + 多空差額 (Shioaji ticks live, TAIFEX tick file otherwise)
   const [lastLiveAt, setLastLiveAt] = uS(null); // ② timestamp of last successful live fetch
   const [liveBars, setLiveBars] = uS(null); // 近月期貨的 IB 歷史 K
   const [liveDayBars, setLiveDayBars] = uS(null); // daily 日盤 bars regardless of the K-line toggles — the 關卡價 input
@@ -545,6 +547,12 @@ function Obsidian3() {
         if (!dead && t && t.rows && t.rows.length) setTop20Data(t);
       })();
     }
+    if (P.oiSource === 'taifex' && window.LiveData.intraday) {
+      (async () => {
+        const it = await window.LiveData.intraday(P.id);
+        if (!dead && it && it.day && it.day.bars && it.day.bars.length) setIntradayData(it);
+      })();
+    }
     return () => { dead = true; };
   }, [productId]);
 
@@ -595,11 +603,18 @@ function Obsidian3() {
       if (chain.underlying && chain.underlying.price > 0) setSpot(chain.underlying.price);
       setLastLiveAt(Date.now());
     };
+    const pullIntraday = async () => {
+      if (document.hidden || !window.LiveData.intraday || (live.health && live.health.source === 'eod')) return;
+      const it = await window.LiveData.intraday(P.id);
+      if (dead || !it || !it.day || !it.day.bars || !it.day.bars.length) return;
+      setIntradayData(it);
+    };
     const qId = setInterval(pullQuote, 10000);
     const cId = setInterval(pullChain, 30000);
+    const iId = setInterval(pullIntraday, 60000);
     const onVis = () => { if (!document.hidden) { pullQuote(); pullChain(); } };
     document.addEventListener('visibilitychange', onVis);
-    return () => { dead = true; clearInterval(qId); clearInterval(cId); document.removeEventListener('visibilitychange', onVis); };
+    return () => { dead = true; clearInterval(qId); clearInterval(cId); clearInterval(iId); document.removeEventListener('visibilitychange', onVis); };
   }, [live, productId, expiryId]);
 
   // IB live：K 線依所選週期抓歷史 K 棒。剛連上 + 每次換週期都會重抓；
@@ -826,7 +841,7 @@ function Obsidian3() {
       {workspace === 'levels' && (
         <LevelsWorkspace
           P={P} theme={theme} light={light} spot={spot} expiry={expiry} levels={levels} live={live} market={marketData}
-          rangeLevels={rangeLevels} dayBarsLive={!!liveDayBars} gex={gex} grid={grid} top20={top20Data}
+          rangeLevels={rangeLevels} dayBarsLive={!!liveDayBars} gex={gex} grid={grid} top20={top20Data} intraday={intradayData}
           bars={bars} barsLive={!!liveBars} barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
           barSession={barSession} setBarSession={setBarSession}
           D={D}
@@ -1542,7 +1557,7 @@ function LevelTile({ label, hk, value, sub, color, right, light }) {
 // squash the straddle band when a wall sits thousands of points away — the
 // K-line beside it carries the real scale). Each row: price, what it is,
 // distance from spot.
-function LevelsLadder({ P, spot, L, G, light }) {
+function LevelsLadder({ P, spot, L, G, costLine = null, light }) {
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
   const chg = (v) => (v == null ? '' : `（${v > 0 ? '+' : ''}${v.toLocaleString()}）`);
   const rows = [];
@@ -1554,6 +1569,7 @@ function LevelsLadder({ P, spot, L, G, light }) {
   rows.push({ price: spot, label: `現價 ${P.code}`, detail: L.straddle != null ? `價平和 ${window.fmtPx(L.straddle, P)} · 價平 ${fmtP(L.atm.strike)}` : '沒有價平權利金', color: LEVEL_COLORS.spot, isSpot: true });
   if (L.support) rows.push({ price: L.support.strike, label: '支撐', detail: `Put OI 最大 ${L.support.oi.toLocaleString()}${chg(L.support.oiChg)}`, color: LEVEL_COLORS.down });
   if (L.maxPain) rows.push({ price: L.maxPain.strike, label: '最大痛苦點', detail: '買方到期損失最大的結算價', color: LEVEL_COLORS.gex });
+  if (costLine != null) rows.push({ price: costLine.price, label: '成本線', detail: `（${costLine.running ? '今' : '前'}高 + 低）÷ 2 · 上多下空`, color: LEVEL_COLORS.spot });
   if (G) {
     if (G.callWall && G.callWall.call > 0) rows.push({ price: G.callWall.strike, label: 'Call Gamma 牆', detail: `Call γ·OI 最大 ${fmtBig(G.callWall.call, P)}/1%`, color: LEVEL_COLORS.gex });
     if (G.putWall && G.putWall.put < 0) rows.push({ price: G.putWall.strike, label: 'Put Gamma 牆', detail: `Put γ·OI 最大 ${fmtBig(G.putWall.put, P)}/1%`, color: LEVEL_COLORS.gex });
@@ -1588,6 +1604,74 @@ function LevelsLadder({ P, spot, L, G, light }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// 當日走勢 — the 多空指南針 main screen in one panel: 1-minute closes with
+// the 成本線 stepping on every new session high / low ((high + low) / 2),
+// the open line, and below it the 多空差額 (running 外盤 − 內盤) with each
+// minute's net as bars. Data: Shioaji ticks (real tick_type) when a session
+// is connected, otherwise TAIFEX's daily tick file with the tick rule — the
+// header says which. 日盤 / 夜盤 toggle when the file carries both.
+function IntradayPanel({ I, P, light = false }) {
+  const [sess, setSess] = React.useState('day');
+  const dim = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
+  if (!I || !I.day || !I.day.bars || !I.day.bars.length) return <div className="mono" style={{ fontSize: 11, color: dim }}>沒有逐筆資料（期交所逐筆檔或永豐逐筆）。</div>;
+  const S = (sess === 'night' && I.night && I.night.bars && I.night.bars.length) ? I.night : I.day;
+  const bars = S.bars;
+  const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  const W = 760, H = 250, pTop = 10, pBot = 144, fTop = 174, fBot = 240, padR = 58, plotW = W - padR;
+  const n = bars.length;
+  const x = (i) => (i + 0.5) * (plotW / n);
+  const pMin = Math.min(...bars.map((b) => b[3])), pMax = Math.max(...bars.map((b) => b[2]));
+  const y = (p) => pTop + ((pMax - p) / Math.max(pMax - pMin, 1)) * (pBot - pTop);
+  const cums = bars.map((b) => b[8]); const nets = bars.map((b) => b[7]);
+  const fMin = Math.min(0, ...cums), fMax = Math.max(0, ...cums);
+  const fy = (v) => fTop + ((fMax - v) / Math.max(fMax - fMin, 1)) * (fBot - fTop);
+  const netMax = Math.max(...nets.map(Math.abs), 1);
+  const last = bars[n - 1];
+  const open = bars[0][1];
+  const closeCol = last[4] >= open ? LEVEL_COLORS.up : LEVEL_COLORS.down;
+  const cumCol = last[8] >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down;
+  const closePts = bars.map((b, i) => `${x(i).toFixed(1)},${y(b[4]).toFixed(1)}`).join(' ');
+  // cost line as steps: horizontal at the minute's value, vertical at changes
+  let costPath = '';
+  bars.forEach((b, i) => { const X0 = (i * plotW / n).toFixed(1), X1 = ((i + 1) * plotW / n).toFixed(1), Y = y(b[6]).toFixed(1); costPath += (i === 0 ? `M${X0},${Y}` : ` L${X0},${Y}`) + ` L${X1},${Y}`; });
+  const cumPts = bars.map((b, i) => `${x(i).toFixed(1)},${fy(b[8]).toFixed(1)}`).join(' ');
+  const txt = dim, grid = light ? 'rgba(20,30,50,0.12)' : 'rgba(255,255,255,0.10)';
+  const ticks = [];
+  for (let i = 0; i < n; i++) if (bars[i][0].slice(2) === '00' || bars[i][0] === '0845') ticks.push(i);
+  const tag = (Y, label, col) => (<g><rect x={plotW + 2} y={Y - 6.5} width={54} height={13} fill={col} /><text x={plotW + 29} y={Y + 3} fontSize="9" fontWeight="700" fill="#fff" textAnchor="middle">{label}</text></g>);
+  return (
+    <div>
+      <div className="mono tnum" style={{ display: 'flex', gap: 14, alignItems: 'center', fontSize: 11, marginBottom: 4, flexWrap: 'wrap' }}>
+        <span>成交價 <b style={{ color: closeCol, fontSize: 14 }}>{fmtP(last[4])}</b> <Chg v={last[4] - open} fmt={fmtP} /> <span style={{ color: dim }}>對開盤</span></span>
+        <span>成本價 <b style={{ color: LEVEL_COLORS.spot, fontSize: 14 }}>{fmtP(Math.floor(S.cost + 0.5))}</b> <span style={{ color: dim }}>高 {fmtP(S.high)} 低 {fmtP(S.low)}</span></span>
+        <span>多空差額 <b style={{ color: cumCol, fontSize: 14 }}>{last[8] > 0 ? '+' : ''}{last[8].toLocaleString()}</b> <span style={{ color: dim }}>外 {S.buy.toLocaleString()} 內 {S.sell.toLocaleString()}</span></span>
+        <span style={{ color: dim }}>本分鐘淨量 <Chg v={last[7]} /></span>
+        {I.night && I.night.bars && I.night.bars.length > 0 && <span style={{ marginLeft: 'auto' }}><Seg items={[{ id: 'day', label: '日盤' }, { id: 'night', label: '夜盤' }]} value={sess} onChange={setSess} /></span>}
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: 'block', fontFamily: 'var(--font-mono)' }}>
+        {[0.2, 0.5, 0.8].map((f, i) => { const p = pMin + f * (pMax - pMin); return <g key={i}><line x1="0" x2={plotW} y1={y(p)} y2={y(p)} stroke={grid} strokeDasharray="2 4" /><text x={plotW + 6} y={y(p) + 3} fontSize="9" fill={txt}>{fmtP(p)}</text></g>; })}
+        {ticks.map((i) => <text key={i} x={x(i)} y={pBot + 10} fontSize="8.5" fill={txt} textAnchor="middle">{bars[i][0].slice(0, 2)}:{bars[i][0].slice(2)}</text>)}
+        <line x1="0" x2={plotW} y1={y(open)} y2={y(open)} stroke={txt} strokeWidth="0.8" strokeDasharray="4 3" />
+        <text x="3" y={y(open) - 3} fontSize="8.5" fill={txt}>開 {fmtP(open)}</text>
+        <polyline points={closePts} fill="none" stroke={closeCol} strokeWidth="1.3" strokeLinejoin="round" />
+        <path d={costPath} fill="none" stroke={LEVEL_COLORS.spot} strokeWidth="1.5" />
+        {tag(y(last[4]), fmtP(last[4]), closeCol)}
+        {Math.abs(y(S.cost) - y(last[4])) > 13 && tag(y(S.cost), `成${fmtP(Math.floor(S.cost + 0.5))}`, LEVEL_COLORS.spot)}
+        <text x="3" y={fTop - 5} fontSize="9" fontWeight="600" fill={txt}>多空差額（累計 外盤－內盤）</text>
+        <line x1="0" x2={plotW} y1={fy(0)} y2={fy(0)} stroke={grid} />
+        {bars.map((b, i) => { const h = Math.abs(b[7]) / netMax * 22; return <rect key={i} x={x(i) - (plotW / n) * 0.35} y={b[7] >= 0 ? fy(0) - h : fy(0)} width={(plotW / n) * 0.7} height={Math.max(h, 0.4)} fill={b[7] >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down} fillOpacity="0.55" />; })}
+        <polyline points={cumPts} fill="none" stroke={LEVEL_COLORS.spot} strokeWidth="1.4" strokeLinejoin="round" />
+        {Math.abs(fy(fMax) - fy(last[8])) > 12 && <text x={plotW + 6} y={fy(fMax) + 3} fontSize="9" fill={txt}>{fMax.toLocaleString()}</text>}
+        {Math.abs(fy(fMin) - fy(last[8])) > 12 && <text x={plotW + 6} y={fy(fMin) + 3} fontSize="9" fill={txt}>{fMin.toLocaleString()}</text>}
+        {tag(fy(last[8]), `${last[8] > 0 ? '+' : ''}${last[8].toLocaleString()}`, cumCol)}
+      </svg>
+      <div className="mono" style={{ marginTop: 6, fontSize: 9.5, color: dim }}>
+        成本線＝（當節最高＋最低）÷2，自由人公式，逢新高新低才移動 · 多空差額＝每分鐘（外盤量－內盤量）累計{I.flow === 'tick-type' ? '，內外盤依交易所成交別' : '，此處以 tick rule（上漲成交＝外盤、下跌＝內盤）近似，非交易所內外盤'}
+      </div>
     </div>
   );
 }
@@ -1635,7 +1719,7 @@ function Top20Panel({ T, light = false }) {
   );
 }
 
-function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, levels: L, live, market: M, rangeLevels: R, dayBarsLive, gex: G, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D, grid, top20: T }) {
+function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, levels: L, live, market: M, rangeLevels: R, dayBarsLive, gex: G, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D, grid, top20: T, intraday: I }) {
   const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
   const chg = (v) => (v == null ? '' : `（${v > 0 ? '+' : ''}${v.toLocaleString()}）`);
@@ -1671,6 +1755,10 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
     return cands.reduce((a, b) => (Math.abs(a.price - spot) <= Math.abs(b.price - spot) ? a : b));
   })();
   const rangeSource = dayBarsLive ? `● ${liveLabel(live, P)} 日K` : '○ 模擬日K';
+  // 成本線 (自由人): (session high + session low) / 2, rounded half up — steps
+  // whenever the session prints a new high or low. Same base as 關卡價.
+  const cost = R ? Math.floor((R.base.high + R.base.low) / 2 + 0.5) : null;
+  if (cost != null) chartLevels.push({ price: cost, label: '成本', color: LEVEL_COLORS.spot });
   // OI table centered on the strike nearest spot, walls highlighted.
   let atmK = null;
   for (const r of L.oiRows) if (atmK == null || Math.abs(r.strike - spot) < Math.abs(atmK - spot)) atmK = r.strike;
@@ -1702,6 +1790,9 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
         <LevelTile label="預期波動 ±1σ" hk="expmove" color={LEVEL_COLORS.band}
           value={L.sigma1 != null ? `±${fmtP(Math.round(L.sigma1))}` : '—'}
           sub={L.sigma1 != null ? <>{fmtP(Math.round(spot - L.sigma1))}–{fmtP(Math.round(spot + L.sigma1))} · IV {L.atmIv.toFixed(1)}% · {expiry.dte} 天{L.straddle != null ? ` · 價平和×0.85 ${window.fmtPx(L.straddle * 0.85, P)}` : ''}</> : '沒有 IV'} light={light} />
+        <LevelTile label="成本價" hk="costline" color={LEVEL_COLORS.spot}
+          value={cost != null ? fmtP(cost) : '—'}
+          sub={R ? <>{R.base.running ? '今' : '前'}高 {fmtP(R.base.high)} ＋ 低 {fmtP(R.base.low)} ÷ 2 · 現價{spot >= cost ? '在上' : '在下'} <Chg v={spot - cost} fmt={(x) => fmtP(x)} /></> : '日K不足'} light={light} />
         <LevelTile label="距一壘" hk="rangelevels" color={LEVEL_COLORS.range}
           value={near1B ? fmtP(near1B.price) : '—'}
           sub={near1B ? <>{near1B.side}方一壘 · 差 <b>{fmtP(Math.abs(near1B.price - spot))}</b> 點</> : (R ? '兩側一壘皆已到達' : '日K不足')} light={light} />
@@ -1716,7 +1807,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
       body: <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>{tiles}</div> },
     { i: 'ladder', title: `關卡 · ${P.nameZh || P.name}`, right: gridCap(expCap(expiry)),
       body: (<>
-        <LevelsLadder P={P} spot={spot} L={L} G={G} light={light} />
+        <LevelsLadder P={P} spot={spot} L={L} G={G} costLine={cost != null ? { price: cost, running: R.base.running } : null} light={light} />
         <div className="mono" style={{ marginTop: 8, fontSize: 9.5, color: dim, display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
           <span>{oiLabel}</span>
           <span>權利金：{isLive ? `● ${liveLabel(live, P)}` : '○ 模擬'}</span>
@@ -1730,6 +1821,9 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
               cone={L.atmIv ? { ivPct: L.atmIv, days: expiry.dte, label: expiry.label } : null} /> },
     { i: 'oi', title: '各履約價未平倉 · 對前日增減', hk: 'oichg', right: gridCap(`${pcExpiry != null ? `本到期日 P/C ${pcExpiry.toFixed(2)} · ` : ''}${oiLabel}`),
       body: <OIProfile spot={spot} contract={expiry.type} rows={oiRows} theme={theme} maxRows={15} showChange walls={walls} /> },
+    { i: 'intraday', title: <>{I && I.night ? '' : ''}當日走勢 · 成本線 · 多空差額</>, hk: 'intraday',
+      right: gridCap(I ? `${I.flow === 'tick-type' ? '永豐逐筆 · 內外盤' : '期交所逐筆 · tick rule 近似內外盤'} · ${I.date.slice(4, 6)}/${I.date.slice(6)} ${I.month}` : ''),
+      body: <IntradayPanel I={I} P={P} light={light} /> },
     { i: 'top20', title: '權值股 TOP20 · 當日漲跌', hk: 'top20',
       right: gridCap(T ? `權重 期交所 ${T.weightsDate} · 行情 證交所 ${T.date.slice(0, 4)}/${T.date.slice(4, 6)}/${T.date.slice(6)}` : ''),
       body: <Top20Panel T={T} light={light} /> },

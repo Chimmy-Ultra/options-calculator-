@@ -383,3 +383,42 @@ The app labels this: "一壘＝驗證自由人公式；其餘為本站統計定�
 screenshots (any day, both lists visible) would pin down the rest — the
 matching scripts live in the session scratchpad (`re/find_dates.py`,
 `re/consistent.py`).
+
+## 8. 成本線 / 多空差額 / 五大盤型 — what could be pinned down (2026-09-13)
+
+**成本線 = (當節最高 + 當節最低) ÷ 2.** 自由人's own Facebook post
+(多空指南針APP 主力成本線篇, freeman1688) states "成本線原理：（最高價＋最低價）／2".
+Checked against the three dated screenshots with TAIFEX's TX history:
+
+| Screenshot | Session high / low | (H + L) ÷ 2 | His 成本價 |
+|---|---|---|---|
+| PC 2023/06/09 ~11:10 (day) | 16888 / 16785 | 16836.5 | 16837 |
+| APP 2024/08/28 10:36 (day, running) | 22211 / 22048 (both labelled on his chart) | 22129.5 | 22130 |
+| APP 2024/08/28 evening (夜盤) | 22315 / 22066 | 22190.5 | 22191 |
+
+All three round half up. The line only moves when a new session high or low
+prints, which is why it draws as a staircase and "位移 on 大量突破/跌破".
+
+**多空差額 = Σ per minute (外盤量 − 內盤量).** His per-minute table
+(PC screenshot, 10:54–11:12) adds up exactly: red rows add the minute's lots
+to the running total, green rows subtract them (11377 − 292 = 11085,
+− 194 = 10891, − 114 = 10777 … + 134 = 10420 …). The 外盤 / 內盤 split
+needs the trade's side: Shioaji ticks carry the exchange's `tick_type`
+(1 = 外盤, 2 = 內盤); TAIFEX's daily tick file has no bid / ask, so the
+proxy's TAIFEX path uses the tick rule (uptick = 外盤, downtick = 內盤,
+unchanged inherits) and labels it `flow: "tick-rule"`. **Not verified
+against his numbers** — that needs ticks for a day we have a screenshot of.
+The thermometer's two numbers (13269 / 11922) and 紅K量 (1347 = their
+difference) are consistent with "current total / total before this minute /
+this minute's net", but that is a reading of one screenshot, not a rule.
+
+**五大盤型** (長紅K突破 / 長黑K突破 / V轉紅K / A轉黑K / 盤整抓轉折): only the
+names and the 1-minute-K framing are public (his books, CMoney course
+blurbs); no recognition thresholds are published. Not implemented as an
+auto-tagger — anything built would be this site's own definition.
+
+Data note: TAIFEX keeps only about two weeks of `Daily_YYYY_MM_DD.zip`
+(2026/09/01 was the oldest that answered; 08/15 and earlier redirect). The
+2023 / 2024 screenshot days can only be validated with a broker's historical
+ticks (Shioaji `api.ticks(contract, date)`), which needs the owner's API key
+on a machine that can reach api.sinotrade.com.tw.

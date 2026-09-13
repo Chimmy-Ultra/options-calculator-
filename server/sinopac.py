@@ -366,3 +366,99 @@ async def positions(spec: dict):
     certificate, which read-only research deliberately does not set up.
     Returns an empty list so the frontend just shows "no positions"."""
     return {"positions": []}
+
+
+# ── Intraday: 成本線 + 多空差額 from Shioaji ticks ─────────────────────────────
+# The exact version of taifex.intraday(): the exchange's own tick_type says
+# whether each trade hit the ask (外盤, 1) or the bid (內盤, 2), so 多空差額 is
+# the real Σ(外盤 − 內盤) per minute rather than the tick-rule approximation.
+# Front-month TXF contract; `day` = YYYYMMDD, default today. Written against
+# shioaji 1.7.5's api.ticks(contract, date) signature (Ticks: ts / close /
+# volume / tick_type lists); a build without tick_type falls back to the
+# tick rule and says so in `flow`. Not exercised in this container — it has
+# no credentials and cannot reach api.sinotrade.com.tw.
+
+def _front_future(spec: dict):
+    fut = spec.get("underlyingFuture", "TXF")
+    group = getattr(_api.Contracts.Futures, fut, None)
+    if not group:
+        return None
+    # the R1 / R2 continuous codes come first in Shioaji's list; pick the nearest dated month
+    dated = [c for c in group if getattr(c, "delivery_month", "") and c.code and not c.code.endswith(("R1", "R2"))]
+    dated.sort(key=lambda c: c.delivery_month)
+    return dated[0] if dated else group[0]
+
+
+def _series_from_ticks(times: list, prices: list, lots: list, types: list | None) -> dict:
+    """Same shape as taifex._minute_series: bars [hhmm, o, h, l, c, lots, cost, net, cum]."""
+    bars: list = []
+    hi = lo = None
+    prev_px = None
+    sign = 0
+    cur = None
+    buy = sell = 0
+    for i, (t, px, q) in enumerate(zip(times, prices, lots)):
+        hi = px if hi is None else max(hi, px)
+        lo = px if lo is None else min(lo, px)
+        if types is not None:
+            tt = types[i]
+            side = 1 if tt == 1 else -1 if tt == 2 else 0
+        else:
+            if prev_px is not None and px != prev_px:
+                sign = 1 if px > prev_px else -1
+            side = sign
+        prev_px = px
+        if side > 0:
+            buy += q
+        elif side < 0:
+            sell += q
+        m = t[:4]
+        if cur is None or cur[0] != m:
+            cur = [m, px, px, px, px, 0, 0.0, 0, 0]
+            bars.append(cur)
+        cur[2] = max(cur[2], px)
+        cur[3] = min(cur[3], px)
+        cur[4] = px
+        cur[5] += q
+        cur[6] = (hi + lo) / 2
+        cur[7] += side * q
+    cum = 0
+    for b in bars:
+        cum += b[7]
+        b[8] = cum
+    return {"bars": bars, "high": hi, "low": lo, "cost": (hi + lo) / 2 if hi is not None else None,
+            "buy": buy, "sell": sell, "net": buy - sell}
+
+
+async def intraday(spec: dict, day: str | None = None):
+    async with _lock:
+        if not await ensure_connected():
+            return None
+
+        def work():
+            fut = _front_future(spec)
+            if fut is None:
+                return None
+            d = day or datetime.now().strftime("%Y%m%d")
+            iso = f"{d[:4]}-{d[4:6]}-{d[6:]}"
+            t = _api.ticks(contract=fut, date=iso)
+            ts = list(getattr(t, "ts", []) or [])
+            if not ts:
+                return None
+            closes = [float(x) for x in t.close]
+            vols = [int(x) for x in t.volume]
+            types = list(t.tick_type) if getattr(t, "tick_type", None) else None
+            # ts = epoch nanoseconds (Shioaji), exchange local time
+            times = [datetime.fromtimestamp(int(x) / 1e9).strftime("%H%M%S") for x in ts]
+            rows = list(zip(times, closes, vols, types if types else [None] * len(ts)))
+            day_rows = [r for r in rows if "084500" <= r[0] <= "134500"]
+            night_rows = [r for r in rows if r[0] >= "150000" or r[0] < "050000"]
+            def build(rs):
+                if not rs:
+                    return None
+                return _series_from_ticks([r[0] for r in rs], [r[1] for r in rs], [r[2] for r in rs],
+                                          [r[3] for r in rs] if types else None)
+            return {"source": "sinopac-ticks", "flow": "tick-type" if types else "tick-rule",
+                    "symbol": spec.get("underlyingFuture", "TXF"), "date": d, "month": getattr(fut, "delivery_month", None),
+                    "day": build(day_rows), "night": build(night_rows)}
+        return await asyncio.to_thread(work)

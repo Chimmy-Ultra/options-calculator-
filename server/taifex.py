@@ -35,6 +35,8 @@ MIS_URL = "https://mis.taifex.com.tw/futures/api/getQuoteList"
 # 權值股 TOP20: TAIFEX's monthly TAIEX constituent-weight table + TWSE's daily closing table.
 WEIGHTS_URL = "https://www.taifex.com.tw/cht/9/futuresQADetail"
 TWSE_MI_URL = "https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX"
+# Every trade of one day, all products (TAIFEX keeps roughly the last two weeks).
+TICK_ZIP_URL = "https://www.taifex.com.tw/file/taifex/Dailydownload/DailydownloadCSV/Daily_{y}_{m}_{d}.zip"
 RISK_FREE_TW = float(os.environ.get("RISK_FREE_TW", "0.015"))
 WINDOW_DAYS = 7          # calendar days back — enough for 2 trading days across holidays
 CACHE_TTL_S = 15 * 60.0
@@ -499,6 +501,128 @@ async def top20(n: int = 20):
     return data
 
 
+# ── Intraday: 成本線 + 多空差額 from the exchange's own tick file ────────────
+# 自由人's 成本線 is (session high + session low) / 2 — his FB post "主力成本線
+# 篇" states the formula, and it reproduces three dated screenshots to the
+# point (docs/daytrade-redesign.md §8). 多空差額 is the running sum of each
+# minute's 外盤量 − 內盤量 (the arithmetic of his per-minute table checks out).
+# TAIFEX's tick file has no bid / ask, so here 外盤 / 內盤 is the tick rule
+# (an uptick trades at the ask, a downtick at the bid, an unchanged price
+# inherits) — an approximation, labelled `flow: "tick-rule"`; the Shioaji path
+# in sinopac.py uses the exchange's real tick_type when a session is connected.
+
+def _fetch_tick_zip(day: date) -> bytes | None:
+    """The day's Daily_YYYY_MM_DD.zip, or None when TAIFEX has no file (it
+    answers a redirect to an HTML page instead of the archive)."""
+    url = TICK_ZIP_URL.format(y=day.year, m=f"{day.month:02d}", d=f"{day.day:02d}")
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=120) as r:
+        raw = r.read()
+    return raw if raw[:2] == b"PK" else None
+
+
+def _parse_ticks(raw_zip: bytes, symbol: str = FUT_COMMODITY) -> dict:
+    """Front-month ticks of `symbol` from the archive: {date, month,
+    day: [(hhmmss, price, lots)], night: [...]} — the day session of the file's
+    trading date and the night session booked before it (dated the previous
+    calendar day). Lots = 成交數量(B+S) / 2. Front month = the outright month
+    with the most day-session lots."""
+    import zipfile
+    zf = zipfile.ZipFile(io.BytesIO(raw_zip))
+    name = next(n for n in zf.namelist() if n.lower().endswith(".csv"))
+    text = zf.read(name).decode("big5", "replace")
+    rows = []
+    for line in text.splitlines()[1:]:
+        p = [x.strip() for x in line.split(",")]
+        if len(p) < 6 or p[1] != symbol or "/" in p[2]:
+            continue
+        rows.append((p[0], p[2], p[3], float(p[4]), int(p[5]) // 2))
+    if not rows:
+        raise ValueError(f"no {symbol} ticks in file")
+    trade_date = max(r[0] for r in rows)
+    day_rows = [r for r in rows if r[0] == trade_date and "084500" <= r[2] <= "134500"]
+    by_month: dict = {}
+    for r in day_rows:
+        by_month[r[1]] = by_month.get(r[1], 0) + r[4]
+    month = max(by_month, key=by_month.get)
+    day = [(r[2], r[3], r[4]) for r in day_rows if r[1] == month]
+    night = [(r[2], r[3], r[4]) for r in rows if r[1] == month and r[0] != trade_date]
+    return {"date": trade_date, "month": month, "day": day, "night": night}
+
+
+def _minute_series(ticks: list) -> dict:
+    """1-minute bars with the running 成本線 and the tick-rule 多空差額.
+    bars: [hhmm, o, h, l, c, lots, cost, net, cum]; cost = (running high +
+    running low) / 2 at the end of the minute; net = the minute's 外盤 − 內盤
+    lots; cum = the running sum."""
+    bars: list = []
+    hi = lo = None
+    prev_px = None
+    sign = 0
+    cur = None
+    buy = sell = 0
+    for t, px, q in ticks:
+        hi = px if hi is None else max(hi, px)
+        lo = px if lo is None else min(lo, px)
+        if prev_px is not None and px != prev_px:
+            sign = 1 if px > prev_px else -1
+        prev_px = px
+        if sign > 0:
+            buy += q
+        elif sign < 0:
+            sell += q
+        m = t[:4]
+        if cur is None or cur[0] != m:
+            cur = [m, px, px, px, px, 0, 0.0, 0, 0]
+            bars.append(cur)
+        cur[2] = max(cur[2], px)
+        cur[3] = min(cur[3], px)
+        cur[4] = px
+        cur[5] += q
+        cur[6] = (hi + lo) / 2
+        cur[7] += sign * q
+    cum = 0
+    for b in bars:
+        cum += b[7]
+        b[8] = cum
+    return {"bars": bars, "high": hi, "low": lo, "cost": (hi + lo) / 2 if hi is not None else None,
+            "buy": buy, "sell": sell, "net": buy - sell}
+
+
+async def intraday(day: str | None = None, days_back: int = 10):
+    """成本線 / 多空差額 series for the latest day TAIFEX has a tick file for
+    (or the given YYYYMMDD). None when no file could be found."""
+    key = f"intraday:{day or 'latest'}"
+    hit = _cache.get(key)
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+
+    def work():
+        start = datetime.strptime(day, "%Y%m%d").date() if day else date.today()
+        for back in range(days_back if not day else 1):
+            d = start - timedelta(days=back)
+            if d.weekday() >= 5:
+                continue
+            try:
+                raw = _fetch_tick_zip(d)
+            except Exception:
+                raw = None
+            if raw is None:
+                continue
+            parsed = _parse_ticks(raw)
+            out = {"source": "taifex-ticks", "flow": "tick-rule", "symbol": FUT_COMMODITY,
+                   "date": parsed["date"], "month": parsed["month"],
+                   "day": _minute_series(parsed["day"]),
+                   "night": _minute_series(parsed["night"]) if parsed["night"] else None}
+            return out
+        return None
+
+    data = await asyncio.to_thread(work)
+    if data is not None:
+        _cache[key] = (time.monotonic() + CACHE_TTL_S, data)
+    return data
+
+
 # ── End-of-day snapshot ─────────────────────────────────────────────────────
 # Everything the frontend needs for the previous session, from TAIFEX alone:
 # index close (MIS quote list), per-strike close / best bid-ask / settlement /
@@ -592,6 +716,11 @@ async def build_snapshot(product_id: str = "txo", n_expiries: int = 5, strike_pc
     bars = await asyncio.to_thread(_fetch_bars)
     mkt = await market()
     t20 = await top20()
+    intra = None
+    try:
+        intra = await intraday()
+    except Exception:
+        intra = None
     spot = idx["price"]
     data_date = max(d for e in tbl.values() for d in e["dates"])          # yyyy/mm/dd
     asof = data_date.replace("/", "")
@@ -647,6 +776,7 @@ async def build_snapshot(product_id: str = "txo", n_expiries: int = 5, strike_pc
         "bars": bars["day"], "barsFull": bars["full"],
         "market": mkt,
         "top20": t20,
+        "intraday": intra,
     }
 
 
@@ -664,7 +794,8 @@ def main(argv):
     print(f"snapshot {snap['date']} (prev {snap['prevDate']}) spot {snap['spot']['price']} "
           f"expiries {[e['id'] for e in snap['expiries']]} chain rows {[len(c['rows']) for c in snap['chains'].values()]} "
           f"bars {len(snap['bars'])} day / {len(snap['barsFull'])} full; market {sorted((snap['market'] or {}).keys())}; "
-          f"top20 {len((snap.get('top20') or {}).get('rows') or [])} rows -> {len(text) // 1024} KB")
+          f"top20 {len((snap.get('top20') or {}).get('rows') or [])} rows; "
+          f"intraday {((snap.get('intraday') or {}).get('date'))} {len(((snap.get('intraday') or {}).get('day') or {}).get('bars') or [])} min -> {len(text) // 1024} KB")
     if out:
         with open(out, "w", encoding="utf-8") as f:
             f.write(text)

@@ -88,6 +88,8 @@
     market: (pid) => get('/api/market/' + encodeURIComponent(pid), 15000),
     // { source, weightsDate, date, rows: [{ rank, code, name, weight, close, chg, chgPct, open, high, low, vol }] } | null
     top20: (pid) => get('/api/top20/' + encodeURIComponent(pid), 15000),
+    // { source, flow: 'tick-type' | 'tick-rule', date, month, day: { bars: [[hhmm,o,h,l,c,lots,cost,net,cum]…], high, low, cost, buy, sell, net }, night } | null
+    intraday: (pid) => get('/api/intraday/' + encodeURIComponent(pid), 20000),
   };
   // health.source 'eod' + a label tells the top bar what it is showing; no proxy ⇒ never "STALE".
   const fallback = {};
@@ -120,6 +122,7 @@
   fallback.oi = async (pid, expiry) => { const s = eod(pid); return s ? eodOi(s, expiry) : null; };
   fallback.market = async (pid) => { const s = eod(pid); return (s && s.market) || null; };
   fallback.top20 = async (pid) => { const s = eod(pid); return (s && s.top20) || null; };
+  fallback.intraday = async (pid) => { const s = eod(pid); return (s && s.intraday) || null; };
 
   // Proxy first; the snapshot only answers when the proxy could not.
   window.LiveData = {};
