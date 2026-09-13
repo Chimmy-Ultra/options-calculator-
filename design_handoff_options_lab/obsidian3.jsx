@@ -836,6 +836,7 @@ function Obsidian3() {
           P={P} bars={bars} barsLive={!!liveBars} live={live} theme={theme} light={light}
           barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
           barSession={barSession} setBarSession={setBarSession}
+          cone={levels.atmIv ? { ivPct: levels.atmIv, days: expiry.dte, label: expiry.label } : null}
           D={D}
         />
       )}
@@ -1778,7 +1779,8 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
               台指期 {barSession === 'full' ? '全日盤' : '日盤'} 日K · 關卡疊圖
               <span style={{ color: dim, fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· {barsLive ? liveLabel(live, P) : '模擬'}</span>
             </Eyebrow>
-            <PriceChart bars={bars} theme={theme} code={P.code} periodLabel={per.label === '日' ? 'Daily' : per.label} levels={chartLevels} />
+            <PriceChart bars={bars} theme={theme} code={P.code} periodLabel={per.label === '日' ? 'Daily' : per.label} levels={chartLevels}
+              cone={L.atmIv ? { ivPct: L.atmIv, days: expiry.dte, label: expiry.label } : null} />
           </Glass2>
 
           {/* OI by strike with change column */}
@@ -1804,7 +1806,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
 // ───────────────────────────────────────────────── CHART WORKSPACE
 // Top-level Chart tab (from the design): full-width candles + MA + RSI.
 // Desktop only — mobile keeps the K線 sub-tab inside Calc.
-function ChartWorkspace({ P, bars, barsLive, live, theme, light, barPeriodId, setBarPeriodId, barSession, setBarSession, D }) {
+function ChartWorkspace({ P, bars, barsLive, live, theme, light, barPeriodId, setBarPeriodId, barSession, setBarSession, cone = null, D }) {
   const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
   return (
     <div style={{ position: 'absolute', top: 110, left: 24, right: 24, bottom: 24, zIndex: 5, overflowY: 'auto' }}>
@@ -1815,7 +1817,7 @@ function ChartWorkspace({ P, bars, barsLive, live, theme, light, barPeriodId, se
             · {barsLive ? `front-month · ${liveLabel(live, P)}` : 'mock'}
           </span>
         </Eyebrow>
-        <PriceChart
+        <PriceChart cone={cone}
           bars={bars} theme={theme} code={P.code}
           periodLabel={(per.label === '日' ? 'Daily' : per.label) + (barSession === 'full' ? ' · 全日盤' : ' · 日盤')}
           sourceLabel={barsLive

@@ -808,7 +808,10 @@ const PRICE_MAS = [
   { k: 60, color: '#fb923c' },
 ];
 
-function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceLabel = '', levels = [] }) {
+// cone: { ivPct, days, label } — thinkorswim's probability cone: from the last
+// close, ±1σ (68.27%) and ±2σ bands of S·IV·√(t/365) drawn forward to `days`
+// (the selected expiry) in a strip of empty slots to the right of the bars.
+function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceLabel = '', levels = [], cone = null }) {
   const dark = theme === 'dark';
   const [hiddenMa, setHiddenMa] = React.useState({});
   if (!bars || bars.length < 2) return null;
@@ -819,11 +822,16 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
   const barRng = Math.max(barMax - barMin, 1e-9);
   const lv = (levels || []).filter((l) => Number.isFinite(l.price));
   const inScale = lv.filter((l) => l.price >= barMin - barRng * 0.6 && l.price <= barMax + barRng * 0.6);
-  const pMin = Math.min(barMin, ...inScale.map((l) => l.price)) * 0.998;
-  const pMax = Math.max(barMax, ...inScale.map((l) => l.price)) * 1.002;
+  const hasCone = !!(cone && cone.ivPct > 0 && cone.days > 0);
+  const coneSlots = hasCone ? Math.max(6, Math.round(n * 0.14)) : 0;
+  const anchor = bars[n - 1].c;
+  const coneSig = (t) => anchor * (cone.ivPct / 100) * Math.sqrt(Math.max(t, 0) / 365);
+  const coneEnd = hasCone ? coneSig(cone.days) : 0;
+  const pMin = Math.min(barMin, ...inScale.map((l) => l.price), hasCone ? anchor - 2 * coneEnd : Infinity) * 0.998;
+  const pMax = Math.max(barMax, ...inScale.map((l) => l.price), hasCone ? anchor + 2 * coneEnd : -Infinity) * 1.002;
   const y = (p) => pTop + ((pMax - p) / (pMax - pMin)) * (pBot - pTop);
   const levelTags = lv.map((l) => ({ ...l, pinned: !inScale.includes(l), y: inScale.includes(l) ? y(l.price) : (l.price > pMax ? pTop + 4 : pBot - 4) }));
-  const xw = plotW / n;
+  const xw = plotW / (n + coneSlots);
   const cx = (i) => i * xw + xw / 2;
   const bw = Math.min(7, Math.max(2, xw * 0.62));
   const vMax = Math.max(...bars.map((b) => b.v), 1);
@@ -931,6 +939,26 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
             <text x={plotW + 25} y={l.y + 3} fontSize="9" fontWeight="700" fill="#fff" textAnchor="middle">{fmt(l.price)}</text>
           </g>
         ))}
+        {/* Probability cone: ±2σ (light) and ±1σ (darker) from the last close to the expiry */}
+        {hasCone && (() => {
+          const x0 = cx(n - 1), x1 = cx(n + coneSlots - 1);
+          const pts = (k, sign) => {
+            const out = [];
+            for (let j = 0; j <= 12; j++) { const f = j / 12; out.push(`${(x0 + (x1 - x0) * f).toFixed(1)},${y(anchor + sign * k * coneSig(cone.days * f)).toFixed(1)}`); }
+            return out;
+          };
+          const band = (k, op) => <polygon points={[...pts(k, 1), ...pts(k, -1).reverse()].join(' ')} fill="#a78bfa" fillOpacity={op} />;
+          const edge = (k, sign) => <polyline points={pts(k, sign).join(' ')} fill="none" stroke="#a78bfa" strokeWidth="1" strokeOpacity={k === 1 ? 0.9 : 0.5} strokeDasharray={k === 1 ? '' : '3 3'} />;
+          const lab = (k, sign) => <text x={x1 - 2} y={y(anchor + sign * k * coneEnd) + (sign > 0 ? -3 : 9)} fontSize="8.5" fontWeight="700" fill="#a78bfa" textAnchor="end">{sign > 0 ? '+' : '−'}{k}σ {fmt(anchor + sign * k * coneEnd)}</text>;
+          return (
+            <g>
+              {band(2, 0.07)}{band(1, 0.12)}
+              {edge(2, 1)}{edge(2, -1)}{edge(1, 1)}{edge(1, -1)}
+              {lab(1, 1)}{lab(1, -1)}{lab(2, 1)}{lab(2, -1)}
+              <text x={x1} y={pBot - 3} fontSize="8.5" fontWeight="600" fill="#a78bfa" fillOpacity="0.9" textAnchor="end">機率錐 ±1σ/2σ · IV {cone.ivPct.toFixed(1)}% · {cone.days}d{cone.label ? ` → ${cone.label}` : ''}</text>
+            </g>
+          );
+        })()}
         <line x1="0" x2={plotW} y1={y(last.c)} y2={y(last.c)} stroke="#f0c068" strokeWidth="0.8" strokeDasharray="4 3" strokeOpacity="0.7" />
         <text x={plotW + 6} y={y(last.c) + 3.5} fontSize="10" fontWeight="700" fill="#f0c068">{fmt(last.c)}</text>
       </svg>
