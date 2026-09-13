@@ -21,6 +21,9 @@
       // 即時資料源：'sinopac' = 永豐金 Shioaji（見 server/sinopac.py）。
       // null = 只有 mock。ib 欄位僅 IB 商品使用。
       live: 'sinopac',
+      // Open interest comes from TAIFEX's daily report via the proxy (server/taifex.py):
+      // the Levels tab's 壓力 / 支撐 walls and the chain's OI column while connected.
+      oiSource: 'taifex',
       // 永豐的帳務/部位需要電子憑證，唯讀研究設定刻意不裝 → 不提供部位匯入。
       livePositions: false,
       ib: null,           // TXO 不走 IB

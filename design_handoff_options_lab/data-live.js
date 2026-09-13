@@ -50,5 +50,9 @@
     // { positions: [{ side, type, strike, premium(點數), qty, expiry, dte }] } | null
     // 唯讀持倉，用來把真實部位載入前端 legs。失敗一律 null（房間規則）。
     positions: (pid) => get('/api/positions/' + encodeURIComponent(pid), 8000),
+    // { source, date, prevDate, expiry, rows: [{ strike, call: { oi, oiChg, vol, settle }, put }],
+    //   maxCallOi: { strike, oi, oiChg }, maxPutOi, totals } | null
+    // 每檔未平倉（TAIFEX 每日行情，前一交易日的數字）— 只有 products.js 標了 oiSource 的商品有。
+    oi: (pid, expiry) => get('/api/oi/' + encodeURIComponent(pid) + (expiry ? '?expiry=' + encodeURIComponent(expiry) : ''), 15000),
   };
 })();

@@ -31,11 +31,22 @@ const HELP_COPY = {
   pnldist:{ term: 'P&L distribution', short: 'Probability-weighted outcomes at expiry: red bars = profit, teal = loss.' },
   pricer: { term: 'Option pricer', short: 'Fair value + Greeks for one strike. IV is pulled from the chain smile; spot and days come from the market — no manual entry.' },
   ivsurface: { term: 'IV surface', short: 'Implied volatility across every strike and expiry. Skew / smile shows where the market prices more risk.' },
+  straddle: { term: 'ATM straddle (價平和)', short: 'ATM call premium + ATM put premium for the selected expiry. Adding the two cancels direction, so what is left is the move the market is pricing in until expiry, in index points. ATM ± this value is the expected range.', example: 'ATM 46,150 · call 131 + put 158 → 289 pts → band 45,861–46,439' },
+  resistance: { term: 'Resistance (壓力)', short: 'The strike with the largest call open interest. Read from the sellers’ side: call writers do not expect the index to close above it. The change vs the previous session shows whether the wall is still being built.' },
+  support: { term: 'Support (支撐)', short: 'The strike with the largest put open interest — put writers do not expect the index to close below it.' },
+  pcratio: { term: 'Put/Call OI ratio', short: 'Total put open interest ÷ total call open interest for the expiry. Above 1 = more put positions outstanding (hedged / bearish positioning); below 1 = call-heavy.' },
+  oichg: { term: 'OI change', short: 'Open interest today minus the previous session. Red = positions added, teal = closed out. A growing wall matters more than a static one.' },
 };
 
 // Drawer sections. `tabs` lists the workspaces a section is relevant to; on open
 // the drawer scrolls to the first section matching the current workspace.
 const HELP_SECTIONS = [
+  { id: 'levels', tabs: ['levels'], title: 'Levels — the day-trading read', paras: [
+    'One price ladder, spot in the middle. Above it: the resistance wall (strike with the largest call OI) and ATM + straddle; below it: ATM − straddle and the support wall (largest put OI). Each row shows its distance from spot.',
+    'ATM straddle (價平和) = ATM call + ATM put for the selected expiry. It is the move the market prices in until expiry; ATM ± straddle is the expected range. It decays every session — a straddle that is not shrinking (or is growing) means expected volatility is rising. When previous-session settlement prices are available, the tile shows the change against them.',
+    'Open interest is published by TAIFEX once a day after the close, so the walls are the previous session’s numbers — the way day traders use them. The change column (+/−) shows whether a wall is being built or unwound. Without the proxy, the walls come from mock data and are labeled MOCK.',
+    'The same levels are drawn on the K-line as dashed lines with price tags on the right axis. Switch expiry in the strip to read weekly vs monthly walls.',
+  ] },
   { id: 'chain', tabs: ['chain'], title: 'Option chain', paras: [
     'Calls are on the left (red), puts on the right (teal) — Taiwan T-quote colors, used app-wide.',
     'Columns: OI = open interest, VOL = volume, Δ = delta, IV = implied volatility, BID/ASK = live quotes.',

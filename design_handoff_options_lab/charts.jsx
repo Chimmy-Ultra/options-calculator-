@@ -285,7 +285,10 @@ function PnLDistribution({ legs, spot, iv = 24, dte = 17, theme = 'dark', height
 // ─────────────────────────────────────────────────────────────────────────────
 // OI Profile — mirrored horizontal bars: Call OI (left, red) vs Put OI (right, teal).
 // Reads chain rows from window.genChain(spot, contract). ATM row highlighted.
-function OIProfile({ spot, contract = 'monthly', theme = 'dark', height, maxRows = 13, rows: rowsProp }) {
+// showChange: print "(+274) 3245" next to each bar (the 未平倉變化 layout every
+// Taiwanese OI table uses); walls: { call, put } strikes of the max-OI walls —
+// those rows get solid bars and a colored strike (壓力 / 支撐).
+function OIProfile({ spot, contract = 'monthly', theme = 'dark', height, maxRows = 13, rows: rowsProp, showChange = false, walls = null }) {
   const genRows = useMemoM(() => {
     if (rowsProp && rowsProp.length) return [];
     if (!window.genChain) return [];
@@ -302,6 +305,9 @@ function OIProfile({ spot, contract = 'monthly', theme = 'dark', height, maxRows
   const upColor = '#ef5350', downColor = '#26a69a';
   const txt = theme === 'dark' ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.50)';
   const rowH = 16;
+  const chg = (v) => (v == null ? null : (
+    <span style={{ fontSize: 9, color: v > 0 ? upColor : v < 0 ? downColor : txt, opacity: v === 0 ? 0.6 : 1 }}>({v > 0 ? '+' : ''}{v})</span>
+  ));
 
   return (
     <div style={{ width: '100%' }}>
@@ -314,6 +320,8 @@ function OIProfile({ spot, contract = 'monthly', theme = 'dark', height, maxRows
         {visible.map((r) => {
           const cw = (r.call.oi / maxOI) * 100;
           const pw = (r.put.oi  / maxOI) * 100;
+          const isCallWall = !!walls && r.strike === walls.call;
+          const isPutWall = !!walls && r.strike === walls.put;
           return (
             <div key={r.strike} style={{
               display: 'grid', gridTemplateColumns: '1fr 56px 1fr', alignItems: 'center', gap: 6,
@@ -323,30 +331,36 @@ function OIProfile({ spot, contract = 'monthly', theme = 'dark', height, maxRows
               background: r.atm ? 'rgba(240,192,104,0.08)' : 'transparent',
               border: r.atm ? '1px solid rgba(240,192,104,0.25)' : '1px solid transparent',
             }} title={`Strike ${r.strike} · Call OI ${r.call.oi.toLocaleString()} · Put OI ${r.put.oi.toLocaleString()}`}>
-              {/* Call bar — grows to the LEFT */}
-              <div style={{ height: 8, position: 'relative' }}>
-                <div style={{
-                  position: 'absolute', right: 0, top: 0, bottom: 0,
-                  width: `${cw}%`,
-                  background: `linear-gradient(270deg, ${upColor}cc, ${upColor}55)`,
-                  borderRadius: '4px 0 0 4px',
-                }} />
+              {/* Call bar — grows to the LEFT; numbers sit to its left when showChange */}
+              <div style={{ height: showChange ? 12 : 8, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4, fontFamily: 'ui-monospace, SF Mono, monospace', fontVariantNumeric: 'tabular-nums' }}>
+                {showChange && <span style={{ fontSize: 9, whiteSpace: 'nowrap', color: isCallWall ? upColor : txt, fontWeight: isCallWall ? 700 : 500 }}>{chg(r.call.oiChg)} {r.call.oi.toLocaleString()}</span>}
+                <div style={{ position: 'relative', flex: showChange ? '0 0 46%' : '1 1 auto', alignSelf: 'stretch', height: showChange ? undefined : 8 }}>
+                  <div style={{
+                    position: 'absolute', right: 0, top: showChange ? 2 : 0, bottom: showChange ? 2 : 0,
+                    width: `${cw}%`,
+                    background: isCallWall ? upColor : `linear-gradient(270deg, ${upColor}cc, ${upColor}55)`,
+                    borderRadius: '4px 0 0 4px',
+                  }} />
+                </div>
               </div>
               {/* Strike label */}
               <div style={{
                 fontSize: 11, fontFamily: 'ui-monospace, SF Mono, monospace',
-                fontWeight: r.atm ? 700 : 500, textAlign: 'center',
-                color: r.atm ? '#f7d394' : '#e8eaef',
+                fontWeight: (r.atm || isCallWall || isPutWall) ? 700 : 500, textAlign: 'center',
+                color: r.atm ? '#f7d394' : isCallWall ? upColor : isPutWall ? downColor : '#e8eaef',
                 fontVariantNumeric: 'tabular-nums',
               }}>{r.strike}</div>
               {/* Put bar — grows to the RIGHT */}
-              <div style={{ height: 8, position: 'relative' }}>
-                <div style={{
-                  position: 'absolute', left: 0, top: 0, bottom: 0,
-                  width: `${pw}%`,
-                  background: `linear-gradient(90deg, ${downColor}cc, ${downColor}55)`,
-                  borderRadius: '0 4px 4px 0',
-                }} />
+              <div style={{ height: showChange ? 12 : 8, position: 'relative', display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'ui-monospace, SF Mono, monospace', fontVariantNumeric: 'tabular-nums' }}>
+                <div style={{ position: 'relative', flex: showChange ? '0 0 46%' : '1 1 auto', alignSelf: 'stretch', height: showChange ? undefined : 8 }}>
+                  <div style={{
+                    position: 'absolute', left: 0, top: showChange ? 2 : 0, bottom: showChange ? 2 : 0,
+                    width: `${pw}%`,
+                    background: isPutWall ? downColor : `linear-gradient(90deg, ${downColor}cc, ${downColor}55)`,
+                    borderRadius: '0 4px 4px 0',
+                  }} />
+                </div>
+                {showChange && <span style={{ fontSize: 9, whiteSpace: 'nowrap', color: isPutWall ? downColor : txt, fontWeight: isPutWall ? 700 : 500 }}>{r.put.oi.toLocaleString()} {chg(r.put.oiChg)}</span>}
               </div>
             </div>
           );
@@ -781,15 +795,24 @@ function KBarChart({ bars, theme = 'dark', height = 160, width = 304 }) {
 // mockup): candles + MA5/MA20 overlays + volume + RSI(14) subchart + OHLC
 // readout. Taiwan colors: red = up, teal = down. Renders from the same `bars`
 // array as KBarChart (live IB history or genBars mock).
-function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceLabel = '' }) {
+// levels: [{ price, label, color }] — horizontal dashed lines with a price tag on
+// the right axis (the 開 / 昨 / 成本 tag style of Taiwanese day-trading charts).
+// A level within 60% of the bar range beyond the bars stretches the scale to
+// include it; anything further gets a pinned marker at the chart edge instead.
+function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceLabel = '', levels = [] }) {
   const dark = theme === 'dark';
   if (!bars || bars.length < 2) return null;
   const W = 768, H = 282, plotW = 720, pTop = 12, pBot = 196, vTop = 210, vBot = 274;
   const n = bars.length;
   const closes = bars.map((b) => b.c);
-  const pMin = Math.min(...bars.map((b) => b.l)) * 0.998;
-  const pMax = Math.max(...bars.map((b) => b.h)) * 1.002;
+  const barMin = Math.min(...bars.map((b) => b.l)), barMax = Math.max(...bars.map((b) => b.h));
+  const barRng = Math.max(barMax - barMin, 1e-9);
+  const lv = (levels || []).filter((l) => Number.isFinite(l.price));
+  const inScale = lv.filter((l) => l.price >= barMin - barRng * 0.6 && l.price <= barMax + barRng * 0.6);
+  const pMin = Math.min(barMin, ...inScale.map((l) => l.price)) * 0.998;
+  const pMax = Math.max(barMax, ...inScale.map((l) => l.price)) * 1.002;
   const y = (p) => pTop + ((pMax - p) / (pMax - pMin)) * (pBot - pTop);
+  const levelTags = lv.map((l) => ({ ...l, pinned: !inScale.includes(l), y: inScale.includes(l) ? y(l.price) : (l.price > pMax ? pTop + 4 : pBot - 4) }));
   const xw = plotW / n;
   const cx = (i) => i * xw + xw / 2;
   const bw = Math.min(7, Math.max(2, xw * 0.62));
@@ -829,11 +852,12 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
   const last = bars[n - 1];
   const lastUp = last.c >= last.o;
   const lastY = y(last.c);
-  // Hide a grid price label if it would collide with the gold last-price label.
+  // Hide a grid price label if it would collide with the gold last-price label
+  // or a level tag.
   const gridLines = [0.12, 0.37, 0.62, 0.87].map((f) => {
     const p = pMin + f * (pMax - pMin);
     const gy = y(p);
-    return { y: gy, lab: fmt(p), hideLabel: Math.abs(gy - lastY) < 11 };
+    return { y: gy, lab: fmt(p), hideLabel: Math.abs(gy - lastY) < 11 || levelTags.some((l) => Math.abs(gy - l.y) < 11) };
   });
 
   return (
@@ -879,6 +903,15 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
         })}
         <polyline points={maPts(5)} fill="none" stroke="#f0c068" strokeWidth="1.4" strokeLinejoin="round" />
         <polyline points={maPts(20)} fill="none" stroke="#5fa3d4" strokeWidth="1.4" strokeLinejoin="round" />
+        {/* Level overlays: dashed line + label at the left, price tag on the right axis */}
+        {levelTags.map((l, i) => (
+          <g key={i}>
+            {!l.pinned && <line x1="0" x2={plotW} y1={l.y} y2={l.y} stroke={l.color} strokeWidth="1" strokeDasharray="6 4" strokeOpacity="0.85" />}
+            {l.label && <text x="4" y={l.price >= last.c ? l.y - 3 : l.y + 10} fontSize="9" fontWeight="600" fill={l.color} fillOpacity="0.9">{l.label}{l.pinned ? (l.price > pMax ? ' ▲' : ' ▼') : ''}</text>}
+            <rect x={plotW + 2} y={l.y - 6.5} width={46} height={13} rx="2.5" fill={l.color} fillOpacity={l.pinned ? 0.55 : 0.9} />
+            <text x={plotW + 25} y={l.y + 3} fontSize="9" fontWeight="700" fill="#fff" textAnchor="middle">{fmt(l.price)}</text>
+          </g>
+        ))}
         <line x1="0" x2={plotW} y1={y(last.c)} y2={y(last.c)} stroke="#f0c068" strokeWidth="0.8" strokeDasharray="4 3" strokeOpacity="0.7" />
         <text x={plotW + 6} y={y(last.c) + 3.5} fontSize="10" fontWeight="700" fill="#f0c068">{fmt(last.c)}</text>
       </svg>

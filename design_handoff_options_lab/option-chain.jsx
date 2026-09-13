@@ -28,8 +28,10 @@ function genChain({ spot, contract, dte = 17, product }) {
     const callPx = window.bsPrice('call', spot, strike, iv, dte, r, model);
     const putPx = window.bsPrice('put', spot, strike, iv, dte, r, model);
     const half = Math.max(strikeStep * 0.02, callPx * 0.02, putPx * 0.02); // bid-ask 半寬
-    const callOI = Math.round(8000 - Math.abs(i) * 600 + Math.random() * 400);
-    const putOI = Math.round(7500 - Math.abs(i) * 550 + Math.random() * 400);
+    // Mock OI peaks a few strikes OTM on each side (call wall above spot, put
+    // wall below), so the Levels walls sit away from spot like real books do.
+    const callOI = Math.round(8000 - Math.abs(i - 3) * 600 + Math.random() * 400);
+    const putOI = Math.round(7500 - Math.abs(i + 3) * 550 + Math.random() * 400);
     const callVol = Math.round(callOI * 0.18);
     const putVol = Math.round(putOI * 0.18);
     rows.push({

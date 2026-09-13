@@ -145,6 +145,7 @@ function WorkspaceTabs({ value, onChange, accent, light }) {
   // Desktop tabs (design): Compare is shelved and Pricer is folded into
   // Calculator, so the top bar shows four workspaces.
   const items = [
+    { id: 'levels', label: 'Levels',     icon: '☰' },
     { id: 'chain',  label: 'Chain',      icon: '☷' },
     { id: 'chart',  label: 'Chart',      icon: '☵' },
     { id: 'calc',   label: 'Calculator', icon: '◈' },
@@ -335,12 +336,13 @@ function Obsidian3() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [workspace, setWorkspace] = uS(() => {
     const s = readSaved();
-    return (s && ['chain', 'chart', 'calc', 'iv', 'pricer'].includes(s.workspace)) ? s.workspace : 'chain';
+    return (s && ['levels', 'chain', 'chart', 'calc', 'iv', 'pricer'].includes(s.workspace)) ? s.workspace : 'levels';
   });
   const [productId, setProductId] = uS(initialProductId);
   const P = window.getProduct(productId);
   const [live, setLive] = uS(null);         // { quote, expiries, health } — IB proxy 抓到的
   const [liveRows, setLiveRows] = uS(null); // 當前到期日的 IB 期權鏈 rows
+  const [oiData, setOiData] = uS(null);     // per-strike OI for the current expiry (TAIFEX via proxy; products with oiSource)
   const [lastLiveAt, setLastLiveAt] = uS(null); // ② timestamp of last successful live fetch
   const [liveBars, setLiveBars] = uS(null); // 近月期貨的 IB 歷史 K
   const [barPeriodId, setBarPeriodId] = uS('D'); // K 線週期：D / 4H / 1H
@@ -424,6 +426,7 @@ function Obsidian3() {
     setProductId(id);
     setLive(null);
     setLiveRows(null);
+    setOiData(null);
     setLiveBars(null);
     setLastLiveAt(null);
     setExpiryId(e0.id);
@@ -457,6 +460,7 @@ function Obsidian3() {
   uE(() => {
     let dead = false;
     setLiveRows(null);
+    setOiData(null);
     if (!live || !P.live || !window.LiveData) return undefined;
     (async () => {
       const chain = await window.LiveData.chain(P.id, expiryId);
@@ -465,6 +469,15 @@ function Obsidian3() {
       if (chain.underlying && chain.underlying.price > 0) setSpot(chain.underlying.price);
       setLastLiveAt(Date.now());
     })();
+    // Full-range open interest for the Levels walls (TAIFEX daily report — the
+    // previous session's numbers). Only products with an oiSource; null → the
+    // walls fall back to the chain rows' own OI.
+    if (P.oiSource && window.LiveData.oi) {
+      (async () => {
+        const oi = await window.LiveData.oi(P.id, expiryId);
+        if (!dead && oi && oi.rows && oi.rows.length) setOiData(oi);
+      })();
+    }
     return () => { dead = true; };
   }, [live, expiryId]);
 
@@ -519,7 +532,7 @@ function Obsidian3() {
   // On phone/fold, Compare is the only desktop-exclusive workspace (it needs the
   // multi-card grid to be useful). IV Surface is now mobile-friendly so it stays.
   uE(() => {
-    if (vp.layout !== 'desk' && (workspace === 'compare' || workspace === 'chart')) setWorkspace('calc');
+    if (vp.layout !== 'desk' && (workspace === 'compare' || workspace === 'chart' || workspace === 'levels')) setWorkspace('calc');
   }, [vp.layout]);
   // Desktop: Pricer/Compare tabs removed — redirect stale state to Chain.
   uE(() => {
@@ -562,6 +575,8 @@ function Obsidian3() {
     return window.genChain ? window.genChain({ spot, contract: expiry.type, dte, product: P }) : [];
   }, [liveRows, spot, expiry.type, dte, productId]);
   const quality = uM(() => dataQuality(legs, chainRows), [legs, chainRows]);
+  // Levels (價平和 band + max-OI walls) from the rows on screen + the OI table.
+  const levels = uM(() => computeLevels({ spot, rows: chainRows, oi: oiData, P }), [spot, chainRows, oiData, productId]);
   // K 線：live（IB 日K）優先，否則 mock 隨機漫步。
   // 刻意不依賴 spot — 拉 slider 屬於情境模擬，不該重繪歷史走勢。
   const bars = uM(() => {
@@ -700,6 +715,13 @@ function Obsidian3() {
       </div>
 
       {/* WORKSPACE BODY */}
+      {workspace === 'levels' && (
+        <LevelsWorkspace
+          P={P} theme={theme} light={light} spot={spot} expiry={expiry} levels={levels} live={live}
+          bars={bars} barsLive={!!liveBars} barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
+          D={D}
+        />
+      )}
       {workspace === 'calc' && (
         <CalcWorkspace
           P={P} theme={theme} light={light} rows={chainRows} expiries={expiries} live={live}
@@ -1167,6 +1189,193 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiri
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>settlement</span>}>Max pain</Eyebrow>
           <MaxPain spot={spot} contract={expiry.type} rows={rows} ntdMult={P.mult} cur={P.cur} theme={theme} height={150} width={520} />
         </Glass2>
+      </div>
+    </div>
+  );
+}
+
+// ───────────────────────────────────────────────── LEVELS WORKSPACE
+// The day-trading read (docs/daytrade-redesign.md §4): one price ladder with
+// spot in the middle, the ATM straddle (價平和) band and the max-OI walls
+// (壓力 / 支撐), the same lines overlaid on the K-line, and the OI table with
+// its change column. Every number is derived from the rows already on screen
+// plus the OI table the proxy serves (TAIFEX, previous session) — no extra
+// pricing path.
+
+// atm = chain row nearest spot; straddle = its call + put premium; the walls =
+// max call / put OI over the OI table (full strike range when TAIFEX data is
+// loaded, else the chain rows' own OI — IB or mock). prevStraddle = the same
+// two contracts' previous-session settlement prices (TAIFEX), the 前盤價平和
+// the straddle is compared against.
+function computeLevels({ spot, rows, oi, P }) {
+  let atm = null;
+  for (const r of rows) if (!atm || Math.abs(r.strike - spot) < Math.abs(atm.strike - spot)) atm = r;
+  const straddle = (atm && atm.call.last > 0 && atm.put.last > 0) ? atm.call.last + atm.put.last : null;
+  let prevStraddle = null;
+  if (oi && oi.rows && atm) {
+    const r = oi.rows.find((x) => x.strike === atm.strike);
+    if (r && r.call.settle != null && r.put.settle != null) prevStraddle = r.call.settle + r.put.settle;
+  }
+  const oiRows = (oi && oi.rows && oi.rows.length) ? oi.rows : rows;
+  const wall = (side) => {
+    let best = null;
+    for (const r of oiRows) if (r[side].oi > 0 && (!best || r[side].oi > best[side].oi)) best = r;
+    return best ? { strike: best.strike, oi: best[side].oi, oiChg: best[side].oiChg } : null;
+  };
+  const totals = (oi && oi.totals) ? oi.totals : {
+    callOi: oiRows.reduce((a, r) => a + r.call.oi, 0),
+    putOi: oiRows.reduce((a, r) => a + r.put.oi, 0),
+  };
+  return {
+    atm, straddle, prevStraddle,
+    resistance: wall('call'), support: wall('put'),
+    totals, oiRows,
+    oiSource: oi ? oi.source : null, oiDate: oi ? oi.date : null,
+  };
+}
+
+const LEVEL_COLORS = { up: '#ef5350', down: '#26a69a', band: '#a78bfa', spot: '#f0c068' };
+
+// One tile of the Levels header row: label (hover help), a big mono value, a sub line.
+function LevelTile({ label, hk, value, sub, color, light }) {
+  const HT = window.HelpTip;
+  return (
+    <Glass2 tone="chip" radius={12} padding="10px 14px" style={{ minWidth: 0 }}>
+      <div style={{ fontSize: 9, letterSpacing: 0.7, textTransform: 'uppercase', opacity: 0.55, fontWeight: 600, marginBottom: 4, whiteSpace: 'nowrap' }}>
+        {(hk && HT) ? <HT k={hk}>{label}</HT> : label}
+      </div>
+      <div className="tnum" style={{ fontSize: 20, fontWeight: 700, fontFamily: 'ui-monospace, SF Mono, monospace', color: color || 'inherit', lineHeight: 1.1 }}>{value}</div>
+      {sub && <div className="mono" style={{ fontSize: 10, marginTop: 4, opacity: 0.6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub}</div>}
+    </Glass2>
+  );
+}
+
+// The ladder: rows in price order, evenly spaced (a true price scale would
+// squash the straddle band when a wall sits thousands of points away — the
+// K-line beside it carries the real scale). Each row: price, what it is,
+// distance from spot.
+function LevelsLadder({ P, spot, L, light }) {
+  const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
+  const chg = (v) => (v == null ? '' : ` (${v > 0 ? '+' : ''}${v.toLocaleString()})`);
+  const rows = [];
+  if (L.resistance) rows.push({ price: L.resistance.strike, label: 'Resistance', zh: '壓力', detail: `max call OI ${L.resistance.oi.toLocaleString()}${chg(L.resistance.oiChg)}`, color: LEVEL_COLORS.up });
+  if (L.straddle != null) {
+    rows.push({ price: L.atm.strike + L.straddle, label: 'ATM + straddle', zh: '價平 + 價平和', detail: `${fmtP(L.atm.strike)} + ${window.fmtPx(L.straddle, P)}`, color: LEVEL_COLORS.band });
+    rows.push({ price: L.atm.strike - L.straddle, label: 'ATM − straddle', zh: '價平 − 價平和', detail: `${fmtP(L.atm.strike)} − ${window.fmtPx(L.straddle, P)}`, color: LEVEL_COLORS.band });
+  }
+  rows.push({ price: spot, label: `${P.code} spot`, zh: '現價', detail: L.straddle != null ? `straddle ${window.fmtPx(L.straddle, P)} · ATM ${fmtP(L.atm.strike)}` : 'no ATM premiums', color: LEVEL_COLORS.spot, isSpot: true });
+  if (L.support) rows.push({ price: L.support.strike, label: 'Support', zh: '支撐', detail: `max put OI ${L.support.oi.toLocaleString()}${chg(L.support.oiChg)}`, color: LEVEL_COLORS.down });
+  rows.sort((a, b) => b.price - a.price);
+  const dim = light ? 'rgba(20,30,50,0.5)' : 'rgba(255,255,255,0.5)';
+  const line = light ? 'rgba(25,40,70,0.18)' : 'rgba(255,255,255,0.12)';
+  return (
+    <div style={{ position: 'relative', paddingLeft: 18 }}>
+      {/* spine */}
+      <div aria-hidden style={{ position: 'absolute', left: 5, top: 10, bottom: 10, width: 2, background: line, borderRadius: 1 }} />
+      {rows.map((r, i) => {
+        const d = r.price - spot;
+        const pct = spot > 0 ? (d / spot) * 100 : 0;
+        return (
+          <div key={i} style={{
+            position: 'relative', display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 12, alignItems: 'center',
+            padding: r.isSpot ? '10px 12px' : '9px 12px', marginBottom: 6, borderRadius: 10,
+            background: r.isSpot ? 'rgba(240,192,104,0.10)' : (light ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.03)'),
+            border: `1px solid ${r.isSpot ? 'rgba(240,192,104,0.45)' : line}`,
+          }}>
+            <span aria-hidden style={{ position: 'absolute', left: -18, top: '50%', width: 10, height: 10, marginTop: -5, borderRadius: 5, background: r.color, boxShadow: `0 0 8px ${r.color}` }} />
+            <span className="tnum" style={{ fontSize: r.isSpot ? 18 : 15, fontWeight: 700, fontFamily: 'ui-monospace, SF Mono, monospace', color: r.color, minWidth: 74 }}>{fmtP(r.price)}</span>
+            <span style={{ display: 'block', minWidth: 0, overflow: 'hidden' }}>
+              <div style={{ fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.label} <span style={{ opacity: 0.55, fontWeight: 500 }}>{r.zh}</span></div>
+              <div className="mono" style={{ fontSize: 10, color: dim, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.detail}</div>
+            </span>
+            <span className="tnum" style={{ fontFamily: 'ui-monospace, SF Mono, monospace', textAlign: 'right', whiteSpace: 'nowrap', color: r.isSpot ? dim : (d >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down) }}>
+              <div style={{ fontSize: 11, fontWeight: 700 }}>{r.isSpot ? '—' : `${d >= 0 ? '+' : '−'}${fmtP(Math.abs(d))}`}</div>
+              {!r.isSpot && <div style={{ fontSize: 9, opacity: 0.75 }}>{`${d >= 0 ? '+' : '−'}${Math.abs(pct).toFixed(2)}%`}</div>}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, levels: L, live, bars, barsLive, barPeriodId, setBarPeriodId, D }) {
+  const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
+  const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
+  const chg = (v) => (v == null ? '' : ` (${v > 0 ? '+' : ''}${v.toLocaleString()})`);
+  // What the OI numbers are: TAIFEX daily report (dated), the live chain (IB), or mock.
+  const oiLabel = L.oiSource === 'taifex' ? `● TAIFEX ${L.oiDate} · previous session`
+    : (live && P.live) ? `● ${BROKER[P.live]} chain OI · ±8 strikes`
+    : '○ MOCK OI';
+  const straddleDelta = (L.straddle != null && L.prevStraddle != null) ? L.straddle - L.prevStraddle : null;
+  const pc = L.totals.callOi > 0 ? L.totals.putOi / L.totals.callOi : null;
+  // K-line overlays: the four option-derived levels (spot has its own tag).
+  const chartLevels = [];
+  if (L.resistance) chartLevels.push({ price: L.resistance.strike, label: '壓力 max call OI', color: LEVEL_COLORS.up });
+  if (L.straddle != null) {
+    chartLevels.push({ price: L.atm.strike + L.straddle, label: '+straddle', color: LEVEL_COLORS.band });
+    chartLevels.push({ price: L.atm.strike - L.straddle, label: '−straddle', color: LEVEL_COLORS.band });
+  }
+  if (L.support) chartLevels.push({ price: L.support.strike, label: '支撐 max put OI', color: LEVEL_COLORS.down });
+  // OI table centered on the strike nearest spot, walls highlighted.
+  let atmK = null;
+  for (const r of L.oiRows) if (atmK == null || Math.abs(r.strike - spot) < Math.abs(atmK - spot)) atmK = r.strike;
+  const oiRows = L.oiRows.map((r) => ({ ...r, atm: r.strike === atmK }));
+  const walls = { call: L.resistance ? L.resistance.strike : null, put: L.support ? L.support.strike : null };
+  const dim = light ? 'rgba(20,30,50,0.5)' : 'rgba(255,255,255,0.5)';
+  return (
+    <div style={{ position: 'absolute', top: 110, left: 24, right: 24, bottom: 24, zIndex: 5, overflowY: 'auto', paddingBottom: 4 }}>
+      {/* header tiles */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: D.gap, marginBottom: D.gap }}>
+        <LevelTile label="ATM straddle · 價平和" hk="straddle"
+          value={L.straddle != null ? `${window.fmtPx(L.straddle, P)} pts` : '—'}
+          sub={L.atm ? `ATM ${fmtP(L.atm.strike)} · call ${window.fmtPx(L.atm.call.last, P)} + put ${window.fmtPx(L.atm.put.last, P)}` : 'no chain rows'}
+          color={LEVEL_COLORS.band} light={light} />
+        <LevelTile label="vs prev settle · 流失" hk="straddle"
+          value={straddleDelta != null ? `${straddleDelta >= 0 ? '+' : '−'}${window.fmtPx(Math.abs(straddleDelta), P)}` : '—'}
+          sub={L.prevStraddle != null ? `prev session ${window.fmtPx(L.prevStraddle, P)} (TAIFEX settle)` : 'needs TAIFEX settlement prices'}
+          color={straddleDelta == null ? undefined : straddleDelta >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down} light={light} />
+        <LevelTile label="Resistance · 壓力" hk="resistance"
+          value={L.resistance ? fmtP(L.resistance.strike) : '—'}
+          sub={L.resistance ? `max call OI ${L.resistance.oi.toLocaleString()}${chg(L.resistance.oiChg)}` : 'no OI'}
+          color={LEVEL_COLORS.up} light={light} />
+        <LevelTile label="Support · 支撐" hk="support"
+          value={L.support ? fmtP(L.support.strike) : '—'}
+          sub={L.support ? `max put OI ${L.support.oi.toLocaleString()}${chg(L.support.oiChg)}` : 'no OI'}
+          color={LEVEL_COLORS.down} light={light} />
+        <LevelTile label="Put / Call OI" hk="pcratio"
+          value={pc != null ? pc.toFixed(2) : '—'}
+          sub={`put ${L.totals.putOi.toLocaleString()} / call ${L.totals.callOi.toLocaleString()}`}
+          color={pc == null ? undefined : pc >= 1 ? LEVEL_COLORS.down : LEVEL_COLORS.up} light={light} />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(380px, 440px) 1fr', gap: D.gap, alignItems: 'start' }}>
+        {/* ladder */}
+        <Glass2 tone="panel" padding={D.panelPad} style={{ minWidth: 0 }}>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>}>Levels · {P.code}</Eyebrow>
+          <LevelsLadder P={P} spot={spot} L={L} light={light} />
+          <div className="mono" style={{ marginTop: 10, fontSize: 9, color: dim, display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+            <span>{oiLabel}</span>
+            <span>premiums: {live && P.live ? `● ${BROKER[P.live]}` : '○ mock'}</span>
+          </div>
+        </Glass2>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: D.gap, minWidth: 0 }}>
+          {/* K-line with the levels drawn on it */}
+          <Glass2 tone="panel" padding={D.panelPad}>
+            <Eyebrow right={<KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} light={light} />}>
+              Chart · {P.code}
+              <span style={{ color: dim, fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· levels overlaid · {barsLive ? 'live' : 'mock'}</span>
+            </Eyebrow>
+            <PriceChart bars={bars} theme={theme} code={P.code} periodLabel={per.label === '日' ? 'Daily' : per.label} levels={chartLevels} />
+          </Glass2>
+
+          {/* OI by strike with change column */}
+          <Glass2 tone="panel" padding={D.panelPad}>
+            <Eyebrow hk="oichg" right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{oiLabel}</span>}>OI by strike · change vs prev</Eyebrow>
+            <OIProfile spot={spot} contract={expiry.type} rows={oiRows} theme={theme} maxRows={15} showChange walls={walls} />
+          </Glass2>
+        </div>
       </div>
     </div>
   );
