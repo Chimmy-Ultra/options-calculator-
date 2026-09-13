@@ -59,6 +59,17 @@ PRODUCTS = {
     "gc": {"source": "ib", "symbol": "GC", "exchange": "COMEX", "tradingClass": "OG", "strikeStep": 25.0},
     "cl": {"source": "ib", "symbol": "CL", "exchange": "NYMEX", "tradingClass": "LO", "strikeStep": 1.0},
     "ng": {"source": "ib", "symbol": "NG", "exchange": "NYMEX", "tradingClass": "ON", "strikeStep": 0.1},
+    # Added with the IB snapshot (2026-09): index + 農副產品 + Brent. Trading
+    # classes are the standard monthly class as IB lists it; a wrong guess
+    # still works through _sec_def's most-expirations fallback. VIX has no row:
+    # its options are index options (OPT), not FOP, so the proxy does not serve
+    # it — the deployed site reads it from ib-eod.js only.
+    "nq": {"source": "ib", "symbol": "NQ", "exchange": "CME", "tradingClass": "NQ", "strikeStep": 100.0},
+    "zm": {"source": "ib", "symbol": "ZM", "exchange": "CBOT", "tradingClass": "OZM", "strikeStep": 5.0},
+    "zl": {"source": "ib", "symbol": "ZL", "exchange": "CBOT", "tradingClass": "OZL", "strikeStep": 1.0},
+    "le": {"source": "ib", "symbol": "LE", "exchange": "CME", "tradingClass": "LE", "strikeStep": 2.0},
+    "he": {"source": "ib", "symbol": "HE", "exchange": "CME", "tradingClass": "HE", "strikeStep": 2.0},
+    "bz": {"source": "ib", "symbol": "BZ", "exchange": "NYMEX", "tradingClass": "BZO", "strikeStep": 1.0},
 }
 
 # 盤前脈絡 — the overseas read a Taiwan day trader takes before the 08:45 open,
@@ -214,6 +225,10 @@ async def health(pid: str | None = None):
     """Connection status. With ?pid= the answer is for that product's own data
     source, so the frontend only shows a live badge when the backend that
     actually serves that product is up; without it, connected means "any source"."""
+    if pid and pid.lower() not in PRODUCTS:
+        # Nothing here serves it (e.g. VIX, snapshot-only) — the frontend then
+        # falls back to its end-of-day snapshot instead of treating us as live.
+        return {"connected": False, "source": None, "serverTime": datetime.now().isoformat(timespec="seconds")}
     src = PRODUCTS.get((pid or "").lower(), {}).get("source") if pid else None
 
     sino_ok = await sinopac.ensure_connected() if (src in (None, "sinopac")) else False
