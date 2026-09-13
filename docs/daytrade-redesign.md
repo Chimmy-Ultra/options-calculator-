@@ -24,14 +24,14 @@ should start from.
   with spot, 價平 ± 價平和, max Call OI (壓力), max Put OI (支撐), 關卡價 and
   成本線 drawn as horizontal lines — plus the K-line with the same lines
   overlaid. The 3D P&L / IV surfaces move to a "Lab" tab.
-- Nothing here was verified from this container: every Taiwanese finance
-  domain (TAIFEX, CMoney, 玩股網 …) is blocked by its egress proxy, for the
-  browser as well as for fetches. Run `server/check_taifex.py` on your machine
-  to turn "feasible" into "verified". To let a future session actually look at
-  those sites, widen the environment's network policy (claude.ai/code →
-  environment → network access) to include `cmoney.tw`, `wantgoo.com`,
-  `optree.tw`, `opkevin.cc`, `taifex.com.tw`, `mis.taifex.com.tw`,
-  `openapi.taifex.com.tw`, `histock.tw`, `ptt.cc`.
+- **Verified 2026-09-13** (network policy widened): the TAIFEX endpoints were
+  probed from the authoring container and the reference sites were opened in a
+  headless browser — see §2b for what each one actually shows and §3 for the
+  real field names. Only 玩股網 stayed out of reach (Cloudflare challenge).
+- **P0 is built** on this branch: `server/taifex.py` (daily per-strike OI +
+  change, merged into the TXO chain and served whole by `/api/oi/txo`), a
+  **Levels** tab (ladder, 價平和 tiles, walls on the K-line, OI table with the
+  change column). See §5 for the status per item.
 
 ## 1. What 多空指南針 actually is
 
@@ -92,6 +92,102 @@ Sources: [OP凱文 價平和](https://opkevin.cc/%E9%81%B8%E6%93%87%E6%AC%8A%E5%
 [永豐期貨 未平倉教學](https://www.spf.com.tw/mktinfo/Futures/OA/option-001.html),
 [Win投資 未平倉](https://winvest.tw/Knowledge/Article/318).
 
+## 2b. Reference sites — what they actually show
+
+Opened 2026-09-13 in headless Chromium (all requests relayed through the
+sandbox proxy), full-page screenshots in `design-reference/refs/`. Only what
+is visible on those pages is recorded here; the TAIFEX numbers on the 搖錢樹
+page were cross-checked against our own `taifex.py` output and match.
+
+### 選擇權搖錢樹 · 最大未平倉量 (`optree.tw/home/tools/max_oi_amount`)
+
+`refs/optree-max-oi-full.jpg`, `refs/optree-max-oi-fold.jpg`
+
+- **Context row** above the table: 大盤指數 46184.9 (−755.6), 期貨指數 46331.0
+  (−411.0), 大盤20日均線 46025.3, 大盤5日均線 46948.2, 資料時間 2026/09/11
+  16:30:10 — a post-close, once-a-day view.
+- **Summary strip**: 日期 · 到期月份 (dropdown 台指2609 / 台指2610 / 台指4W2609)
+  · 買權最大未平倉量 **SC50000** · 賣權最大未平倉量 **SP43000**. The SC / SP
+  prefix (sell call / sell put) bakes the seller's-side reading into the label.
+- **Body "選擇權未平倉變化 2026-09-11 [台指2609]"**: one row per strike over the
+  whole listed range (55800 down to 35600), calls left, puts right, strike in the
+  middle. Each cell is `(±change) OI` plus a horizontal bar: call bars grow to
+  the left in pink, put bars to the right in light green, and the **max cell on
+  each side is a saturated bar**. The change is colored red for + and green
+  for −. Dashed horizontal lines mark 5MA(46948.2) (orange) and 20MA(46025.3)
+  (blue) at their price rows; the strike nearest the index (46150) is a dark
+  badge.
+- Takeaway: strike axis = price axis. The OI table *is* the price ladder; the
+  walls are simply the longest bar per side, and OI change is a first-class
+  column, not a tooltip.
+
+### OP凱文 · 選擇權價平和 (`opkevin.cc/選擇權價平和/` → now `opop.tw`)
+
+`refs/opkevin-atm-straddle-fold.jpg`, `refs/atm-straddle-intraday.jpg`
+
+- The article itself is text: 價平和 = 價平 Call 權利金 + 價平 Put 權利金.
+  Adding the two removes direction; always using the ATM strike removes strike;
+  rates barely matter; compare on the same weekday and time drops out — what is
+  left is volatility. Two worked weeks (Wed→Tue 263→117 vs 284→121) show a
+  higher-straddle week = higher-volatility week. Rule: 價平和 normally shrinks
+  every session; *not shrinking much* hints volatility is expanding, *rising*
+  means it certainly is. Warning: some brokers' T-quote ATM is the wrong strike.
+- The one screenshot in the article (from 選擇權駕訓班, 2024/1/17 night session)
+  is the actual visualization: a **tile row** — 即時日期 · 夜盤日期 · 時間 · 加權
+  17346.9 · 週小台 · 大台 17328 · **前盤價平和 100 · 流失 −25 · 即時價平和 75.5 ·
+  價平合約 17350** · 夜盤 2401W3 — then an **intraday 價平和 line** (y 56–119)
+  with a horizontal reference at the previous session's value and one at the
+  current value, and under it the futures price line on the same time axis.
+- Takeaway: show the straddle as *number tiles* (previous session, current,
+  decay "流失", the ATM contract) and as an *intraday line against the
+  previous-session reference*, paired with the price chart.
+
+### CMoney · 自由人 多空指南針 (PC `id=3092`, APP `id=3461`, App Store `id1443991843`)
+
+`refs/cmoney-compass-pc-fold.jpg`, `refs/compass-pc-levels-panel.jpg`,
+`refs/compass-pc-costline-netflow.jpg`, `refs/compass-app-1..4.jpg`
+
+Marketing pages, no interactive tool; the UI is visible in the product
+screenshots they embed.
+
+- **PC** (dark terminal): top bar 成交價 (large, red) ▲171 · 成本價 (yellow).
+  A 1-minute candle chart (red up / green down) with a cyan 5MA and the yellow
+  **成本線 drawn as a step line** — flat until a volume breakout, then it
+  ratchets — plus a white horizontal line at the open. A right-hand **關卡價
+  panel**: 場外關卡價 16628 / 全壘關卡價 16724 / 三壘關卡價 16764 / 二壘關卡價
+  16790 / 一壘關卡價 16821 as green rows with an 自動 / 上 / 下 toggle, and
+  "近1日 波動放大 2/20 …" ranks. Lower pane: the cumulative **多空差額** line
+  (yellow) over per-minute red/green bars, and a **多空溫度計** — one horizontal
+  red bar with the number (13269). The 五大盤型 are tabs (長紅K突破 / 長黑K突破 /
+  V轉紅K / A轉黑K / 盤整抓轉折). Time & sales on the right.
+- **App** (iPhone): header 成交價 22087 ▼65 · 成本價 22130 · **距一壘 22041 差 46
+  點** (distance to the next 關卡) with a diamond 壘包 indicator. The 1-minute
+  chart carries **right-axis price tags** 開22181 / 昨22152 / 成22130 on dashed
+  lines, the 5MA, the step 成本線, and the session high/low labeled (22211 /
+  22048). The 台指振幅 tab is a plain **list of levels**: 場外 24267 / 全壘 23287
+  / 三壘 22929 / 二壘 22691 / 一壘 22340 / 近周低 21998, 近周振幅 452, with
+  自動 / 上方 / 下方. Tabs: 台指K線圖 · 台指振幅 · 聊天室 · 學習區 · 更多.
+- Takeaway: levels are a **list** (not a scaled chart), the same levels are
+  **price tags on the K-line's right axis**, and the headline number is
+  **distance to the next level**. No options reading anywhere — confirms §1.
+
+### 玩股網 · 選擇權支撐壓力表 (`wantgoo.com/option/support-resistance`) — not captured
+
+Both curl and the relayed headless browser get Cloudflare's "Just a moment…"
+challenge (HTTP 403). Needs a human browser session; nothing recorded.
+
+### What the Levels tab takes from each
+
+| Element | From | In our Levels tab |
+|---|---|---|
+| Level **list** with distance from spot | 多空指南針 app (距一壘 … 差 46 點) | The ladder: price · what it is · Δ pts / Δ % per row |
+| Price **tags on the K-line's right axis** | 多空指南針 app (開 / 昨 / 成) | `PriceChart levels` — dashed line + tag for 壓力 / ±straddle / 支撐 |
+| Mirrored OI bars, `(±chg) OI`, saturated max bar | 搖錢樹 | `OIProfile showChange walls` centered on ATM |
+| 價平和 tiles: current · 前盤 · 流失 | 選擇權駕訓班 screen | ATM straddle tile + "vs prev settle" tile (previous session's TAIFEX settlement of the same two contracts) |
+| Seller's-side labels (SC / SP) | 搖錢樹 | "max call OI" / "max put OI" spelled out under 壓力 / 支撐 |
+
+Not taken (P1/P2): 關卡價, 成本線, 籌碼差額, the intraday 價平和 line.
+
 ## 3. Data feasibility
 
 ### What Shioaji gives us (verified by introspecting the installed 1.7.2)
@@ -116,6 +212,29 @@ to spread-only for TXO.
 | `https://www.taifex.com.tw/cht/3/dlOptDataDown` (POST → CSV) | Historical options daily report, per strike. Params `down_type=1`, `commodity_id=TXO`, `queryStartDate`, `queryEndDate` (yyyy/mm/dd, ≤ 30 days per request). Columns: 交易日期, 契約, 到期月份(週別), 履約價, 買賣權, 開/高/低/收盤價, 成交量, 結算價, **未沖銷契約數** (= OI) | Daily | For OI-change vs yesterday and for backfilling. Columns confirmed from [histockhero's notebook](https://github.com/histockhero/youtube_code/blob/main/Part4_%E9%81%B8%E6%93%87%E6%AC%8A%E8%B3%87%E6%96%99%E4%B8%8B%E8%BC%89%EF%BC%86%E6%8A%80%E8%A1%93%E5%88%86%E6%9E%90/4.2%E9%81%B8%E6%93%87%E6%AC%8A%E6%8A%80%E8%A1%93%E5%88%86%E6%9E%90/%E5%8F%B0%E6%8C%87%E9%81%B8%E6%94%AF%E6%92%90%E5%A3%93%E5%8A%9B%E5%9C%96(%E5%90%AB%E5%B7%AE%E5%80%BC).ipynb); older code calls it `optDataDown` ([PTT](https://www.ptt.cc/bbs/Python/M.1646569595.A.6B8.html)) |
 | `https://mis.taifex.com.tw/futures/api/getQuoteList` (POST JSON `{MarketType:"0", SymbolType:"F"/"O", KindID:"1", CID:"TXF"/"TXO"}`) | The quote list behind TAIFEX's 行情資訊網: bid/ask, last, volume, open/high/low, reference. [TaiexChipAnalyzer](https://github.com/joekisoul-code/TaiexChipAnalyzer) reports it also carries OI for TXF | Real-time | **Unverified whether the OI value is intraday or the last settlement.** If it moves during the session, the "end-of-day" limit above disappears for TXO too |
 | `data.gov.tw` datasets [11320](https://data.gov.tw/dataset/11320) 選擇權每日交易行情, [45746](https://data.gov.tw/dataset/45746) 未平倉量增減, [11322](https://data.gov.tw/dataset/11322) P/C ratio, [11600](https://data.gov.tw/dataset/11600) 三大法人選擇權 | Same data, catalogued | Daily | Point at the same TAIFEX resources |
+
+#### Probe results (run from this container, 2026-09-13)
+
+`python3 server/check_taifex.py` answered on every step:
+
+- **OpenAPI** `DailyMarketReportOpt`: latest trading day only (2026-09-11),
+  12,060 rows, columns `Date, Contract, ContractMonth(Week), StrikePrice,
+  CallPut, Open, High, Low, Close, Volume, SettlementPrice, OpenInterest,
+  BestBid, BestAsk, …, TradingSession`. OI is on the 一般 rows; 盤後 rows show
+  `-`. Contract codes seen: `202609` (monthly), `202609F2/F3/F4` (Friday
+  weeklies), `202609W4` (Wednesday weekly). No expiry *date* column.
+  `DailyMarketReportFut` (TX rows carry `OpenInterest`, e.g. 202609 = 88,464)
+  and `PutCallRatio` (23 rows with `PutOI`, `CallOI`, `PutCallOIRatio%`) work
+  too; most other catalogue paths return non-JSON.
+- **CSV** `dlOptDataDown` (POST): 22 columns incl. `未沖銷契約數` **and**
+  `契約到期日` (YYYYMMDD) — which is why `taifex.py` uses this and not the JSON:
+  one request gives today, the previous sessions (for the change column) and
+  the expiry-date mapping to the frontend's `YYYYMMDD` expiry ids.
+- **MIS quote list** `getQuoteList`: TXO rows do carry an `OpenInterest` key
+  (1,873 of 3,083 rows non-empty on a Saturday). An F2 contract that had
+  already expired on 9/11 still showed a non-zero value, which looks like the
+  last settlement's number rather than a live one — **intraday behaviour is
+  still unverified**; run step 4 twice during a session to settle it.
 
 **Working assumption**: OI is a settlement-time number — design the levels
 as "yesterday's walls", refreshed once when TAIFEX publishes (day session
@@ -171,11 +290,25 @@ builder move under a **Lab** tab. They keep working unchanged.
 
 ## 5. Phasing
 
-- **P0 (one PR)**: `taifex.py` source in the proxy (options daily report +
-  `optDataDown` for yesterday, cached per day); OI merged into TXO chain rows;
-  live 價平和 tile; Levels ladder with spot / 價平和 band / max OI walls;
-  K-line overlays. Verify: `OIProfile` shows non-zero TXO OI; ladder lines
-  match the TAIFEX numbers by hand.
+- **P0 — done on this branch** (`claude/gracious-galileo-wr2whl`):
+  - `server/taifex.py`: one `dlOptDataDown` request (7-day window, cached 15
+    min) → per-strike OI, OI change vs the previous session, settlement prices,
+    and the contract-month → expiry-date map. `GET /api/oi/txo?expiry=YYYYMMDD`
+    serves the whole strike range with the max-OI strikes and totals;
+    `/api/chain/txo` merges the same OI (+ `oiChg`) into the rows it already
+    returns. Public data — works without Shioaji credentials.
+  - Frontend: **Levels** tab (first tab, default for new users): tiles (ATM
+    straddle, vs prev settle, 壓力, 支撐, put/call OI), the ladder, the K-line
+    with the four option levels tagged on the right axis, and the OI table with
+    the change column and highlighted walls. `products.js` `oiSource: 'taifex'`
+    on TXO turns the OI fetch on; everything else derives from the chain rows.
+    Mock mode keeps working and is labeled `○ MOCK OI`.
+  - Verified in headless Chromium against a stubbed Shioaji feed + the real
+    TAIFEX data for 2026-09-11: 壓力 50,000 (3,245, +274) / 支撐 43,000
+    (2,899, +891) for the 9/16 monthly — the same numbers 搖錢樹 shows — and
+    the chain's OI column matches its rows (45800 call 434, 46000 call 459 /
+    put 941). Zero console errors in dark, light, phone and mock runs.
+  - Not in P0: the intraday 價平和 line, 關卡價 / 成本線 (P1); mobile ladder (P2).
 - **P1**: 價平和 intraday sampler; 關卡價 and 成本線; P/C ratio and 三大法人
   tiles.
 - **P2**: 籌碼差額 proxy from ticks; weekly/monthly ladder toggle; Lab tab
