@@ -313,6 +313,94 @@ function FreshnessChip({ lastLiveAt }) {
   );
 }
 
+// ───────────────────────────────────────────────── ADJUSTABLE PANEL GRID
+// Every desktop tab is a set of panels on a 12-column grid (react-grid-layout
+// from the CDN, window.ReactGridLayout). With 調整版面 on, panels drag by their
+// header bar and resize from the bottom-right corner; the arrangement is saved
+// per tab under optionsLab.layout.v1 and 重設 restores the tab's defaults.
+// Without the library (offline, blocked CDN) the panels stack in default order.
+const RGL = (window.ReactGridLayout && window.ReactGridLayout.WidthProvider) ? window.ReactGridLayout.WidthProvider(window.ReactGridLayout) : null;
+const LAYOUT_KEY = 'optionsLab.layout.v1';
+function readLayouts() { try { const o = JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}'); return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {}; } catch (e) { return {}; } }
+function writeLayouts(all) { try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(all)); } catch (e) { /* storage disabled */ } }
+function clearLayout(tab) { const all = readLayouts(); delete all[tab]; writeLayouts(all); }
+// A saved arrangement is used only where it names the current panels with sane numbers.
+function resolveLayout(saved, defaults) {
+  const byId = {};
+  (Array.isArray(saved) ? saved : []).forEach((l) => { if (l && typeof l.i === 'string') byId[l.i] = l; });
+  return defaults.map((d) => {
+    const v = byId[d.i];
+    const ok = v && [v.x, v.y, v.w, v.h].every((n) => Number.isFinite(n) && n >= 0) && v.w >= 1 && v.h >= 1;
+    return ok ? { i: d.i, x: v.x, y: v.y, w: Math.min(12, v.w), h: v.h, minW: d.minW || 2, minH: d.minH || 3 } : { minW: 2, minH: 3, ...d };
+  });
+}
+function PanelGrid({ tab, panels, defaults, grid }) {
+  const editing = !!(grid && grid.editing), resetToken = grid ? grid.resetToken : 0;
+  const [layout, setLayout] = uS(() => resolveLayout(readLayouts()[tab], defaults));
+  uE(() => { setLayout(resolveLayout(readLayouts()[tab], defaults)); }, [tab, resetToken]);
+  const onLayoutChange = (l) => {
+    setLayout(l);
+    const all = readLayouts();
+    all[tab] = l.map(({ i, x, y, w, h }) => ({ i, x, y, w, h }));
+    writeLayouts(all);
+  };
+  const item = (p) => (
+    <div key={p.i} className="pg-item">
+      <Glass2 tone={p.tone || 'panel'} padding={p.pad != null ? p.pad : 12}>
+        <Eyebrow hk={p.hk} right={p.right}>{p.title}</Eyebrow>
+        <div className="pg-body">{p.body}</div>
+      </Glass2>
+    </div>
+  );
+  if (!RGL) return <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{panels.map(item)}</div>;
+  return (
+    <RGL className={`pg${editing ? ' pg-editing' : ''}`} layout={layout} cols={12} rowHeight={30} margin={[8, 8]} containerPadding={[0, 0]}
+      isDraggable={editing} isResizable={editing} draggableHandle=".pg-handle" compactType="vertical" onLayoutChange={onLayoutChange}>
+      {panels.map(item)}
+    </RGL>
+  );
+}
+// Default arrangements (12 columns × 30px rows, 8px gutters).
+const GRID_DEFAULTS = {
+  levels: [
+    { i: 'strip',  x: 0, y: 0,  w: 12, h: 4 },
+    { i: 'ladder', x: 0, y: 4,  w: 4,  h: 19 },
+    { i: 'range',  x: 0, y: 23, w: 4,  h: 10 },
+    { i: 'kline',  x: 4, y: 4,  w: 8,  h: 14 },
+    { i: 'oi',     x: 4, y: 18, w: 8,  h: 10 },
+    { i: 'gex',    x: 4, y: 28, w: 8,  h: 11 },
+  ],
+  chart: [{ i: 'kline', x: 0, y: 0, w: 12, h: 19 }],
+  chain: [
+    { i: 'chain',   x: 0, y: 0,  w: 8, h: 24 },
+    { i: 'whatif',  x: 8, y: 0,  w: 4, h: 6 },
+    { i: 'payoff',  x: 8, y: 6,  w: 4, h: 7 },
+    { i: 'greeks',  x: 8, y: 13, w: 4, h: 5 },
+    { i: 'legs',    x: 8, y: 18, w: 4, h: 8 },
+    { i: 'oiprof',  x: 0, y: 24, w: 6, h: 9 },
+    { i: 'maxpain', x: 6, y: 26, w: 6, h: 8 },
+  ],
+  calc: [
+    { i: 'legs',     x: 0, y: 0,  w: 3, h: 7 },
+    { i: 'pricer',   x: 0, y: 7,  w: 3, h: 14 },
+    { i: 'payoff',   x: 3, y: 0,  w: 6, h: 14 },
+    { i: 'heat',     x: 3, y: 14, w: 6, h: 13 },
+    { i: 'pnl',      x: 9, y: 0,  w: 3, h: 7 },
+    { i: 'analysis', x: 9, y: 7,  w: 3, h: 9 },
+    { i: 'greeks',   x: 9, y: 16, w: 3, h: 6 },
+  ],
+  'lab-iv': [
+    { i: 'surface', x: 0, y: 0,  w: 9, h: 24 },
+    { i: 'hv',      x: 9, y: 0,  w: 3, h: 11 },
+    { i: 'term',    x: 9, y: 11, w: 3, h: 7 },
+    { i: 'skew',    x: 9, y: 18, w: 3, h: 4 },
+    { i: 'help',    x: 9, y: 22, w: 3, h: 3 },
+  ],
+};
+const gridCap = (txt) => <span className="mono" style={{ fontSize: 9, opacity: 0.6 }}>{txt}</span>;
+const expCap = (e) => `${e.date} ${e.type === 'monthly' ? '月選' : e.label} · ${e.dte} 天`;
+const GRID_BODY = { position: 'absolute', top: 90, left: 12, right: 12, bottom: 12, zIndex: 5, overflowY: 'auto', overflowX: 'hidden' };
+
 function Obsidian3() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [workspace, setWorkspace] = uS(() => {
@@ -339,6 +427,8 @@ function Obsidian3() {
     return (s && (s.theme === 'light' || s.theme === 'dark')) ? s.theme : 'dark';
   }); // 'dark' | 'light'（設計稿的 Light/Dark 切換）
   const [prodMenuOpen, setProdMenuOpen] = uS(false);
+  const [layoutEdit, setLayoutEdit] = uS(false);  // 調整版面: panels drag / resize
+  const [layoutReset, setLayoutReset] = uS(0);    // bumped by 重設 so the grid re-reads storage
   const [whatIfOpen, setWhatIfOpen] = uS(false); // collapsible What-if rail (owner: rarely used)
   // In-app help (⑧): drawer open state + one-time discoverability hint.
   const [helpOpen, setHelpOpen] = uS(false);
@@ -659,6 +749,8 @@ function Obsidian3() {
     );
   }
 
+  const gridTab = workspace === 'lab' ? (labView === 'iv' ? 'lab-iv' : null) : workspace;
+  const grid = { editing: layoutEdit && !!gridTab, resetToken: layoutReset };
   const qNow = quoteNow || (live && live.quote);
   const spotChgTop = (qNow && qNow.last > 0 && qNow.close > 0) ? qNow.last - qNow.close : null;
   return (
@@ -714,6 +806,10 @@ function Obsidian3() {
         <ExpiryStrip value={expiryId} onChange={setExpiryId} expiries={expiries} />
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {workspace === 'lab' && <LabToggle value={labView} onChange={setLabView} />}
+          {gridTab && (<>
+            <Seg items={[{ id: 'lock', label: '鎖定版面' }, { id: 'edit', label: '調整版面' }]} value={layoutEdit ? 'edit' : 'lock'} onChange={(v) => setLayoutEdit(v === 'edit')} />
+            {layoutEdit && <button style={miniBtn} title="回到這個分頁的預設版面" onClick={() => { clearLayout(gridTab); setLayoutReset((n) => n + 1); }}>重設</button>}
+          </>)}
           <span className="mono tnum" style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{P.unitLabel}</span>
         </div>
       </div>
@@ -722,7 +818,7 @@ function Obsidian3() {
       {workspace === 'levels' && (
         <LevelsWorkspace
           P={P} theme={theme} light={light} spot={spot} expiry={expiry} levels={levels} live={live} market={marketData}
-          rangeLevels={rangeLevels} dayBarsLive={!!liveDayBars} gex={gex}
+          rangeLevels={rangeLevels} dayBarsLive={!!liveDayBars} gex={gex} grid={grid}
           bars={bars} barsLive={!!liveBars} barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
           barSession={barSession} setBarSession={setBarSession}
           D={D}
@@ -741,14 +837,14 @@ function Obsidian3() {
           pnlPts={pnlPts} pnlNTD={pnlNTD}
           maxProfit={maxProfit} maxLoss={maxLoss} fees={fees}
           accent={accent} D={D} t={t}
-          portfolioG={portfolioG} popValue={popValue} quality={quality}
+          portfolioG={portfolioG} popValue={popValue} quality={quality} grid={grid}
         />
       )}
       {workspace === 'lab' && labView === '3d' && (
         <LabSurface P={P} theme={theme} light={light} t={t} spot={spot} dte={dte} legs={legs} hover={hover} setHover={setHover} D={D} />
       )}
       {workspace === 'lab' && labView === 'iv' && (
-        <IVWorkspace D={D} P={P} spot={spot} iv={iv} expiry={expiry} expiries={expiries} rows={chainRows} hv20={hv20} hvLive={hvLive} dayBars={dayBars} live={live} light={light} theme={theme} />
+        <IVWorkspace D={D} P={P} spot={spot} iv={iv} expiry={expiry} expiries={expiries} rows={chainRows} hv20={hv20} hvLive={hvLive} dayBars={dayBars} live={live} light={light} theme={theme} grid={grid} />
       )}
       {workspace === 'chain' && (
         <ChainWorkspace
@@ -760,7 +856,7 @@ function Obsidian3() {
           pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss} fees={fees}
           popValue={popValue} portfolioG={portfolioG}
           accent={accent} t={t} D={D}
-          quality={quality}
+          quality={quality} grid={grid}
         />
       )}
       {workspace === 'chart' && (
@@ -769,7 +865,7 @@ function Obsidian3() {
           barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
           barSession={barSession} setBarSession={setBarSession}
           cone={levels.atmIv ? { ivPct: levels.atmIv, days: expiry.dte, label: expiry.label } : null}
-          D={D}
+          D={D} grid={grid}
         />
       )}
 
@@ -812,7 +908,7 @@ function Obsidian3() {
 }
 
 // ───────────────────────────────────────────────── CALCULATOR WORKSPACE
-function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, accent, D, t, portfolioG, popValue, quality }) {
+function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, accent, D, t, portfolioG, popValue, quality, grid }) {
   const light = theme === 'light';
   // Net of estimated round-trip fees (⑤). Charts stay gross.
   const netPnl = pnlNTD - fees;
@@ -841,168 +937,100 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
   // panel now); a saved 'payoff' view shows the P&L cross-section instead.
   const rv = view === 'payoff' ? 'cross' : view;
 
+  const analysisTabs = [
+    { id: 'cross', label: '損益' },
+    { id: 'greeks', label: '希臘值' },
+    { id: 'dist', label: '分布' },
+    { id: 'attr', label: '歸因' },
+    { id: 'theta', label: '時間' },
+    { id: 'iv', label: 'IV' },
+  ];
+  const analysisTitle = { cross: '損益 vs 現價', greeks: '希臘值曲線 · Δ Γ Θ V 對現價', dist: '損益分布 · 對數常態', attr: '損益歸因 · 漲跌從哪來', theta: '時間價值衰減', iv: 'IV 微笑曲線' }[rv] || '分析';
+  const panels = [
+    { i: 'legs', title: `部位明細${legs.length ? ` · ${legs.length} 筆` : ''}`,
+      right: (
+        <div style={{ display: 'flex', gap: 4 }}>
+          {canImport && <button style={miniBtn} disabled={importing} onClick={importPositions} title={`載入 ${BROKER[P.live]} 帳戶的真實部位`}>{importing ? '…' : `⟳ ${BROKER[P.live]}`}</button>}
+          <StrategyMenu P={P} spot={spot} iv={iv} dte={dte} onPick={setLegs} light={light} />
+          <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 2 * P.strikeStep) / P.strikeStep) * P.strikeStep, iv, dte, P)])}>＋ 新增</button>
+        </div>
+      ),
+      body: (<>
+        <LegEditor legs={legs} onChange={setLegs} theme={theme} expiries={expiries} defaultDte={dte} />
+        {importNote && <div style={{ fontSize: 10, opacity: 0.6, marginTop: 6, fontFamily: 'var(--font-mono)' }}>{importNote}</div>}
+      </>) },
+    { i: 'pricer', title: '理論價試算', hk: 'pricer', right: gridCap(P.model === 'b76' ? 'Black-76' : 'Black-Scholes'),
+      body: <OptionPricer key={P.id} product={P} spot={spot} iv={iv} dte={dte} rows={rows} theme={theme} accent={accent} /> },
+    { i: 'payoff', hk: 'payoff', title: <>到期損益圖 {t.showProbCone && <span style={{ color: '#a78bfa', fontWeight: 500, marginLeft: 4 }}>· 1σ/2σ 機率錐</span>}</>,
+      right: gridCap(`${sliceFrac >= 0.99 ? '到期時' : sliceFrac <= 0.01 ? '現在' : `時間 ${(sliceFrac * 100).toFixed(0)}%`} · ${legs.length} 筆部位`),
+      body: (<>
+        <PayoffChart legs={legs} spot={spot} theme={theme} height={320} width={720} iv={iv} dte={dte} showCone={t.showProbCone} sliceFrac={sliceFrac} rangePct={0.08} showKeyNumbers={true} model={P.model} r={P.r / 100} strikeStep={P.strikeStep} />
+        <div style={{ marginTop: 10 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, opacity: 0.6, fontWeight: 600, marginBottom: 4 }}>
+            <span>損益日期</span>
+            <span className="mono">今天 → 到期</span>
+          </div>
+          <input type="range" min="0" max="1" step="0.01" value={sliceFrac} onChange={(e) => setSliceFrac(parseFloat(e.target.value))}
+            style={{ width: '100%', accentColor: accent }} />
+        </div>
+      </>) },
+    { i: 'heat', title: '損益表 · 價格 × 日期', hk: 'pnlheat', right: gridCap(`IV ${iv.toFixed(1)}% 固定 · ${P.cur} · 毛損益`),
+      body: legs.length ? <window.PnLHeatmap legs={legs} spot={spot} iv={iv} dte={dte} P={P} theme={theme} /> : <div style={{ fontSize: 11, opacity: 0.5, padding: '12px 0' }}>先加入部位。</div> },
+    { i: 'pnl', title: '目前損益', hk: 'pnlnow', tone: 'raised', right: gridCap(fees > 0 ? `已扣估計手續費 ${P.cur}${Math.round(fees).toLocaleString()}` : ''),
+      body: (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+          <div style={{ minWidth: 0 }}>
+            <div className="tnum" style={{
+              fontSize: 30, fontWeight: 700, letterSpacing: -0.6,
+              color: netPnl >= 0 ? (light ? 'oklch(0.60 0.13 75)' : 'oklch(0.84 0.14 75)') : (light ? 'oklch(0.50 0.10 220)' : 'oklch(0.74 0.12 220)'),
+              fontFamily: 'var(--font-mono)', lineHeight: 1,
+            }}>
+              {netPnl >= 0 ? '+' : ''}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
+            </div>
+            <div className="tnum" style={{ fontSize: 10, opacity: 0.55, marginTop: 4 }}>
+              {pnlPts >= 0 ? '+' : ''}{pnlPts.toFixed(1)} 點 {P.unitLabel}
+            </div>
+            <div className="tnum" style={{ fontSize: 11, opacity: 0.6, marginTop: 8, whiteSpace: 'nowrap' }}>
+              最大獲利 <span style={{ color: '#f0c068' }}>+{P.cur}{Math.round(netMaxProfit).toLocaleString()}</span>
+              <span style={{ opacity: 0.4 }}> · </span>
+              最大虧損 <span style={{ color: '#5fa3d4' }}>{P.cur}{Math.round(netMaxLoss).toLocaleString()}</span>
+            </div>
+          </div>
+          <div style={{ width: 96, flexShrink: 0 }}>
+            <div style={{ fontSize: 10, opacity: 0.6, fontWeight: 600, textAlign: 'center' }}>獲利機率</div>
+            <POPGauge theme={theme} size={96} value={popValue} />
+          </div>
+        </div>
+      ) },
+    { i: 'analysis', title: analysisTitle, right: gridCap(rv === 'greeks' ? `${dte} 天 · IV ${iv}%` : rv === 'dist' ? '到期時' : rv === 'attr' ? '相對基準' : rv === 'iv' ? `價平 IV ${iv}%` : `${dte} 天`),
+      body: (<>
+        <div className="seg" style={{ display: 'flex', marginBottom: 8 }}>
+          {analysisTabs.map((tab) => <button key={tab.id} className={rv === tab.id ? 'on' : ''} style={{ flex: 1 }} onClick={() => setView(tab.id)}>{tab.label}</button>)}
+        </div>
+        {rv === 'cross' && <CrossSection theme={theme} dte={dte} height={140} width={304} />}
+        {rv === 'greeks' && <GreeksProfile legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={140} width={304} model={P.model} r={P.r / 100} />}
+        {rv === 'dist' && <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={140} width={304} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />}
+        {rv === 'attr' && <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={150} width={304} baseSpot={P.defaultSpot} baseIv={P.defaultIv} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />}
+        {rv === 'theta' && (<>
+          <ThetaDecay theme={theme} dte={dte} height={140} width={304} />
+          <div style={{ marginTop: 6, fontSize: 11, opacity: 0.6 }}>目前到期天數下每日約 −{P.cur}{(0.12 * P.mult * 100).toFixed(0)}</div>
+        </>)}
+        {rv === 'iv' && <IVSmile theme={theme} iv={iv} height={140} width={304} />}
+      </>) },
+    { i: 'greeks', title: '部位希臘值', right: <DataQualityPill quality={quality} />,
+      body: (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(120px,1fr))', gap: 8 }}>
+          <GreekChip label="Delta · Δ" helpKey="delta" value={(portfolioG.delta >= 0 ? '+' : '') + portfolioG.delta.toFixed(2)} theme={theme} emphasis={portfolioG.delta >= 0 ? 'up' : 'down'} />
+          <GreekChip label="Gamma · Γ" helpKey="gamma" value={portfolioG.gamma.toFixed(4)} theme={theme} />
+          <GreekChip label="Theta · Θ" helpKey="theta" value={(portfolioG.theta >= 0 ? '+' : '') + portfolioG.theta.toFixed(2)} theme={theme} emphasis={portfolioG.theta >= 0 ? 'up' : 'down'} />
+          <GreekChip label="Vega · V" helpKey="vega" value={(portfolioG.vega >= 0 ? '+' : '') + portfolioG.vega.toFixed(2)} theme={theme} emphasis={portfolioG.vega >= 0 ? 'up' : 'down'} />
+        </div>
+      ) },
+  ];
   return (
-    <>
-      {/* Centre: the payoff chart at full size, with the time slice (the 3D
-          surface that used to sit here lives in the Lab tab). */}
-      <div style={{ position: 'absolute', top: 90, left: 12 + 320 + D.gap, right: 12 + 340 + D.gap, zIndex: 5, maxHeight: 'calc(100vh - 102px)', overflow: 'auto' }}>
-        <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow hk="payoff" right={
-            <span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>
-              {sliceFrac >= 0.99 ? '到期時' : sliceFrac <= 0.01 ? '現在' : `時間 ${(sliceFrac * 100).toFixed(0)}%`} · {legs.length} 筆部位
-            </span>
-          }>到期損益圖 {t.showProbCone && <span style={{ color: '#a78bfa', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· 1σ/2σ 機率錐</span>}</Eyebrow>
-          <PayoffChart legs={legs} spot={spot} theme={theme} height={320} width={720} iv={iv} dte={dte} showCone={t.showProbCone} sliceFrac={sliceFrac} rangePct={0.08} showKeyNumbers={true} model={P.model} r={P.r / 100} strikeStep={P.strikeStep} />
-          <div style={{ marginTop: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, opacity: 0.55, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 4 }}>
-              <span>損益日期</span>
-              <span className="mono">今天 → 到期</span>
-            </div>
-            <input type="range" min="0" max="1" step="0.01" value={sliceFrac} onChange={(e) => setSliceFrac(parseFloat(e.target.value))}
-              style={{ width: '100%', accentColor: accent }} />
-          </div>
-        </Glass2>
-
-        {/* P&L by price × date (the OptionStrat table), gross of fees */}
-        {legs.length > 0 && (
-          <Glass2 tone="panel" padding={D.panelPad} style={{ marginTop: D.gap }}>
-            <Eyebrow hk="pnlheat" right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>IV {iv.toFixed(1)}% 固定 · {P.cur} · 毛損益</span>}>損益表 · 價格 × 日期</Eyebrow>
-            <window.PnLHeatmap legs={legs} spot={spot} iv={iv} dte={dte} P={P} theme={theme} />
-          </Glass2>
-        )}
-      </div>
-
-      {/* Left column */}
-      <div className="calc-col" style={{
-        position: 'absolute', top: 90, left: 12, width: 320, zIndex: 5,
-        display: 'flex', flexDirection: 'column', gap: D.gap,
-        maxHeight: 'calc(100vh - 102px)', overflow: 'auto', paddingBottom: 4,
-      }}>
-        <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow right={
-            <div style={{ display: 'flex', gap: 4 }}>
-              {canImport && <button style={miniBtn} disabled={importing} onClick={importPositions} title={`載入 ${BROKER[P.live]} 帳戶的真實部位`}>{importing ? '…' : `⟳ ${BROKER[P.live]} 部位`}</button>}
-              <StrategyMenu P={P} spot={spot} iv={iv} dte={dte} onPick={setLegs} light={light} />
-              <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 2 * P.strikeStep) / P.strikeStep) * P.strikeStep, iv, dte, P)])}>＋ 新增部位</button>
-            </div>
-          }>部位明細{legs.length ? ` · ${legs.length} 筆` : ''}</Eyebrow>
-          <LegEditor legs={legs} onChange={setLegs} theme={theme} expiries={expiries} defaultDte={dte} />
-          {importNote && <div style={{ fontSize: 10, opacity: 0.6, marginTop: 6, fontFamily: 'var(--font-mono)' }}>{importNote}</div>}
-        </Glass2>
-
-        {/* Single-contract pricer — folded in from the removed Pricer tab.
-            Auto: pick a strike, IV is pulled from the chain smile, price is live. */}
-        <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow hk="pricer" right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{P.model === 'b76' ? 'Black-76' : 'Black-Scholes'}</span>}>理論價試算</Eyebrow>
-          <OptionPricer key={P.id} product={P} spot={spot} iv={iv} dte={dte} rows={rows} theme={theme} accent={accent} />
-        </Glass2>
-      </div>
-
-      {/* Right column */}
-      <div className="calc-col" style={{
-        position: 'absolute', top: 90, right: 12, width: 340, zIndex: 5,
-        display: 'flex', flexDirection: 'column', gap: D.gap,
-        maxHeight: 'calc(100vh - 102px)', overflow: 'auto', paddingBottom: 4,
-      }}>
-        <Glass2 tone="raised" padding={D.panelPad}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <Eyebrow hk="pnlnow">目前損益</Eyebrow>
-              <div className="tnum" style={{
-                fontSize: 32, fontWeight: 600, letterSpacing: -0.6,
-                color: netPnl >= 0 ? (light ? 'oklch(0.60 0.13 75)' : 'oklch(0.84 0.14 75)') : (light ? 'oklch(0.50 0.10 220)' : 'oklch(0.74 0.12 220)'),
-                fontFamily: 'var(--font-mono)', lineHeight: 1,
-              }}>
-                {netPnl >= 0 ? '+' : ''}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
-              </div>
-              <div className="tnum" style={{ fontSize: 10, opacity: 0.5, marginTop: 4 }}>
-                {pnlPts >= 0 ? '+' : ''}{pnlPts.toFixed(1)} 點 {P.unitLabel}
-              </div>
-              <div className="tnum" style={{ fontSize: 11, opacity: 0.55, marginTop: 8 }}>
-                最大獲利 <span style={{ color: '#f0c068' }}>+{P.cur}{Math.round(netMaxProfit).toLocaleString()}</span>
-                <span style={{ opacity: 0.4 }}> · </span>
-                最大虧損 <span style={{ color: '#5fa3d4' }}>{P.cur}{Math.round(netMaxLoss).toLocaleString()}</span>
-              </div>
-              {fees > 0 && (
-                <div className="tnum" style={{ fontSize: 9, opacity: 0.45, marginTop: 4 }}>
-                  已扣估計手續費 {P.cur}{Math.round(fees).toLocaleString()}
-                </div>
-              )}
-            </div>
-            <div style={{ width: 110 }}>
-              <div style={{ fontSize: 10, opacity: 0.6, fontWeight: 600, textAlign: 'center' }}>獲利機率</div>
-              <POPGauge theme={theme} size={110} value={popValue} />
-            </div>
-          </div>
-        </Glass2>
-
-        {/* analysis tabs */}
-        <Glass2 tone="chip" padding={3} style={{ display: 'flex', gap: 2, overflowX: 'auto', scrollbarWidth: 'none' }}>
-          {[
-            { id: 'cross', label: '損益' },
-            { id: 'greeks', label: '希臘值' },
-            { id: 'dist', label: '分布' },
-            { id: 'attr', label: '歸因' },
-            { id: 'theta', label: '時間' },
-            { id: 'iv', label: 'IV' },
-          ].map((tab) => (
-            <button key={tab.id} onClick={() => setView(tab.id)} style={{
-              flex: '1 0 auto', minWidth: 48, fontSize: 11, fontWeight: 600, padding: '6px 8px', borderRadius: 0,
-              border: 'none', cursor: 'pointer', transition: 'all .18s',
-              background: rv === tab.id ? (light ? 'rgba(20,40,80,0.10)' : 'rgba(255,255,255,0.10)') : 'transparent',
-              color: rv === tab.id ? 'inherit' : (light ? 'rgba(20,30,50,0.5)' : 'rgba(255,255,255,0.55)'),
-              fontFamily: 'inherit', whiteSpace: 'nowrap',
-            }}>{tab.label}</button>
-          ))}
-        </Glass2>
-
-        <Glass2 tone="panel" padding={D.panelPad}>
-          {rv === 'cross' && (<>
-            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{dte} 天</span>}>損益 vs 現價</Eyebrow>
-            <CrossSection theme={theme} dte={dte} height={140} width={304} />
-          </>)}
-          {rv === 'greeks' && (<>
-            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{dte} 天 · IV {iv}%</span>}>
-              希臘值曲線 <span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· Δ Γ Θ V 對現價</span>
-            </Eyebrow>
-            <GreeksProfile legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={140} width={304} model={P.model} r={P.r / 100} />
-          </>)}
-          {rv === 'dist' && (<>
-            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>到期時</span>}>
-              損益分布 <span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· 對數常態</span>
-            </Eyebrow>
-            <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={140} width={304} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />
-          </>)}
-          {rv === 'attr' && (<>
-            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>相對基準</span>}>
-              損益歸因 <span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· 漲跌從哪來</span>
-            </Eyebrow>
-            <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={150} width={304} baseSpot={P.defaultSpot} baseIv={P.defaultIv} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />
-          </>)}
-          {rv === 'theta' && (<>
-            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>θ</span>}>時間價值衰減</Eyebrow>
-            <ThetaDecay theme={theme} dte={dte} height={140} width={304} />
-            <div style={{ marginTop: 6, fontSize: 11, opacity: 0.6 }}>目前到期天數下每日約 −{P.cur}{(0.12 * P.mult * 100).toFixed(0)}</div>
-          </>)}
-          {rv === 'iv' && (<>
-            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>價平 IV {iv}%</span>}>IV 微笑曲線</Eyebrow>
-            <IVSmile theme={theme} iv={iv} height={140} width={304} />
-          </>)}
-        </Glass2>
-
-        <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow right={<DataQualityPill quality={quality} />}>部位希臘值</Eyebrow>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <GreekChip label="Delta · Δ" helpKey="delta" value={(portfolioG.delta >= 0 ? '+' : '') + portfolioG.delta.toFixed(2)} theme={theme} emphasis={portfolioG.delta >= 0 ? 'up' : 'down'} />
-            <GreekChip label="Gamma · Γ" helpKey="gamma" value={portfolioG.gamma.toFixed(4)} theme={theme} />
-            <GreekChip label="Theta · Θ" helpKey="theta" value={(portfolioG.theta >= 0 ? '+' : '') + portfolioG.theta.toFixed(2)} theme={theme} emphasis={portfolioG.theta >= 0 ? 'up' : 'down'} />
-            <GreekChip label="Vega · V" helpKey="vega" value={(portfolioG.vega >= 0 ? '+' : '') + portfolioG.vega.toFixed(2)} theme={theme} emphasis={portfolioG.vega >= 0 ? 'up' : 'down'} />
-          </div>
-        </Glass2>
-      </div>
-
-      {/* Spot / IV live in the global What-if rail (shell) now. */}
-    </>
+    <div style={GRID_BODY}>
+      <PanelGrid tab="calc" panels={panels} defaults={GRID_DEFAULTS.calc} grid={grid} />
+    </div>
   );
 }
 
@@ -1074,7 +1102,7 @@ function LabSurface({ P, theme = 'dark', light = false, t, spot, dte, legs, hove
 
 // ───────────────────────────────────────────────── CHAIN WORKSPACE
 // P&L what-if card (design ⑤) — compact hero + POP gauge + max profit/loss tiles.
-function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, fees = 0, theme, light, D }) {
+function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, fees = 0, theme, light, D, bare = false }) {
   // Net of estimated round-trip fees (⑤).
   const netPnl = pnlNTD - fees;
   const netMaxProfit = maxProfit - fees;
@@ -1084,11 +1112,10 @@ function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, fees = 0,
     ? (light ? 'oklch(0.60 0.13 75)' : 'oklch(0.84 0.14 75)')
     : (light ? 'oklch(0.50 0.10 220)' : 'oklch(0.74 0.12 220)');
   const tile = { padding: '7px 10px', borderRadius: 0, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' };
-  return (
-    <Glass2 tone="raised" padding="14px 14px 12px" radius={0}>
+  const inner = (<>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
         <div style={{ minWidth: 0 }}>
-          <Eyebrow hk="pnlwhatif">部位損益試算 · {P.code}</Eyebrow>
+          {!bare && <Eyebrow hk="pnlwhatif">部位損益試算 · {P.code}</Eyebrow>}
           <div className="tnum" style={{ fontSize: 24, fontWeight: 600, letterSpacing: -0.4, lineHeight: 1.05, marginTop: 3, fontFamily: 'var(--font-mono)', color: heroColor }}>
             {profit ? '+' : ''}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
           </div>
@@ -1102,16 +1129,17 @@ function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, fees = 0,
       <div style={{ height: 1, background: light ? 'rgba(20,30,50,0.10)' : 'rgba(255,255,255,0.10)', margin: '10px 0 9px' }} />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
         <div className="lt-tile" style={tile}>
-          <div style={{ fontSize: 9, letterSpacing: 0.5, textTransform: 'uppercase', opacity: 0.6 }}>Max profit</div>
+          <div style={{ fontSize: 9, opacity: 0.6 }}>最大獲利</div>
           <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'var(--font-mono)', color: '#f0c068' }}>+{P.cur}{Math.round(netMaxProfit).toLocaleString()}</div>
         </div>
         <div className="lt-tile" style={tile}>
-          <div style={{ fontSize: 9, letterSpacing: 0.5, textTransform: 'uppercase', opacity: 0.6 }}>Max loss</div>
+          <div style={{ fontSize: 9, opacity: 0.6 }}>最大虧損</div>
           <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'var(--font-mono)', color: '#5fa3d4' }}>{P.cur}{Math.round(netMaxLoss).toLocaleString()}</div>
         </div>
       </div>
-    </Glass2>
-  );
+  </>);
+  if (bare) return inner;
+  return <Glass2 tone="raised" padding="14px 14px 12px">{inner}</Glass2>;
 }
 
 // Chain-tab layout switcher (design ③): SIDE / WIDE / SPLIT.
@@ -1125,95 +1153,63 @@ function LayoutToggle({ value, onChange }) {
 }
 
 function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiries, onAddLeg, legs, setLegs,
-  iv, setIv, dte, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, popValue, portfolioG, accent, t, D, quality }) {
+  iv, setIv, dte, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, popValue, portfolioG, accent, t, D, quality, grid }) {
   const light = theme === 'light';
-  const [layout, setLayout] = uS('a');
-  const lay = CHAIN_LAYOUTS[layout];
   const credit = legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0);
-  const glassArea = (area, children, pad = D.panelPad) => (
-    <Glass2 tone="panel" padding={pad} style={{ gridArea: area, minWidth: 0 }}>{children}</Glass2>
+  const greekGrid = (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(120px,1fr))', gap: 8 }}>
+      <GreekChip label="Delta · Δ" helpKey="delta" value={(portfolioG.delta >= 0 ? '+' : '') + portfolioG.delta.toFixed(2)} theme={theme} emphasis={portfolioG.delta >= 0 ? 'up' : 'down'} />
+      <GreekChip label="Gamma · Γ" helpKey="gamma" value={portfolioG.gamma.toFixed(4)} theme={theme} />
+      <GreekChip label="Theta · Θ" helpKey="theta" value={(portfolioG.theta >= 0 ? '+' : '') + portfolioG.theta.toFixed(2)} theme={theme} emphasis={portfolioG.theta >= 0 ? 'up' : 'down'} />
+      <GreekChip label="Vega · V" helpKey="vega" value={(portfolioG.vega >= 0 ? '+' : '') + portfolioG.vega.toFixed(2)} theme={theme} emphasis={portfolioG.vega >= 0 ? 'up' : 'down'} />
+    </div>
   );
+  const panels = [
+    { i: 'chain', title: `${P.nameZh || P.name} T 字報價 · ${P.code}`, right: gridCap(expCap(expiry)),
+      body: <OptionChain spot={spot} contract={expiry.type} dte={expiry.dte} product={P} rows={rows} legs={legs} onAddLeg={onAddLeg} theme={theme} /> },
+    { i: 'whatif', title: `部位損益試算 · ${P.code}`, hk: 'pnlwhatif', tone: 'raised',
+      body: <WhatIfCard bare P={P} pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss} fees={fees} popValue={popValue} theme={theme} light={light} D={D} /> },
+    { i: 'payoff', title: <>到期損益圖 {t.showProbCone && <span style={{ color: '#a78bfa', fontWeight: 500, marginLeft: 4 }}>· 1σ/2σ 機率錐</span>}</>, right: gridCap('到期時'),
+      body: <PayoffChart legs={legs} spot={spot} theme={theme} height={150} width={304} iv={iv} dte={dte} showCone={t.showProbCone} sliceFrac={1} rangePct={0.08} showKeyNumbers={true} model={P.model} r={P.r / 100} strikeStep={P.strikeStep} /> },
+    { i: 'greeks', title: '部位希臘值', right: <DataQualityPill quality={quality} />, body: greekGrid },
+    { i: 'legs', title: `部位明細 · ${legs.length} 筆`,
+      right: (
+        <div style={{ display: 'flex', gap: 4 }}>
+          <StrategyMenu P={P} spot={spot} iv={iv} dte={dte} onPick={setLegs} light={light} />
+          <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 2 * P.strikeStep) / P.strikeStep) * P.strikeStep, iv, dte, P)])}>＋ 新增</button>
+          {legs.length > 0 && <button style={miniBtn} onClick={() => setLegs([])}>清空</button>}
+        </div>
+      ),
+      body: (<>
+        {legs.length === 0 ? (
+          <div style={{ padding: '20px 0', textAlign: 'center', fontSize: 11, opacity: 0.5 }}>點報價表任一列加入部位</div>
+        ) : (
+          <LegEditor legs={legs} onChange={setLegs} theme={theme} expiries={expiries} defaultDte={dte} />
+        )}
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, opacity: 0.6, marginTop: 8, fontFamily: 'var(--font-mono)' }}>
+          <span>{credit >= 0 ? '淨收入' : '淨支出'}</span>
+          <span>{credit >= 0 ? '+' : ''}{P.cur}{Math.round(credit * P.mult).toLocaleString()}</span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 10 }}>
+          {[
+            { label: '跌 5%、IV +15', spot: -5, iv: 15 },
+            { label: '崩跌 10%', spot: -10, iv: 21 },
+          ].map((sc, i) => (
+            <button key={i} onClick={() => {
+              setSpot(Math.round(P.defaultSpot * (1 + sc.spot / 100) / P.spotStep) * P.spotStep);
+              setIv(Math.max(P.ivMin, Math.min(P.ivMax, P.defaultIv + sc.iv)));
+            }} style={{ ...miniBtn, padding: '7px 6px' }}>{sc.label}</button>
+          ))}
+        </div>
+      </>) },
+    { i: 'oiprof', title: '各履約價未平倉', right: gridCap(expCap(expiry)),
+      body: <OIProfile spot={spot} contract={expiry.type} rows={rows} theme={theme} maxRows={11} /> },
+    { i: 'maxpain', title: '最大痛苦點', right: gridCap('結算價'),
+      body: <MaxPain spot={spot} contract={expiry.type} rows={rows} ntdMult={P.mult} cur={P.cur} theme={theme} height={150} width={520} /> },
+  ];
   return (
-    <div style={{ position: 'absolute', top: 90, left: 12, right: 12, bottom: 12, zIndex: 5, overflowY: 'auto', paddingBottom: 4 }}>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
-        <LayoutToggle value={layout} onChange={setLayout} light={light} />
-      </div>
-
-      <div style={{ display: 'grid', gap: D.gap, alignItems: 'start', gridTemplateColumns: lay.cols, gridTemplateAreas: lay.areas }}>
-        {/* chain */}
-        <Glass2 tone="panel" padding={D.panelPad} style={{ gridArea: 'chain', minWidth: 0 }}>
-          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.date} {expiry.type === 'monthly' ? '月選' : expiry.label} · {expiry.dte} 天</span>}>{P.nameZh || P.name} T 字報價 · {P.code}</Eyebrow>
-          <OptionChain spot={spot} contract={expiry.type} dte={expiry.dte} product={P} rows={rows} legs={legs} onAddLeg={onAddLeg} theme={theme} />
-        </Glass2>
-
-        {/* pnl what-if */}
-        <div style={{ gridArea: 'pnl', minWidth: 0 }}>
-          <WhatIfCard P={P} pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss} fees={fees} popValue={popValue} theme={theme} light={light} D={D} />
-        </div>
-
-        {/* payoff */}
-        {glassArea('payoff', (<>
-          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>到期時</span>}>
-            到期損益圖 {t.showProbCone && <span style={{ color: '#a78bfa', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· 1σ/2σ 機率錐</span>}
-          </Eyebrow>
-          <PayoffChart legs={legs} spot={spot} theme={theme} height={150} width={304} iv={iv} dte={dte} showCone={t.showProbCone} sliceFrac={1} rangePct={0.08} showKeyNumbers={true} model={P.model} r={P.r / 100} strikeStep={P.strikeStep} />
-        </>))}
-
-        {/* greeks */}
-        <div style={{ gridArea: 'greeks', minWidth: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 8 }}>
-          <GreekChip label="Delta · Δ" helpKey="delta" value={(portfolioG.delta >= 0 ? '+' : '') + portfolioG.delta.toFixed(2)} theme={theme} emphasis={portfolioG.delta >= 0 ? 'up' : 'down'} />
-          <GreekChip label="Gamma · Γ" helpKey="gamma" value={portfolioG.gamma.toFixed(4)} theme={theme} />
-          <GreekChip label="Theta · Θ" helpKey="theta" value={(portfolioG.theta >= 0 ? '+' : '') + portfolioG.theta.toFixed(2)} theme={theme} emphasis={portfolioG.theta >= 0 ? 'up' : 'down'} />
-          <GreekChip label="Vega · V" helpKey="vega" value={(portfolioG.vega >= 0 ? '+' : '') + portfolioG.vega.toFixed(2)} theme={theme} emphasis={portfolioG.vega >= 0 ? 'up' : 'down'} />
-        </div>
-
-        {/* legs */}
-        {glassArea('legs', (<>
-          <Eyebrow right={
-            <div style={{ display: 'flex', gap: 4 }}>
-              <StrategyMenu P={P} spot={spot} iv={iv} dte={dte} onPick={setLegs} light={light} />
-              <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 2 * P.strikeStep) / P.strikeStep) * P.strikeStep, iv, dte, P)])}>+ leg</button>
-              {legs.length > 0 && <button style={miniBtn} onClick={() => setLegs([])}>clear</button>}
-            </div>
-          }>部位明細 · {legs.length} 筆</Eyebrow>
-          {legs.length === 0 ? (
-            <div style={{ padding: '20px 0', textAlign: 'center', fontSize: 11, opacity: 0.5 }}>Click any chain row to add a leg</div>
-          ) : (
-            <LegEditor legs={legs} onChange={setLegs} theme={theme} expiries={expiries} defaultDte={dte} />
-          )}
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, opacity: 0.6, marginTop: 8, fontFamily: 'var(--font-mono)' }}>
-            <span>{credit >= 0 ? '淨收入' : '淨支出'}</span>
-            <span>{credit >= 0 ? '+' : ''}{P.cur}{Math.round(credit * P.mult).toLocaleString()}</span>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 10 }}>
-            {[
-              { label: '−5% & IV+15%', spot: -5, iv: 15 },
-              { label: '−10% crash', spot: -10, iv: 21 },
-            ].map((s, i) => (
-              <button key={i} onClick={() => {
-                setSpot(Math.round(P.defaultSpot * (1 + s.spot / 100) / P.spotStep) * P.spotStep);
-                setIv(Math.max(P.ivMin, Math.min(P.ivMax, P.defaultIv + s.iv)));
-              }} style={{
-                padding: '8px 6px', borderRadius: 0, fontSize: 10, fontWeight: 600,
-                border: '1px solid rgba(128,140,170,0.28)', cursor: 'pointer',
-                background: 'rgba(128,140,170,0.12)', color: 'inherit', fontFamily: 'inherit',
-              }}>{s.label}</button>
-            ))}
-          </div>
-        </>))}
-      </div>
-
-      {/* OI Profile + Max Pain — kept, below the grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: D.gap, marginTop: D.gap }}>
-        <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.date} {expiry.type === 'monthly' ? '月選' : expiry.label} · {expiry.dte} 天</span>}>各履約價未平倉</Eyebrow>
-          <OIProfile spot={spot} contract={expiry.type} rows={rows} theme={theme} maxRows={11} />
-        </Glass2>
-        <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>結算價</span>}>最大痛苦點</Eyebrow>
-          <MaxPain spot={spot} contract={expiry.type} rows={rows} ntdMult={P.mult} cur={P.cur} theme={theme} height={150} width={520} />
-        </Glass2>
-      </div>
+    <div style={GRID_BODY}>
+      <PanelGrid tab="chain" panels={panels} defaults={GRID_DEFAULTS.chain} grid={grid} />
     </div>
   );
 }
@@ -1588,7 +1584,7 @@ function LevelsLadder({ P, spot, L, G, light }) {
   );
 }
 
-function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, levels: L, live, market: M, rangeLevels: R, dayBarsLive, gex: G, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D }) {
+function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, levels: L, live, market: M, rangeLevels: R, dayBarsLive, gex: G, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D, grid }) {
   const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
   const chg = (v) => (v == null ? '' : `（${v > 0 ? '+' : ''}${v.toLocaleString()}）`);
@@ -1632,10 +1628,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
   const dim = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
   const pc = M && M.pcRatio, fx = M && M.foreign, t10 = M && M.top10;
   const noMkt = isLive ? '期交所資料未載入' : '模擬模式沒有籌碼資料';
-  return (
-    <div style={{ position: 'absolute', top: 90, left: 12, right: 12, bottom: 12, zIndex: 5, overflowY: 'auto', paddingBottom: 4 }}>
-      {/* the strip: 關卡 on the left, 籌碼 on the right — one row of big numbers */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(172px, 1fr))', gap: D.gap, marginBottom: D.gap }}>
+  const tiles = (<>
         <LevelTile label={`現價 ${P.code}`} value={fmtP(spot)} color={spotChg == null ? LEVEL_COLORS.spot : spotChg >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down}
           sub={spotChg != null ? <><Chg v={spotChg} fmt={(x) => fmtP(x)} /> {q.chgPct != null ? `（${q.chgPct >= 0 ? '+' : ''}${q.chgPct}%）` : ''}</> : (isLive ? liveLabel(live, P) : '模擬')} light={light} />
         <LevelTile label="價平和" hk="straddle" color={LEVEL_COLORS.band}
@@ -1657,7 +1650,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
           sub={t10 ? <>較前日 <Chg v={t10.chg} /></> : noMkt} light={light} />
         <LevelTile label="預期波動 ±1σ" hk="expmove" color={LEVEL_COLORS.band}
           value={L.sigma1 != null ? `±${fmtP(Math.round(L.sigma1))}` : '—'}
-          sub={L.sigma1 != null ? <>{fmtP(Math.round(spot - L.sigma1))}–{fmtP(Math.round(spot + L.sigma1))} · IV {L.atmIv.toFixed(1)}% · {expiry.dte}d{L.straddle != null ? ` · 價平和×0.85 ${window.fmtPx(L.straddle * 0.85, P)}` : ''}</> : '沒有 IV'} light={light} />
+          sub={L.sigma1 != null ? <>{fmtP(Math.round(spot - L.sigma1))}–{fmtP(Math.round(spot + L.sigma1))} · IV {L.atmIv.toFixed(1)}% · {expiry.dte} 天{L.straddle != null ? ` · 價平和×0.85 ${window.fmtPx(L.straddle * 0.85, P)}` : ''}</> : '沒有 IV'} light={light} />
         <LevelTile label="距一壘" hk="rangelevels" color={LEVEL_COLORS.range}
           value={near1B ? fmtP(near1B.price) : '—'}
           sub={near1B ? <>{near1B.side}方一壘 · 差 <b>{fmtP(Math.abs(near1B.price - spot))}</b> 點</> : (R ? '兩側一壘皆已到達' : '日K不足')} light={light} />
@@ -1666,50 +1659,38 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
           color={pc ? (pc.ratio >= 1 ? LEVEL_COLORS.down : LEVEL_COLORS.up) : undefined}
           sub={pc ? <>較前日 <Chg v={pc.chg} fmt={(x) => x.toFixed(2)} /></> : noMkt}
           right={pc ? <Spark series={pc.series} w={64} light={light} /> : null} light={light} />
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(380px, 440px) 1fr', gap: D.gap, alignItems: 'start' }}>
-        {/* ladder */}
-        <Glass2 tone="panel" padding={D.panelPad} style={{ minWidth: 0 }}>
-          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.date} {expiry.type === 'monthly' ? '月選' : expiry.label} · {expiry.dte} 天</span>}>關卡 · {P.nameZh || P.name}</Eyebrow>
-          <LevelsLadder P={P} spot={spot} L={L} G={G} light={light} />
-          <div className="mono" style={{ marginTop: 10, fontSize: 9.5, color: dim, display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-            <span>{oiLabel}</span>
-            <span>權利金：{isLive ? `● ${liveLabel(live, P)}` : '○ 模擬'}</span>
-          </div>
-          <div style={{ marginTop: D.gap, paddingTop: D.gap, borderTop: `1px solid ${light ? 'rgba(25,40,70,0.18)' : 'rgba(255,255,255,0.12)'}` }}>
-            <Eyebrow hk="rangelevels" right={<span className="mono tnum" style={{ fontSize: 9, opacity: 0.5 }}>近{RANGE_LEVEL_N}日振幅</span>}>關卡價 · 振幅</Eyebrow>
-            <RangeLevelsPanel P={P} spot={spot} R={R} light={light} sourceLabel={rangeSource} />
-          </div>
-        </Glass2>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: D.gap, minWidth: 0 }}>
-          {/* K-line with the levels drawn on it */}
-          <Glass2 tone="panel" padding={D.panelPad}>
-            <Eyebrow right={<div style={{ display: 'flex', gap: 8 }}><KSessionToggle value={barSession} onChange={setBarSession} light={light} /><KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} light={light} /></div>}>
-              台指期 {barSession === 'full' ? '全日盤' : '日盤'} 日K · 關卡價位
-              <span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· {barsLive ? liveLabel(live, P) : '模擬'}</span>
-            </Eyebrow>
-            <PriceChart bars={bars} theme={theme} code={P.code} periodLabel={per.label === '日' ? '日K' : per.label} levels={chartLevels}
-              cone={L.atmIv ? { ivPct: L.atmIv, days: expiry.dte, label: expiry.label } : null} />
-          </Glass2>
-
-          {/* OI by strike with change column */}
-          <Glass2 tone="panel" padding={D.panelPad}>
-            <Eyebrow hk="oichg" right={<span className="mono tnum" style={{ fontSize: 9.5, opacity: 0.6 }}>{pcExpiry != null ? `本到期日 P/C ${pcExpiry.toFixed(2)} · ` : ''}{oiLabel}</span>}>各履約價未平倉 · 對前日增減</Eyebrow>
-            <OIProfile spot={spot} contract={expiry.type} rows={oiRows} theme={theme} maxRows={15} showChange walls={walls} />
-          </Glass2>
-
-          {/* Dealer gamma exposure by strike (SpotGamma-style), same expiry */}
-          <Glass2 tone="panel" padding={D.panelPad}>
-            <Eyebrow hk="gex" right={<span className="mono tnum" style={{ fontSize: 9.5, opacity: 0.6 }}>{G ? <>總 GEX <b style={{ color: G.total >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down }}>{fmtBig(G.total, P)}</b>/1%{G.flip != null ? ` · 零 Gamma ${fmtP(Math.round(G.flip))}` : ''} · </> : ''}{oiLabel}</span>}>Gamma 曝險 · 各履約價（本到期日）</Eyebrow>
-            {G ? <GexProfile P={P} spot={spot} G={G} theme={theme} light={light} maxRows={15} /> : <div className="mono" style={{ fontSize: 11, color: dim }}>沒有 OI 或 IV，無法計算。</div>}
-            <div className="mono" style={{ marginTop: 8, fontSize: 9.5, color: dim }}>
-              GEX = γ × OI × {P.mult} × S² × 1%，Call 為正、Put 為負（SqueezeMetrics 的造市者存貨慣例：Call 多 Gamma／Put 空 Gamma）。零 Gamma 以上造市者順勢對沖壓抑波動，以下追價放大波動。OI 為前一交易日。
-            </div>
-          </Glass2>
+  </>);
+  const panels = [
+    { i: 'strip', title: '關卡 · 籌碼', right: gridCap(`${isLive ? liveLabel(live, P) : '模擬'} · 籌碼為前一交易日`), pad: 8,
+      body: <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>{tiles}</div> },
+    { i: 'ladder', title: `關卡 · ${P.nameZh || P.name}`, right: gridCap(expCap(expiry)),
+      body: (<>
+        <LevelsLadder P={P} spot={spot} L={L} G={G} light={light} />
+        <div className="mono" style={{ marginTop: 8, fontSize: 9.5, color: dim, display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+          <span>{oiLabel}</span>
+          <span>權利金：{isLive ? `● ${liveLabel(live, P)}` : '○ 模擬'}</span>
         </div>
-      </div>
+      </>) },
+    { i: 'range', title: '關卡價 · 振幅', hk: 'rangelevels', right: gridCap(`近${RANGE_LEVEL_N}日振幅`),
+      body: <RangeLevelsPanel P={P} spot={spot} R={R} light={light} sourceLabel={rangeSource} /> },
+    { i: 'kline', title: <>台指期 {barSession === 'full' ? '全日盤' : '日盤'} 日K · 關卡價位<span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4 }}>· {barsLive ? liveLabel(live, P) : '模擬'}</span></>,
+      right: <div style={{ display: 'flex', gap: 8 }}><KSessionToggle value={barSession} onChange={setBarSession} /><KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} /></div>,
+      body: <PriceChart bars={bars} theme={theme} code={P.code} periodLabel={per.label === '日' ? '日K' : per.label} levels={chartLevels}
+              cone={L.atmIv ? { ivPct: L.atmIv, days: expiry.dte, label: expiry.label } : null} /> },
+    { i: 'oi', title: '各履約價未平倉 · 對前日增減', hk: 'oichg', right: gridCap(`${pcExpiry != null ? `本到期日 P/C ${pcExpiry.toFixed(2)} · ` : ''}${oiLabel}`),
+      body: <OIProfile spot={spot} contract={expiry.type} rows={oiRows} theme={theme} maxRows={15} showChange walls={walls} /> },
+    { i: 'gex', title: 'Gamma 曝險 · 各履約價（本到期日）', hk: 'gex',
+      right: <span className="mono tnum" style={{ fontSize: 9.5, opacity: 0.7 }}>{G ? <>總 GEX <b style={{ color: G.total >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down }}>{fmtBig(G.total, P)}</b>/1%{G.flip != null ? ` · 零 Gamma ${fmtP(Math.round(G.flip))}` : ''} · </> : ''}{oiLabel}</span>,
+      body: (<>
+        {G ? <GexProfile P={P} spot={spot} G={G} theme={theme} light={light} maxRows={15} /> : <div className="mono" style={{ fontSize: 11, color: dim }}>沒有 OI 或 IV，無法計算。</div>}
+        <div className="mono" style={{ marginTop: 8, fontSize: 9.5, color: dim }}>
+          GEX = γ × OI × {P.mult} × S² × 1%，Call 為正、Put 為負（SqueezeMetrics 的造市者存貨慣例：Call 多 Gamma／Put 空 Gamma）。零 Gamma 以上造市者順勢對沖壓抑波動，以下追價放大波動。OI 為前一交易日。
+        </div>
+      </>) },
+  ];
+  return (
+    <div style={GRID_BODY}>
+      <PanelGrid tab="levels" panels={panels} defaults={GRID_DEFAULTS.levels} grid={grid} />
     </div>
   );
 }
@@ -1717,25 +1698,23 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
 // ───────────────────────────────────────────────── CHART WORKSPACE
 // Top-level Chart tab (from the design): full-width candles + MA + RSI.
 // Desktop only — mobile keeps the K線 sub-tab inside Calc.
-function ChartWorkspace({ P, bars, barsLive, live, theme, light, barPeriodId, setBarPeriodId, barSession, setBarSession, cone = null, D }) {
+function ChartWorkspace({ P, bars, barsLive, live, theme, light, barPeriodId, setBarPeriodId, barSession, setBarSession, cone = null, D, grid }) {
   const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
-  return (
-    <div style={{ position: 'absolute', top: 90, left: 12, right: 12, bottom: 12, zIndex: 5, overflowY: 'auto' }}>
-      <Glass2 tone="panel" padding={D.panelPad}>
-        <Eyebrow right={<div style={{ display: 'flex', gap: 8 }}><KSessionToggle value={barSession} onChange={setBarSession} light={light} /><KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} light={light} /></div>}>
-          K線 · {P.code}
-          <span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>
-            · {barsLive ? `近月 · ${liveLabel(live, P)}` : '模擬'}
-          </span>
-        </Eyebrow>
-        <PriceChart cone={cone}
+  const panels = [{
+    i: 'kline',
+    title: <>K線 · {P.code}<span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4 }}>· {barsLive ? `近月 · ${liveLabel(live, P)}` : '模擬'}</span></>,
+    right: <div style={{ display: 'flex', gap: 8 }}><KSessionToggle value={barSession} onChange={setBarSession} /><KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} /></div>,
+    body: <PriceChart cone={cone}
           bars={bars} theme={theme} code={P.code}
           periodLabel={(per.label === '日' ? '日K' : per.label) + (barSession === 'full' ? ' · 全日盤' : ' · 日盤')}
           sourceLabel={barsLive
             ? `● ${liveLabel(live, P)} — 近月期貨日K`
             : '○ 模擬 K 線 — 隨機漫步；接上本機代理（server/）才有真實行情'}
-        />
-      </Glass2>
+        />,
+  }];
+  return (
+    <div style={GRID_BODY}>
+      <PanelGrid tab="chart" panels={panels} defaults={GRID_DEFAULTS.chart} grid={grid} />
     </div>
   );
 }
@@ -1790,7 +1769,7 @@ function ivAnalytics({ rows, expiry, expiries, spot, P }) {
   return { grid: { strikes, exps, base }, term, skew };
 }
 
-function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv20, hvLive, dayBars = null, live = null, light = false, theme = 'dark' }) {
+function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv20, hvLive, dayBars = null, live = null, light = false, theme = 'dark', grid: gridCtl }) {
   const ref = uR(null);
   const instRef = uR(null);
   const [ivView, setIvView] = uS('3d'); // '3d' | 'heat'
@@ -1849,97 +1828,90 @@ function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv
   };
   const cellBorder = light ? 'rgba(25,40,70,0.08)' : 'rgba(255,255,255,0.06)';
 
-  return (
-    <div style={{ position: 'absolute', top: 90, left: 12, right: 12, bottom: 12, zIndex: 5, display: 'flex', gap: D.gap }}>
-      <Glass2 tone="panel" padding={D.panelPad} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        <Eyebrow right={<span style={{ display: 'inline-flex', gap: 4 }}>{viewChip('3d', '3D')}{viewChip('heat', '熱圖')}</span>}>隱含波動率曲面 · {P.code}</Eyebrow>
-        {ivView === '3d' ? (
-          <div ref={ref} style={{ flex: 1, minHeight: 360, borderRadius: 0, overflow: 'hidden', background: 'radial-gradient(ellipse at 30% 30%, rgba(167,139,250,0.10), transparent 60%)' }} />
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <div style={{ minWidth: 640, fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums', fontSize: 11 }}>
-              <div style={{ display: 'flex' }}>
-                <div style={{ width: 64, flexShrink: 0, fontSize: 9, opacity: 0.5, fontWeight: 600, padding: '8px 10px' }}>到期</div>
-                {heat.header.map((h, i) => (
-                  <div key={i} style={{ flex: 1, textAlign: 'center', fontSize: 9, letterSpacing: 0.4, opacity: 0.5, fontWeight: 600, padding: '8px 0' }}>{h}</div>
-                ))}
-              </div>
-              {heat.rows.map((row) => (
-                <div key={row.exp} style={{ display: 'flex' }}>
-                  <div style={{ width: 64, flexShrink: 0, padding: '9px 10px', borderTop: `1px solid ${cellBorder}`, fontWeight: 600 }}>{row.exp}</div>
-                  {row.cells.map((c, i) => (
-                    <div key={i} style={{ flex: 1, textAlign: 'center', padding: '9px 0', borderTop: `1px solid ${cellBorder}`, background: c.bg }}>{c.v}</div>
-                  ))}
-                </div>
-              ))}
-            </div>
-            <div style={{ marginTop: 12, fontSize: 10, opacity: 0.5, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span>low</span>
-              <span style={{ display: 'inline-block', width: 120, height: 8, borderRadius: 4, background: 'linear-gradient(90deg,rgba(240,192,104,0.06),rgba(240,192,104,0.6))' }} />
-              <span>high · rows = expiry · cols = strike · value = IV %</span>
-            </div>
-          </div>
-        )}
-      </Glass2>
-      <div style={{ width: 280, display: 'flex', flexDirection: 'column', gap: D.gap }}>
-        {/* IV vs realized — is premium rich or cheap? */}
-        {hv20 != null && (
-          <Glass2 tone="raised" padding={D.panelPad}>
-            <Eyebrow hk="hv" right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{hvLive ? `${liveLabel(live, P)} 日K` : '模擬'}</span>}>隱含 vs 歷史波動 · 20 日</Eyebrow>
-            <div className="tnum" style={{ fontSize: 20, fontWeight: 600, fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <span>{iv.toFixed(1)}%</span>
-              <span style={{ opacity: 0.4, fontSize: 13 }}>vs</span>
-              <span style={{ opacity: 0.75 }}>{hv20.toFixed(1)}%</span>
-              <span style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 700, color: iv / hv20 > 1.15 ? '#f0c068' : iv / hv20 < 0.85 ? '#5fa3d4' : (light ? 'rgba(20,30,50,0.6)' : 'rgba(255,255,255,0.6)') }}>
-                ×{(iv / hv20).toFixed(2)}
-              </span>
-            </div>
-            <div style={{ fontSize: 11, opacity: 0.6, marginTop: 6 }}>
-              {iv / hv20 > 1.15 ? 'IV 高於實際波動 — 權利金偏貴，利於賣方'
-                : iv / hv20 < 0.85 ? 'IV 低於實際波動 — 權利金偏便宜，利於買方'
-                : 'IV ≈ 實際波動 — 權利金合理'}
-            </div>
-            <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid ' + (light ? 'rgba(25,40,70,0.12)' : 'rgba(255,255,255,0.08)') }}>
-              <Eyebrow hk="volcone">波動率錐 · HV 5/10/20/60 日</Eyebrow>
-              <window.VolCone bars={dayBars} ivPct={iv} theme={theme} />
-            </div>
-          </Glass2>
-        )}
-        <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>價平 IV</span>}>期限結構</Eyebrow>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {term.map((e) => (
-              <div key={e.label + e.dte} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                <span style={{ opacity: 0.7 }}>{e.label} · {e.dte} 天</span>
-                <span className="mono" style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: e.dte === expiry.dte ? '#f0c068' : (light ? '#3a4658' : '#cdd3df') }}>
-                  {e.iv != null ? e.iv.toFixed(1) + '%' : '—'}
-                </span>
-              </div>
+  const surfaceBody = ivView === '3d' ? (
+    <div ref={ref} style={{ height: '100%', minHeight: 320, overflow: 'hidden', background: 'radial-gradient(ellipse at 30% 30%, rgba(167,139,250,0.10), transparent 60%)' }} />
+  ) : (
+    <div style={{ overflowX: 'auto' }}>
+      <div style={{ minWidth: 640, fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums', fontSize: 11 }}>
+        <div style={{ display: 'flex' }}>
+          <div style={{ width: 64, flexShrink: 0, fontSize: 9, opacity: 0.5, fontWeight: 600, padding: '8px 10px' }}>到期</div>
+          {heat.header.map((h, i) => (
+            <div key={i} style={{ flex: 1, textAlign: 'center', fontSize: 9, opacity: 0.5, fontWeight: 600, padding: '8px 0' }}>{h}</div>
+          ))}
+        </div>
+        {heat.rows.map((row) => (
+          <div key={row.exp} style={{ display: 'flex' }}>
+            <div style={{ width: 64, flexShrink: 0, padding: '9px 10px', borderTop: `1px solid ${cellBorder}`, fontWeight: 600 }}>{row.exp}</div>
+            {row.cells.map((c, i) => (
+              <div key={i} style={{ flex: 1, textAlign: 'center', padding: '9px 0', borderTop: `1px solid ${cellBorder}`, background: c.bg }}>{c.v}</div>
             ))}
           </div>
-        </Glass2>
-        <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.date} {expiry.type === 'monthly' ? '月選' : expiry.label} · {expiry.dte} 天</span>}>偏斜 · 25Δ</Eyebrow>
-          {skew != null ? (<>
-            <div className="tnum" style={{ fontSize: 22, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
-              <span style={{ color: skew >= 0 ? '#5fa3d4' : '#f0c068' }}>{skew >= 0 ? '+' : ''}{skew.toFixed(1)}</span>
-              <span style={{ opacity: 0.4, fontSize: 14 }}> vol 點</span>
-            </div>
-            <div style={{ fontSize: 11, opacity: 0.55, marginTop: 6 }}>
-              {skew >= 0 ? 'Put 偏斜 · 下檔避險有價' : 'Call 偏斜 · 上檔風險溢價'}
-            </div>
-          </>) : (
-            <div style={{ fontSize: 11, opacity: 0.5 }}>此到期日沒有可用的 25Δ 報價</div>
-          )}
-        </Glass2>
-        <Glass2 tone="chip" padding={D.panelPad}>
-          <div style={{ fontSize: 11, opacity: 0.65, lineHeight: 1.55 }}>
-            {ivView === '3d'
-              ? <><strong>拖曳</strong>旋轉 · <strong>滾輪</strong>縮放。高度＝各履約價（X）× 各到期日（縱深，前緣最近）的 IV。取自報價表的每檔 IV；沒載入報價的到期日用模型微笑曲線。</>
-              : <>每格＝該履約價、該到期日的 IV（%）。越亮越高。橫向讀微笑／偏斜，縱向讀期限結構。</>}
-          </div>
-        </Glass2>
+        ))}
       </div>
+      <div style={{ marginTop: 12, fontSize: 10, opacity: 0.5, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span>低</span>
+        <span style={{ display: 'inline-block', width: 120, height: 8, background: 'linear-gradient(90deg,rgba(240,192,104,0.06),rgba(240,192,104,0.6))' }} />
+        <span>高 · 列＝到期日 · 欄＝履約價 · 值＝IV %</span>
+      </div>
+    </div>
+  );
+  const panels = [
+    { i: 'surface', title: `隱含波動率曲面 · ${P.code}`, right: <span style={{ display: 'inline-flex', gap: 4 }}>{viewChip('3d', '3D')}{viewChip('heat', '熱圖')}</span>, body: surfaceBody },
+    { i: 'hv', title: '隱含 vs 歷史波動 · 20 日', hk: 'hv', tone: 'raised', right: gridCap(hvLive ? `${liveLabel(live, P)} 日K` : '模擬'),
+      body: hv20 == null ? <div style={{ fontSize: 11, opacity: 0.5 }}>日K不足，無法計算歷史波動。</div> : (<>
+        <div className="tnum" style={{ fontSize: 20, fontWeight: 600, fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <span>{iv.toFixed(1)}%</span>
+          <span style={{ opacity: 0.4, fontSize: 13 }}>vs</span>
+          <span style={{ opacity: 0.75 }}>{hv20.toFixed(1)}%</span>
+          <span style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 700, color: iv / hv20 > 1.15 ? '#f0c068' : iv / hv20 < 0.85 ? '#5fa3d4' : 'var(--text2)' }}>
+            ×{(iv / hv20).toFixed(2)}
+          </span>
+        </div>
+        <div style={{ fontSize: 11, opacity: 0.6, marginTop: 6 }}>
+          {iv / hv20 > 1.15 ? 'IV 高於實際波動 — 權利金偏貴，利於賣方'
+            : iv / hv20 < 0.85 ? 'IV 低於實際波動 — 權利金偏便宜，利於買方'
+            : 'IV ≈ 實際波動 — 權利金合理'}
+        </div>
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 6 }}>{window.HelpTip ? <window.HelpTip k="volcone">波動率錐 · HV 5/10/20/60 日</window.HelpTip> : '波動率錐 · HV 5/10/20/60 日'}</div>
+          <window.VolCone bars={dayBars} ivPct={iv} theme={theme} />
+        </div>
+      </>) },
+    { i: 'term', title: '期限結構', right: gridCap('價平 IV'),
+      body: (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {term.map((e) => (
+            <div key={e.label + e.dte} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '3px 0', borderBottom: '1px solid var(--border)' }}>
+              <span style={{ opacity: 0.7 }}>{e.label} · {e.dte} 天</span>
+              <span className="mono tnum" style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: e.dte === expiry.dte ? '#f0c068' : 'var(--text)' }}>
+                {e.iv != null ? e.iv.toFixed(1) + '%' : '—'}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) },
+    { i: 'skew', title: '偏斜 · 25Δ', right: gridCap(expCap(expiry)),
+      body: skew != null ? (<>
+        <div className="tnum" style={{ fontSize: 22, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
+          <span style={{ color: skew >= 0 ? '#5fa3d4' : '#f0c068' }}>{skew >= 0 ? '+' : ''}{skew.toFixed(1)}</span>
+          <span style={{ opacity: 0.4, fontSize: 14 }}> vol 點</span>
+        </div>
+        <div style={{ fontSize: 11, opacity: 0.55, marginTop: 6 }}>
+          {skew >= 0 ? 'Put 偏斜 · 下檔避險有價' : 'Call 偏斜 · 上檔風險溢價'}
+        </div>
+      </>) : <div style={{ fontSize: 11, opacity: 0.5 }}>此到期日沒有可用的 25Δ 報價</div> },
+    { i: 'help', title: '怎麼讀', tone: 'chip',
+      body: (
+        <div style={{ fontSize: 11, opacity: 0.75, lineHeight: 1.55 }}>
+          {ivView === '3d'
+            ? <><strong>拖曳</strong>旋轉 · <strong>滾輪</strong>縮放。高度＝各履約價（X）× 各到期日（縱深，前緣最近）的 IV。取自報價表的每檔 IV；沒載入報價的到期日用模型微笑曲線。</>
+            : <>每格＝該履約價、該到期日的 IV（%）。越亮越高。橫向讀微笑／偏斜，縱向讀期限結構。</>}
+        </div>
+      ) },
+  ];
+  return (
+    <div style={GRID_BODY}>
+      <PanelGrid tab="lab-iv" panels={panels} defaults={GRID_DEFAULTS['lab-iv']} grid={gridCtl} />
     </div>
   );
 }
