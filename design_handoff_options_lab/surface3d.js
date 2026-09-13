@@ -268,9 +268,9 @@
     applyCamera();
 
     let dragging = false, lx = 0, ly = 0, didDrag = false;
-    // Once the user orbits the surface by hand, stop the idle auto-spin so it
-    // stays where they left it (owner request). Idle spin still runs until the
-    // first drag, as a gentle "this is interactive" hint.
+    // No idle auto-spin: the surface holds its pose until the user orbits it
+    // (owner request, 2026-09 — the earlier "spin until first grab" hint was
+    // distracting). userMoved is kept for the drag handlers below.
     let userMoved = false;
     const dom = renderer.domElement;
     dom.style.cursor = 'grab';
@@ -278,8 +278,6 @@
     // rotate (1-finger) and pinch-zoom (2-finger). Without this, mobile Chrome will
     // try to scroll the page during a drag, which feels broken.
     dom.style.touchAction = 'none';
-    // isTouch (declared at top of makeSurface) is used below to disable auto-rotate
-    // on phones — auto-spin fights with user gestures when they pause to read.
     const ray = new THREE.Raycaster();
     const mouseN = new THREE.Vector2();
 
@@ -382,7 +380,6 @@
       const dt = (now - last) / 1000; last = now;
       if (!dragging && !pinching) {
         idleTime += dt;
-        if (!isTouch && !userMoved && idleTime > 1.5) orbit.az += dt * 0.04;
         applyCamera();
       } else {
         idleTime = 0;

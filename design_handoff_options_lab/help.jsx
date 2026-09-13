@@ -56,8 +56,8 @@ const HELP_SECTIONS = [
     'Click any quote to add it as a leg, then choose BUY or SELL. Your open legs show BUY / SELL badges on their strikes.',
   ] },
   { id: 'surface', tabs: ['calc'], title: 'Calculator — 3D P&L surface', paras: [
-    'The rotating surface is your position’s P&L. Horizontal axis = underlying price; depth axis = days passing (front edge = today, back edge = expiry); height and color = profit (gold) or loss (blue).',
-    'Hover to read exact numbers. Drag to orbit, scroll to zoom. It idles gently until you grab it once, then stays where you leave it.',
+    'The surface is your position’s P&L. Horizontal axis = underlying price; depth axis = days passing (front edge = today, back edge = expiry); height and color = profit (gold) or loss (blue).',
+    'Hover to read exact numbers. Drag to orbit, scroll to zoom. It stays where you leave it.',
   ] },
   { id: 'payoff', tabs: ['calc', 'chain'], title: 'Payoff chart', paras: [
     'The solid line is P&L across underlying prices at the front expiry (the earliest-expiring leg). Drag the time slice to compare today vs expiry.',
