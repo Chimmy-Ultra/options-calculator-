@@ -154,7 +154,7 @@ function WorkspaceTabs({ value, onChange, accent, light }) {
     { id: 'chain',  label: 'Chain',      icon: '☷' },
     { id: 'chart',  label: 'Chart',      icon: '☵' },
     { id: 'calc',   label: 'Calculator', icon: '◈' },
-    { id: 'iv',     label: 'IV Surface', icon: '◬' },
+    { id: 'lab',    label: 'Lab',        icon: '◬' },
   ];
   return (
     <Glass2 tone="chip" radius={999} padding={4} style={{ display: 'flex', gap: 2 }}>
@@ -363,8 +363,11 @@ function Obsidian3() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [workspace, setWorkspace] = uS(() => {
     const s = readSaved();
-    return (s && ['levels', 'chain', 'chart', 'calc', 'iv', 'pricer'].includes(s.workspace)) ? s.workspace : 'levels';
+    return (s && ['levels', 'chain', 'chart', 'calc', 'lab', 'iv', 'pricer'].includes(s.workspace)) ? s.workspace : 'levels';
   });
+  // Lab sub-view: '3d' P&L surface | 'iv' IV surface. A workspace saved as the
+  // old top-level 'iv' tab lands on the IV sub-view.
+  const [labView, setLabView] = uS(() => { const s = readSaved(); return (s && s.workspace === 'iv') ? 'iv' : '3d'; });
   const [productId, setProductId] = uS(initialProductId);
   const P = window.getProduct(productId);
   const [live, setLive] = uS(null);         // { quote, expiries, health } — IB proxy 抓到的
@@ -567,11 +570,13 @@ function Obsidian3() {
   // On phone/fold, Compare is the only desktop-exclusive workspace (it needs the
   // multi-card grid to be useful). IV Surface is now mobile-friendly so it stays.
   uE(() => {
-    if (vp.layout !== 'desk' && (workspace === 'compare' || workspace === 'chart' || workspace === 'levels')) setWorkspace('calc');
+    if (vp.layout !== 'desk' && (workspace === 'compare' || workspace === 'chart' || workspace === 'levels' || workspace === 'lab')) setWorkspace('calc');
   }, [vp.layout]);
-  // Desktop: Pricer/Compare tabs removed — redirect stale state to Chain.
+  // Desktop: Pricer/Compare tabs removed — redirect stale state to Chain; the
+  // old IV Surface tab lives in Lab now.
   uE(() => {
     if (vp.layout === 'desk' && (workspace === 'pricer' || workspace === 'compare')) setWorkspace('chain');
+    if (vp.layout === 'desk' && workspace === 'iv') setWorkspace('lab');
   }, [vp.layout, workspace]);
 
   // P&L numbers（點數 × 商品乘數）。Valued at the same front-expiry horizon as
@@ -743,6 +748,7 @@ function Obsidian3() {
       <div style={{ position: 'absolute', top: 64, left: 24, right: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 10, gap: 12 }}>
         <ExpiryStrip value={expiryId} onChange={setExpiryId} expiries={expiries} light={light} />
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {workspace === 'lab' && <LabToggle value={labView} onChange={setLabView} light={light} />}
           <Glass2 tone="chip" radius={8} padding="5px 10px" style={{ fontSize: 10, opacity: 0.7, fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
             {P.unitLabel}
           </Glass2>
@@ -770,10 +776,15 @@ function Obsidian3() {
           view={view} setView={setView}
           pnlPts={pnlPts} pnlNTD={pnlNTD}
           maxProfit={maxProfit} maxLoss={maxLoss} fees={fees}
-          hover={hover} setHover={setHover}
           accent={accent} D={D} t={t}
           portfolioG={portfolioG} popValue={popValue} quality={quality}
         />
+      )}
+      {workspace === 'lab' && labView === '3d' && (
+        <LabSurface P={P} theme={theme} light={light} t={t} spot={spot} dte={dte} legs={legs} hover={hover} setHover={setHover} D={D} />
+      )}
+      {workspace === 'lab' && labView === 'iv' && (
+        <IVWorkspace D={D} P={P} spot={spot} iv={iv} expiry={expiry} expiries={expiries} rows={chainRows} hv20={hv20} hvLive={hvLive} live={live} light={light} theme={theme} />
       )}
       {workspace === 'chain' && (
         <ChainWorkspace
@@ -795,9 +806,6 @@ function Obsidian3() {
           barSession={barSession} setBarSession={setBarSession}
           D={D}
         />
-      )}
-      {workspace === 'iv' && (
-        <IVWorkspace D={D} P={P} spot={spot} iv={iv} expiry={expiry} expiries={expiries} rows={chainRows} hv20={hv20} hvLive={hvLive} light={light} theme={theme} />
       )}
 
       {/* Global collapsible What-if rail — on every tab */}
@@ -839,7 +847,7 @@ function Obsidian3() {
 }
 
 // ───────────────────────────────────────────────── CALCULATOR WORKSPACE
-function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, hover, setHover, accent, D, t, portfolioG, popValue, quality }) {
+function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, accent, D, t, portfolioG, popValue, quality }) {
   const light = theme === 'light';
   // Net of estimated round-trip fees (⑤). Charts stay gross.
   const netPnl = pnlNTD - fees;
@@ -864,40 +872,32 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
     }
     setTimeout(() => setImportNote(null), 3500);
   }
-  const hoverInfo = uM(() => {
-    if (!hover) return null;
-    const spotAt = (spot * (1 + hover.xn * 0.18)).toFixed(0);
-    const dteAt = (dte * (1 - hover.yn)).toFixed(0);
-    const pnlAt = (hover.v * 1000 * P.mult).toFixed(0); // approx points × mult
-    return { spotAt, dteAt, pnlAt };
-  }, [hover, spot, dte, P]);
+  // The right column's analysis tabs no longer include Payoff (it is the centre
+  // panel now); a saved 'payoff' view shows the P&L cross-section instead.
+  const rv = view === 'payoff' ? 'cross' : view;
 
   return (
     <>
-      {/* 3D background fills middle */}
-      <div style={{ position: 'absolute', inset: '110px 0 0 0' }}>
-        <Surface3DMount theme={theme} height="100%" scheme={t.scheme} onHover={setHover} />
+      {/* Centre: the payoff chart at full size, with the time slice (the 3D
+          surface that used to sit here lives in the Lab tab). */}
+      <div style={{ position: 'absolute', top: 110, left: 24 + 320 + D.gap, right: 24 + 340 + D.gap, zIndex: 5, maxHeight: 'calc(100vh - 200px)', overflow: 'auto' }}>
+        <Glass2 tone="panel" padding={D.panelPad}>
+          <Eyebrow hk="payoff" right={
+            <span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>
+              {sliceFrac >= 0.99 ? 'at expiry' : sliceFrac <= 0.01 ? 'now' : `t = ${(sliceFrac * 100).toFixed(0)}%`} · {legs.length} leg{legs.length === 1 ? '' : 's'}
+            </span>
+          }>Payoff {t.showProbCone && <span style={{ color: '#a78bfa', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· 1σ/2σ cone</span>}</Eyebrow>
+          <PayoffChart legs={legs} spot={spot} theme={theme} height={320} width={720} iv={iv} dte={dte} showCone={t.showProbCone} sliceFrac={sliceFrac} rangePct={0.08} showKeyNumbers={true} model={P.model} r={P.r / 100} strikeStep={P.strikeStep} />
+          <div style={{ marginTop: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, opacity: 0.55, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 4 }}>
+              <span>Time slice</span>
+              <span className="mono">now → expiry</span>
+            </div>
+            <input type="range" min="0" max="1" step="0.01" value={sliceFrac} onChange={(e) => setSliceFrac(parseFloat(e.target.value))}
+              style={{ width: '100%', accentColor: accent }} />
+          </div>
+        </Glass2>
       </div>
-
-      {/* hover tooltip */}
-      {hoverInfo && (
-        <div style={{
-          position: 'absolute', top: 130, left: '50%', transform: 'translateX(-50%)', zIndex: 6,
-          padding: '8px 14px', borderRadius: 999,
-          background: 'rgba(20,24,34,0.85)', backdropFilter: 'blur(20px)',
-          border: '1px solid rgba(255,255,255,0.12)',
-          fontSize: 12, fontFamily: 'var(--font-mono)',
-          display: 'flex', gap: 14, alignItems: 'center', pointerEvents: 'none',
-        }}>
-          <span><span style={{ opacity: 0.55 }}>spot </span>{parseInt(hoverInfo.spotAt).toLocaleString()}</span>
-          <span style={{ opacity: 0.3 }}>·</span>
-          <span><span style={{ opacity: 0.55 }}>DTE </span>{hoverInfo.dteAt}d</span>
-          <span style={{ opacity: 0.3 }}>·</span>
-          <span style={{ color: parseFloat(hoverInfo.pnlAt) >= 0 ? '#f0c068' : '#5fa3d4', fontWeight: 600 }}>
-            {P.cur}{parseFloat(hoverInfo.pnlAt) >= 0 ? '+' : ''}{Math.round(parseFloat(hoverInfo.pnlAt)).toLocaleString()}
-          </span>
-        </div>
-      )}
 
       {/* Left column */}
       <div className="calc-col" style={{
@@ -966,7 +966,6 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
         {/* analysis tabs */}
         <Glass2 tone="chip" padding={4} style={{ display: 'flex', gap: 2, overflowX: 'auto', scrollbarWidth: 'none' }}>
           {[
-            { id: 'payoff', label: 'Payoff' },
             { id: 'cross', label: 'P&L' },
             { id: 'greeks', label: 'Greeks' },
             { id: 'dist', label: 'Dist' },
@@ -977,58 +976,42 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
             <button key={tab.id} onClick={() => setView(tab.id)} style={{
               flex: '1 0 auto', minWidth: 56, fontSize: 11, fontWeight: 600, padding: '7px 10px', borderRadius: 999,
               border: 'none', cursor: 'pointer', transition: 'all .18s',
-              background: view === tab.id ? (light ? 'rgba(20,40,80,0.10)' : 'rgba(255,255,255,0.10)') : 'transparent',
-              color: view === tab.id ? 'inherit' : (light ? 'rgba(20,30,50,0.5)' : 'rgba(255,255,255,0.55)'),
+              background: rv === tab.id ? (light ? 'rgba(20,40,80,0.10)' : 'rgba(255,255,255,0.10)') : 'transparent',
+              color: rv === tab.id ? 'inherit' : (light ? 'rgba(20,30,50,0.5)' : 'rgba(255,255,255,0.55)'),
               fontFamily: 'inherit', whiteSpace: 'nowrap',
             }}>{tab.label}</button>
           ))}
         </Glass2>
 
         <Glass2 tone="panel" padding={D.panelPad}>
-          {view === 'payoff' && (<>
-            <Eyebrow right={
-              <span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>
-                {sliceFrac >= 0.99 ? 'at expiry' : sliceFrac <= 0.01 ? 'now' : `t = ${(sliceFrac * 100).toFixed(0)}%`}
-              </span>
-            }>Payoff {t.showProbCone && <span style={{ color: '#a78bfa', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· 1σ/2σ cone</span>}</Eyebrow>
-            <PayoffChart legs={legs} spot={spot} theme={theme} height={140} width={304} iv={iv} dte={dte} showCone={t.showProbCone} sliceFrac={sliceFrac} rangePct={0.08} showKeyNumbers={true} model={P.model} r={P.r / 100} strikeStep={P.strikeStep} />
-            <div style={{ marginTop: 10 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, opacity: 0.55, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 4 }}>
-                <span>Time slice</span>
-                <span className="mono">now → expiry</span>
-              </div>
-              <input type="range" min="0" max="1" step="0.01" value={sliceFrac} onChange={(e) => setSliceFrac(parseFloat(e.target.value))}
-                style={{ width: '100%', accentColor: accent }} />
-            </div>
-          </>)}
-          {view === 'cross' && (<>
+          {rv === 'cross' && (<>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{dte}d</span>}>P&L vs spot</Eyebrow>
             <CrossSection theme={theme} dte={dte} height={140} width={304} />
           </>)}
-          {view === 'greeks' && (<>
+          {rv === 'greeks' && (<>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{dte}d · IV {iv}%</span>}>
               Greeks <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· Δ Γ Θ V vs spot</span>
             </Eyebrow>
             <GreeksProfile legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={140} width={304} model={P.model} r={P.r / 100} />
           </>)}
-          {view === 'dist' && (<>
+          {rv === 'dist' && (<>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>at expiry</span>}>
               P&L distribution <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· lognormal</span>
             </Eyebrow>
             <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={140} width={304} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />
           </>)}
-          {view === 'attr' && (<>
+          {rv === 'attr' && (<>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>vs baseline</span>}>
               P&L attribution <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· why up / down</span>
             </Eyebrow>
             <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={150} width={304} baseSpot={P.defaultSpot} baseIv={P.defaultIv} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />
           </>)}
-          {view === 'theta' && (<>
+          {rv === 'theta' && (<>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>θ decay</span>}>Time decay</Eyebrow>
             <ThetaDecay theme={theme} dte={dte} height={140} width={304} />
             <div style={{ marginTop: 6, fontSize: 11, opacity: 0.6 }}>−{P.cur}{(0.12 * P.mult * 100).toFixed(0)} / day at current DTE</div>
           </>)}
-          {view === 'iv' && (<>
+          {rv === 'iv' && (<>
             <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{iv}% ATM</span>}>IV smile</Eyebrow>
             <IVSmile theme={theme} iv={iv} height={140} width={304} />
           </>)}
@@ -1046,25 +1029,85 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
       </div>
 
       {/* Spot / IV live in the global What-if rail (shell) now. */}
+    </>
+  );
+}
 
-      {/* Surface legend */}
-      <div style={{
-        position: 'absolute', bottom: 24, right: 24, zIndex: 4, pointerEvents: 'none',
-        padding: '10px 14px', borderRadius: 12,
-        background: 'rgba(20,24,34,0.55)', backdropFilter: 'blur(20px) saturate(140%)',
-        border: '1px solid rgba(255,255,255,0.10)',
-        display: 'flex', alignItems: 'center', gap: 12,
-      }}>
-        <span style={{ fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.55, fontWeight: 600 }}>P&L</span>
-        <span className="tnum" style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: '#5fa3d4' }}>−15K</span>
-        <div style={{ width: 88, height: 8, borderRadius: 4,
-          background: t.scheme === 'aurora' ? 'linear-gradient(90deg, oklch(0.65 0.18 220), oklch(0.70 0.16 290), oklch(0.70 0.18 350))'
-                   : t.scheme === 'viridis' ? 'linear-gradient(90deg, #440154, #21918c, #fde725)'
-                   : t.scheme === 'classic' ? 'linear-gradient(90deg, #d94d4d, #4d4d59, #4dc870)'
-                   :                          'linear-gradient(90deg, #5fa3d4, #4d4d59, #f0c068)',
-        }} />
-        <span className="tnum" style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: '#f0c068' }}>+45K</span>
+// ───────────────────────────────────────────────── LAB WORKSPACE
+// Research views demoted from the working tabs (owner request, 2026-09): the
+// 3D P&L surface that used to be the Calculator's backdrop, and the IV
+// surface that used to be its own tab. The sub-view toggle sits in the
+// expiry row so neither view has to make room for it.
+function LabToggle({ value, onChange, light = false }) {
+  return (
+    <Glass2 tone="chip" radius={999} padding={3} style={{ display: 'flex', gap: 2 }}>
+      {[{ id: '3d', label: '3D P&L' }, { id: 'iv', label: 'IV Surface' }].map((v) => {
+        const active = v.id === value;
+        return (
+          <button key={v.id} onClick={() => onChange(v.id)} style={{
+            fontSize: 10, fontWeight: 700, padding: '4px 10px', borderRadius: 999, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+            background: active ? (light ? 'rgba(20,40,80,0.12)' : 'rgba(255,255,255,0.14)') : 'transparent',
+            color: active ? 'inherit' : (light ? 'rgba(20,30,50,0.5)' : 'rgba(255,255,255,0.55)'),
+          }}>{v.label}</button>
+        );
+      })}
+    </Glass2>
+  );
+}
+
+// The 3D surface is still the stylised OptionsSurface (it does not read the
+// legs) — the caption says so, so nobody mistakes it for the position's P&L.
+function LabSurface({ P, theme = 'dark', light = false, t, spot, dte, legs, hover, setHover, D }) {
+  const hoverInfo = uM(() => {
+    if (!hover) return null;
+    const spotAt = (spot * (1 + hover.xn * 0.18)).toFixed(0);
+    const dteAt = (dte * (1 - hover.yn)).toFixed(0);
+    const pnlAt = (hover.v * 1000 * P.mult).toFixed(0); // approx points × mult
+    return { spotAt, dteAt, pnlAt };
+  }, [hover, spot, dte, P]);
+  return (
+    <>
+      <div style={{ position: 'absolute', inset: '110px 0 0 0' }}>
+        <Surface3DMount theme={theme} height="100%" scheme={t.scheme} onHover={setHover} />
       </div>
+      {hoverInfo && (
+        <div style={{
+          position: 'absolute', top: 130, left: '50%', transform: 'translateX(-50%)', zIndex: 6,
+          padding: '8px 14px', borderRadius: 999,
+          background: 'rgba(20,24,34,0.85)', backdropFilter: 'blur(20px)',
+          border: '1px solid rgba(255,255,255,0.12)',
+          fontSize: 12, fontFamily: 'var(--font-mono)',
+          display: 'flex', gap: 14, alignItems: 'center', pointerEvents: 'none',
+        }}>
+          <span><span style={{ opacity: 0.55 }}>spot </span>{parseInt(hoverInfo.spotAt).toLocaleString()}</span>
+          <span style={{ opacity: 0.3 }}>·</span>
+          <span><span style={{ opacity: 0.55 }}>DTE </span>{hoverInfo.dteAt}d</span>
+          <span style={{ opacity: 0.3 }}>·</span>
+          <span style={{ color: parseFloat(hoverInfo.pnlAt) >= 0 ? '#f0c068' : '#5fa3d4', fontWeight: 600 }}>
+            {P.cur}{parseFloat(hoverInfo.pnlAt) >= 0 ? '+' : ''}{Math.round(parseFloat(hoverInfo.pnlAt)).toLocaleString()}
+          </span>
+        </div>
+      )}
+      <Glass2 tone="panel" padding={D.panelPad} style={{ position: 'absolute', bottom: 24, left: 24, zIndex: 5, width: 300 }}>
+        <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{P.code} · {dte}d</span>}>3D P&L surface</Eyebrow>
+        <div style={{ fontSize: 11, lineHeight: 1.6, opacity: 0.8 }}>
+          Horizontal = underlying price, depth = days passing (front edge today, back edge expiry), height and color = P&L. Drag to orbit, scroll to zoom.
+        </div>
+        <div style={{ fontSize: 10, marginTop: 8, opacity: 0.55, lineHeight: 1.5 }}>
+          Stylised surface — not yet driven by the {legs.length} working leg{legs.length === 1 ? '' : 's'}. The payoff chart on Calculator is the position's real P&L.
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+          <span style={{ fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.55, fontWeight: 600 }}>P&L</span>
+          <span className="tnum" style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: '#5fa3d4' }}>−15K</span>
+          <div style={{ flex: 1, height: 8, borderRadius: 4,
+            background: t.scheme === 'aurora' ? 'linear-gradient(90deg, oklch(0.65 0.18 220), oklch(0.70 0.16 290), oklch(0.70 0.18 350))'
+                     : t.scheme === 'viridis' ? 'linear-gradient(90deg, #440154, #21918c, #fde725)'
+                     : t.scheme === 'classic' ? 'linear-gradient(90deg, #d94d4d, #4d4d59, #4dc870)'
+                     :                          'linear-gradient(90deg, #5fa3d4, #4d4d59, #f0c068)',
+          }} />
+          <span className="tnum" style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: '#f0c068' }}>+45K</span>
+        </div>
+      </Glass2>
     </>
   );
 }
@@ -1538,7 +1581,7 @@ function ivAnalytics({ rows, expiry, expiries, spot, P }) {
   return { grid: { strikes, exps, base }, term, skew };
 }
 
-function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv20, hvLive, light = false, theme = 'dark' }) {
+function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv20, hvLive, live = null, light = false, theme = 'dark' }) {
   const ref = uR(null);
   const instRef = uR(null);
   const [ivView, setIvView] = uS('3d'); // '3d' | 'heat'
@@ -1633,7 +1676,7 @@ function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv
         {/* IV vs realized — is premium rich or cheap? */}
         {hv20 != null && (
           <Glass2 tone="raised" padding={D.panelPad}>
-            <Eyebrow hk="hv" right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{hvLive ? 'IB daily bars' : 'mock'}</span>}>IV vs HV · 20d</Eyebrow>
+            <Eyebrow hk="hv" right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{hvLive ? `${liveLabel(live, P)} daily bars` : 'mock'}</span>}>IV vs HV · 20d</Eyebrow>
             <div className="tnum" style={{ fontSize: 20, fontWeight: 600, fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'baseline', gap: 8 }}>
               <span>{iv.toFixed(1)}%</span>
               <span style={{ opacity: 0.4, fontSize: 13 }}>vs</span>

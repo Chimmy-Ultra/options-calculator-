@@ -309,6 +309,12 @@ builder move under a **Lab** tab. They keep working unchanged.
     the chain's OI column matches its rows (45800 call 434, 46000 call 459 /
     put 941). Zero console errors in dark, light, phone and mock runs.
   - Not in P0: the intraday 價平和 line, 關卡價 / 成本線 (P1); mobile ladder (P2).
+- **Done since (same branch)**: 籌碼 strip (P/C ratio with history, 外資 net
+  futures in TX-equivalent contracts, top-10 traders), the end-of-day snapshot
+  + a daily GitHub Action so the deployed site carries real previous-session
+  numbers, K-line MA5/10/20/60 + 日盤/全日盤, and the **Lab tab** (3D P&L
+  surface and IV surface demoted out of the working tabs; Calculator's centre
+  is now the full-size payoff chart).
 - **P1**: 價平和 intraday sampler; 關卡價 and 成本線; P/C ratio and 三大法人
   tiles.
 - **P2**: 籌碼差額 proxy from ticks; weekly/monthly ladder toggle; Lab tab

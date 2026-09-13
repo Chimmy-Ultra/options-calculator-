@@ -114,7 +114,7 @@ These break Western intuition — get them wrong and the UI looks correct but me
 There is no test suite. To verify:
 
 1. Open `design_handoff_options_lab/index.html` directly in a browser, **or** run a static server from that directory.
-2. Exercise the desktop workspaces: **Levels / Chain / Chart / Calculator / IV Surface** (Levels is the day-trading read — ATM straddle 價平和 band + max-OI 壓力/支撐 walls, ladder + K-line tags + OI table; see `docs/daytrade-redesign.md`. The single-contract pricer is folded into Calculator; Compare is shelved — code kept, tab removed). Mobile keeps its own Calc/Chain/Pricer/IV tabs; a saved `levels` workspace redirects to Calc on phone.
+2. Exercise the desktop workspaces: **Levels / Chain / Chart / Calculator / Lab** (Levels is the day-trading read — ATM straddle 價平和 band + max-OI 壓力/支撐 walls, ladder + K-line tags + OI table; see `docs/daytrade-redesign.md`. Calculator = legs + pricer on the left, the full-size payoff chart in the centre, P&L / Greeks on the right. Lab = the research views demoted from the working tabs: the stylised 3D P&L surface and the IV surface, picked by a sub-toggle in the expiry row; a saved `iv` workspace lands there. The single-contract pricer is folded into Calculator; Compare is shelved — code kept, tab removed). Mobile keeps its own Calc/Chain/Pricer/IV tabs; a saved `levels` or `lab` workspace redirects to Calc on phone.
 3. Check phone width too (DevTools responsive mode, ~390px) — many regressions only show on mobile.
 4. Watch the console: Babel parse errors and Three.js warnings show up there.
 

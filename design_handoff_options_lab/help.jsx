@@ -55,7 +55,7 @@ const HELP_SECTIONS = [
     'The blue line and pill mark the current underlying (spot); ATM is the nearest strike.',
     'Click any quote to add it as a leg, then choose BUY or SELL. Your open legs show BUY / SELL badges on their strikes.',
   ] },
-  { id: 'surface', tabs: ['calc'], title: 'Calculator — 3D P&L surface', paras: [
+  { id: 'surface', tabs: ['lab'], title: 'Lab — 3D P&L surface', paras: [
     'The surface is your position’s P&L. Horizontal axis = underlying price; depth axis = days passing (front edge = today, back edge = expiry); height and color = profit (gold) or loss (blue).',
     'Hover to read exact numbers. Drag to orbit, scroll to zoom. It stays where you leave it.',
   ] },
@@ -74,13 +74,13 @@ const HELP_SECTIONS = [
     'The histogram weights each outcome by its probability at expiry (lognormal). Red bars = profit, teal = loss.',
     'POP (probability of profit) is the total chance of finishing at or above break-even.',
   ] },
-  { id: 'whatif', tabs: ['calc', 'chain', 'chart', 'iv'], title: 'What-if rail', paras: [
+  { id: 'whatif', tabs: ['calc', 'chain', 'chart', 'lab'], title: 'What-if rail', paras: [
     'The collapsible rail at the bottom-right re-prices everything at a hypothetical spot and IV without touching your real position — a quick stress test. Click it to expand.',
   ] },
   { id: 'fees', tabs: ['calc', 'chain'], title: 'Fees', paras: [
     'The P&L cards are shown net of an estimated round-trip commission + tax. The numbers are broker-dependent and can be tuned per product.',
   ] },
-  { id: 'iv', tabs: ['iv'], title: 'IV surface', paras: [
+  { id: 'iv', tabs: ['lab'], title: 'Lab — IV surface', paras: [
     'Implied volatility across strike (X axis) and expiry (depth), built from the chain’s per-strike IVs. Grain options skew to calls (upside / drought risk); index options like TXO skew to puts (downside hedging).',
     'Drag to orbit and scroll to zoom, or switch to the HEATMAP view for a flat grid.',
     'IV vs HV compares implied volatility with how much the underlying actually moved over the last 20 days. Above ×1 the market prices more movement than realized (premium rich — favors sellers); below ×1, premium is cheap (favors buyers).',
