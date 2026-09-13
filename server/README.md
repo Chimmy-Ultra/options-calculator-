@@ -62,8 +62,10 @@ proxy 起來後也能查：`curl "http://127.0.0.1:8720/api/health?pid=txo"` →
 回傳的 `sinopac` 區塊會分別告訴你 `installed`（套件裝了沒）和 `configured`（金鑰設了沒）。
 
 **這條路徑的已知限制**
-- Shioaji 快照**不含未平倉量（OI）**，所以 TXO live 模式下 OI Profile / Max Pain 沒有資料
-  （前端偵測到整條鏈都沒 OI 時，流動性評分會自動改用買賣價差判斷，不會誤標成「乾涸」）。
+- Shioaji 快照**不含未平倉量（OI）**。proxy 改從 **期交所每日行情**補上（`taifex.py`，見下方
+  「TAIFEX 未平倉」）：`/api/chain/txo` 的 rows 會帶前一交易日的 `oi` 與 `oiChg`，Levels 頁的
+  壓力 / 支撐牆走 `/api/oi/txo`。期交所連不上時 rows 的 `oi` 維持 0（前端偵測到整條鏈都沒 OI 時，
+  流動性評分會自動改用買賣價差判斷，不會誤標成「乾涸」）。
 - 快照也不含希臘值 → IV 由權利金反推（Black-Scholes on 加權指數，跟前端 TXO 定價同一套）。
 - **不提供部位匯入**：帳務要憑證，唯讀研究刻意不設，所以 TXO 沒有 `⟳` 匯入鈕。
 
@@ -131,6 +133,7 @@ python3 -m http.server 8080
 | `GET /api/chain/{pid}?expiry=20260821` | `{underlying: {month, price}, rows: [...]}`（rows 跟前端 genChain 同形狀） |
 | `GET /api/bars/{pid}?bar=1 day&duration=3 M` | 近月期貨歷史 K 棒 `{bars: [{t,o,h,l,c,v}]}` |
 | `GET /api/positions/{pid}` | 帳戶內該商品的選擇權部位 `{positions: [{side, type, strike, premium, qty, expiry, dte}]}` |
+| `GET /api/oi/txo?expiry=20260916` | 該到期日**全部履約價**的未平倉（期交所前一交易日）`{date, prevDate, rows: [{strike, call: {oi, oiChg, vol, settle}, put}], maxCallOi, maxPutOi, totals}`；只有 `PRODUCTS` 標了 `"oi": "taifex"` 的商品有，其他回 404 |
 
 `/api/positions` 只回 secType == FOP 且 symbol / tradingClass 對得上的部位；premium 已換算成
 「點數」（averageCost ÷ multiplier），跟前端 legs 的 premium 慣例一致。**沒有任何下單端點。**
@@ -144,17 +147,30 @@ python3 -m http.server 8080
 - 期權鏈快照等 6 秒收一輪，延遲數據偶爾會有缺格（顯示 0）；30 秒內重複請求走快取。
 - 期貨選擇權理論價用歐式 Black-76 近似（真實是美式），OI 靠 generic tick 101。
 
-## TAIFEX open data (probe)
+## TAIFEX 未平倉（`taifex.py`）
 
-Open interest is not part of the Shioaji feed; TAIFEX publishes it once a
-day after the close. Before wiring a `taifex.py` source, check what your
-machine can reach:
+Shioaji 沒有 OI；期交所每天收盤後（日盤約 15:00）公布每檔履約價的**未沖銷契約數**。
+`taifex.py` 只打一支公開端點——期交所「選擇權每日交易行情」的 CSV 下載
+（`https://www.taifex.com.tw/cht/3/dlOptDataDown`，不用帳號）——抓最近 7 天的 TXO 日盤資料，
+一次得到：
+
+- 最新交易日每檔的 OI、成交量、結算價；
+- 前一交易日的 OI → `oiChg`（未平倉增減，跟各家「支撐壓力表」的變化欄一樣）；
+- `契約到期日` → 對到前端的到期日 id（`YYYYMMDD`），週選 / 月選都對得上。
+
+快取 15 分鐘；期交所連不上時回 `None`，前端安靜留在原本的資料。**這是前一交易日的數字**
+（「昨天的牆」），設計上就是這樣用；盤中不會變。
+
+- `/api/chain/txo` 自動把 OI 併進 rows（`oi`, `oiChg`），Chain 頁的 OI 欄 / OI Profile / Max Pain 就有資料。
+- `/api/oi/txo?expiry=YYYYMMDD` 回**整個履約價範圍**（鏈只有 ±8 檔），附最大 Call OI（壓力）/
+  最大 Put OI（支撐）的履約價與總量，給 Levels 頁用。不帶 `expiry` → 最近一個未到期的。
+
+要先確認你的機器連得到期交所（含 OpenAPI 與 MIS 即時報價的 OI 欄位）：
 
 ```bash
 python3 check_taifex.py
 ```
 
-It lists the options-related paths in TAIFEX's OpenAPI, calls the daily
-reports and the historical CSV download, and reports which of them carries a
-per-strike OI column. No credentials; nothing is written. The design that
-would consume it is in `docs/daytrade-redesign.md`.
+它會列出 OpenAPI 的選擇權相關路徑、呼叫每日行情與 CSV 下載，回報哪一個帶每檔 OI 欄位；
+第 4 步另外查 MIS 即時報價（`mis.taifex.com.tw`）的 `OpenInterest` 盤中會不會動——如果會，
+Levels 的牆就能改成盤中刷新。不需要帳號、不會寫入任何東西。設計背景見 `../docs/daytrade-redesign.md`。

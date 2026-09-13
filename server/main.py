@@ -11,6 +11,7 @@
   GET /api/chain/{pid}       → ?expiry=YYYYMMDD 的期權鏈，rows 形狀跟前端 genChain 一致
   GET /api/bars/{pid}        → 近月期貨歷史 K 棒
   GET /api/positions/{pid}   → 目前帳戶的選擇權部位（唯讀，載入前端 legs 用）
+  GET /api/oi/{pid}          → ?expiry=YYYYMMDD 的每檔未平倉（TAIFEX 每日行情，見 taifex.py）
 
 唯讀行情 + 部位代理：只讀行情與持倉，不下單、不改單（沒有任何下單端點）。
 沒訂閱 CME 即時行情時自動退到 15 分鐘延遲數據（IB_MARKET_DATA_TYPE=3）。
@@ -31,6 +32,7 @@ from ib_async import IB, Future, FuturesOption
 
 import pricing
 import sinopac
+import taifex
 
 # Standard (monthly) options trading class; weeklies not wired yet.
 # tradingClass for the newer products is a best-guess for the standard monthly
@@ -38,9 +40,13 @@ import sinopac
 # doesn't match, so a wrong guess degrades gracefully.
 # "source" selects the data backend: "ib" = Interactive Brokers (futures
 # options), "sinopac" = 永豐金 Shioaji (TXO 台指選擇權). Both are read-only.
+# "oi" names a separate open-interest source for products whose quote feed has
+# none: "taifex" = the exchange's daily report (taifex.py), merged into the
+# chain rows and served whole by /api/oi.
 PRODUCTS = {
     "txo": {"source": "sinopac", "symbol": "TXO", "exchange": "TAIFEX", "strikeStep": 50.0,
-            "index": ("TSE", "001"), "underlyingFuture": "TXF", "monthlyCategory": "TXO"},
+            "index": ("TSE", "001"), "underlyingFuture": "TXF", "monthlyCategory": "TXO",
+            "oi": "taifex"},
     "zc": {"source": "ib", "symbol": "ZC", "exchange": "CBOT", "tradingClass": "OZC", "strikeStep": 10.0},
     "zs": {"source": "ib", "symbol": "ZS", "exchange": "CBOT", "tradingClass": "OZS", "strikeStep": 20.0},
     "zw": {"source": "ib", "symbol": "ZW", "exchange": "CBOT", "tradingClass": "OZW", "strikeStep": 10.0},
@@ -310,7 +316,12 @@ async def bars(pid: str, duration: str = "3 M", bar: str = "1 day"):
 async def chain(pid: str, expiry: str):
     spec = _product(pid)
     if spec.get("source") == "sinopac":
-        return await _from_sinopac(sinopac.chain(spec, expiry), "option chain")
+        data = await _from_sinopac(sinopac.chain(spec, expiry), "option chain")
+        if spec.get("oi") == "taifex":
+            # Shioaji snapshots have no OI; fill it from TAIFEX's daily report
+            # (previous session's numbers). Unreachable → rows keep oi: 0.
+            data = taifex.merge_into_chain(data, await taifex.open_interest(expiry))
+        return data
     cache_key = ("chain", spec["symbol"], expiry)
     hit = _cache_get(cache_key)
     if hit:
@@ -404,6 +415,25 @@ async def chain(pid: str, expiry: str):
     }
     _cache_put(cache_key, result, CHAIN_CACHE_TTL_S)
     return result
+
+
+@app.get("/api/oi/{pid}")
+async def open_interest(pid: str, expiry: str | None = None):
+    """Per-strike open interest for one expiry from TAIFEX's daily report — the
+    whole strike range, not just the chain's ±8 — with the change vs the
+    previous session and the max-OI strikes (壓力 / 支撐). Public data, no
+    broker login needed. `expiry` = YYYYMMDD; omitted → the nearest unexpired.
+    """
+    spec = _product(pid)
+    if spec.get("oi") != "taifex":
+        raise HTTPException(404, f"no open-interest source for {pid!r}")
+    data = await taifex.open_interest(expiry)
+    if data is None:
+        raise HTTPException(503, "TAIFEX daily report unavailable")
+    if not data:
+        tbl = await taifex.table()
+        raise HTTPException(404, f"expiry {expiry} not in TAIFEX report (have {[e['id'] for e in taifex.expiries(tbl or {})]})")
+    return data
 
 
 @app.get("/api/positions/{pid}")
