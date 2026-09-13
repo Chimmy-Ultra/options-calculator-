@@ -101,10 +101,16 @@ These break Western intuition — get them wrong and the UI looks correct but me
 - Expiries are weekly + monthly (W1/W2/M/W4). M+1 was removed in `bb2697b` — don't add it back.
 - Pricing model: Black-Scholes for theoretical premiums everywhere (payoff chart, strategy library, +leg, P&L Now). See commits `f0f1ae2`, `1b7355d`. Don't introduce a separate pricing path — Black-76 for futures options is a `model` parameter on the SAME functions (`bsPrice` / `bsGreeks` / `legGreeks` / `portfolioGreeks`), not a second code path.
 
+### Terminal skin and the panel grid (2026-09-13 redesign)
+
+- The desktop shell is the owner's 交易終端風: flat `var(--panel)` panels with 1px `var(--border)` and square corners, system fonts (`--font-display` = 蘋方 / 微軟正黑體, `--font-mono` = the system sans with tabular figures — still no inline font stacks), a 44px top bar and a 36px expiry row. Palette lives in `tokens.css` (`--bg / --panel / --panel2 / --border / --text / --text2 / --muted / --gold`); `body.light` overrides the same variables. `Glass2` is the only panel primitive and `Eyebrow` inside it is the header bar (it bleeds to the edges via `--ppx/--ppy`). Don't reintroduce blur, glow or rounded chips.
+- All desktop labels are Chinese (tabs 關卡 / 報價表 / K線 / 策略 / 實驗室). Expiry codes (SEP / W4 / F3) stay as TAIFEX names them; chips show 月選 / 天.
+- Every desktop tab renders through `PanelGrid` (react-grid-layout from cdnjs, `window.ReactGridLayout`; panels stack if it fails to load). Panels are `{ i, title, right, hk, body, tone, pad }`; defaults per tab live in `GRID_DEFAULTS` (12 cols × 30px rows, 8px gutters). 調整版面 unlocks drag (by the header, `.pg-handle`) and resize; layouts persist per tab in `optionsLab.layout.v1`, 重設 clears that tab. When you add or rename a panel, give it a new `i` and a default — saved layouts are validated against the current panel set and fall back to defaults. Mobile is untouched.
+
 ### Typography and labels
 
-- Fonts are loaded from Google Fonts in `index.html` (IBM Plex Sans / IBM Plex Mono for Latin and numbers, Noto Sans TC for Chinese) and exposed as `--font-display` / `--font-mono` in `tokens.css`. **Never write an inline font stack** — use `fontFamily: 'var(--font-mono)'` (numbers, codes) or inherit the body face. Every number column also gets `className="tnum"` (tabular figures).
-- The Levels tab uses the Taiwanese day-trading vocabulary as its primary labels (現價 / 價平和 / 流失 / 壓力 / 支撐 / 外資淨未平倉 / 十大交易人 / P/C 比), modelled on 多空指南針's strip of big numbers (owner request, 2026-09). The other tabs keep their English labels.
+- Fonts are the platform's own (no web fonts since the 2026-09 redesign): `--font-display` (蘋方 / 微軟正黑體 / Noto Sans TC / system-ui) and `--font-mono` (the system sans, used with tabular figures for numbers) in `tokens.css`. **Never write an inline font stack** — use `fontFamily: 'var(--font-mono)'` (numbers, codes) or inherit the body face. Every number column also gets `className="tnum"` (tabular figures).
+- The Levels tab uses the Taiwanese day-trading vocabulary as its primary labels (現價 / 價平和 / 流失 / 壓力 / 支撐 / 外資淨未平倉 / 十大交易人 / P/C 比 / 關卡價 一壘…場外), modelled on 多空指南針's strip of big numbers (owner request, 2026-09). Since the redesign the other desktop tabs are Chinese too.
 
 ### Layouts
 
