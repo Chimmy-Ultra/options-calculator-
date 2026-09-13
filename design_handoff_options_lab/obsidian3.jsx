@@ -831,9 +831,9 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
         side: pp.side, type: pp.type, strike: pp.strike,
         premium: pp.premium, qty: pp.qty, dte: pp.dte != null ? pp.dte : dte,
       })));
-      setImportNote(`${res.positions.length} position${res.positions.length === 1 ? '' : 's'} loaded`);
+      setImportNote(`已載入 ${res.positions.length} 筆部位`);
     } else {
-      setImportNote(`no ${BROKER[P.live]} positions`);
+      setImportNote(`${BROKER[P.live]} 沒有部位`);
     }
     setTimeout(() => setImportNote(null), 3500);
   }
@@ -849,14 +849,14 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow hk="payoff" right={
             <span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>
-              {sliceFrac >= 0.99 ? 'at expiry' : sliceFrac <= 0.01 ? 'now' : `t = ${(sliceFrac * 100).toFixed(0)}%`} · {legs.length} leg{legs.length === 1 ? '' : 's'}
+              {sliceFrac >= 0.99 ? '到期時' : sliceFrac <= 0.01 ? '現在' : `時間 ${(sliceFrac * 100).toFixed(0)}%`} · {legs.length} 筆部位
             </span>
-          }>Payoff {t.showProbCone && <span style={{ color: '#a78bfa', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· 1σ/2σ cone</span>}</Eyebrow>
+          }>到期損益圖 {t.showProbCone && <span style={{ color: '#a78bfa', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· 1σ/2σ 機率錐</span>}</Eyebrow>
           <PayoffChart legs={legs} spot={spot} theme={theme} height={320} width={720} iv={iv} dte={dte} showCone={t.showProbCone} sliceFrac={sliceFrac} rangePct={0.08} showKeyNumbers={true} model={P.model} r={P.r / 100} strikeStep={P.strikeStep} />
           <div style={{ marginTop: 12 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, opacity: 0.55, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 4 }}>
-              <span>Time slice</span>
-              <span className="mono">now → expiry</span>
+              <span>損益日期</span>
+              <span className="mono">今天 → 到期</span>
             </div>
             <input type="range" min="0" max="1" step="0.01" value={sliceFrac} onChange={(e) => setSliceFrac(parseFloat(e.target.value))}
               style={{ width: '100%', accentColor: accent }} />
@@ -881,11 +881,11 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow right={
             <div style={{ display: 'flex', gap: 4 }}>
-              {canImport && <button style={miniBtn} disabled={importing} onClick={importPositions} title={`Load your real ${BROKER[P.live]} option positions`}>{importing ? '…' : `⟳ ${BROKER[P.live]}`}</button>}
+              {canImport && <button style={miniBtn} disabled={importing} onClick={importPositions} title={`載入 ${BROKER[P.live]} 帳戶的真實部位`}>{importing ? '…' : `⟳ ${BROKER[P.live]} 部位`}</button>}
               <StrategyMenu P={P} spot={spot} iv={iv} dte={dte} onPick={setLegs} light={light} />
-              <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 2 * P.strikeStep) / P.strikeStep) * P.strikeStep, iv, dte, P)])}>+ leg</button>
+              <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 2 * P.strikeStep) / P.strikeStep) * P.strikeStep, iv, dte, P)])}>＋ 新增部位</button>
             </div>
-          }>Legs</Eyebrow>
+          }>部位明細{legs.length ? ` · ${legs.length} 筆` : ''}</Eyebrow>
           <LegEditor legs={legs} onChange={setLegs} theme={theme} expiries={expiries} defaultDte={dte} />
           {importNote && <div style={{ fontSize: 10, opacity: 0.6, marginTop: 6, fontFamily: 'var(--font-mono)' }}>{importNote}</div>}
         </Glass2>
@@ -893,7 +893,7 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
         {/* Single-contract pricer — folded in from the removed Pricer tab.
             Auto: pick a strike, IV is pulled from the chain smile, price is live. */}
         <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow hk="pricer" right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{P.model === 'b76' ? 'Black-76' : 'Black-Scholes'}</span>}>Option Pricer</Eyebrow>
+          <Eyebrow hk="pricer" right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{P.model === 'b76' ? 'Black-76' : 'Black-Scholes'}</span>}>理論價試算</Eyebrow>
           <OptionPricer key={P.id} product={P} spot={spot} iv={iv} dte={dte} rows={rows} theme={theme} accent={accent} />
         </Glass2>
       </div>
@@ -907,7 +907,7 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
         <Glass2 tone="raised" padding={D.panelPad}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
-              <Eyebrow hk="pnlnow">P&L now</Eyebrow>
+              <Eyebrow hk="pnlnow">目前損益</Eyebrow>
               <div className="tnum" style={{
                 fontSize: 32, fontWeight: 600, letterSpacing: -0.6,
                 color: netPnl >= 0 ? (light ? 'oklch(0.60 0.13 75)' : 'oklch(0.84 0.14 75)') : (light ? 'oklch(0.50 0.10 220)' : 'oklch(0.74 0.12 220)'),
@@ -916,38 +916,38 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
                 {netPnl >= 0 ? '+' : ''}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
               </div>
               <div className="tnum" style={{ fontSize: 10, opacity: 0.5, marginTop: 4 }}>
-                {pnlPts >= 0 ? '+' : ''}{pnlPts.toFixed(1)} pts {P.unitLabel}
+                {pnlPts >= 0 ? '+' : ''}{pnlPts.toFixed(1)} 點 {P.unitLabel}
               </div>
               <div className="tnum" style={{ fontSize: 11, opacity: 0.55, marginTop: 8 }}>
-                Max profit <span style={{ color: '#f0c068' }}>+{P.cur}{Math.round(netMaxProfit).toLocaleString()}</span>
+                最大獲利 <span style={{ color: '#f0c068' }}>+{P.cur}{Math.round(netMaxProfit).toLocaleString()}</span>
                 <span style={{ opacity: 0.4 }}> · </span>
-                Max loss <span style={{ color: '#5fa3d4' }}>{P.cur}{Math.round(netMaxLoss).toLocaleString()}</span>
+                最大虧損 <span style={{ color: '#5fa3d4' }}>{P.cur}{Math.round(netMaxLoss).toLocaleString()}</span>
               </div>
               {fees > 0 && (
                 <div className="tnum" style={{ fontSize: 9, opacity: 0.45, marginTop: 4 }}>
-                  incl. est. fees {P.cur}{Math.round(fees).toLocaleString()}
+                  已扣估計手續費 {P.cur}{Math.round(fees).toLocaleString()}
                 </div>
               )}
             </div>
             <div style={{ width: 110 }}>
-              <div style={{ fontSize: 10, letterSpacing: 0.8, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600, textAlign: 'center' }}>POP</div>
+              <div style={{ fontSize: 10, opacity: 0.6, fontWeight: 600, textAlign: 'center' }}>獲利機率</div>
               <POPGauge theme={theme} size={110} value={popValue} />
             </div>
           </div>
         </Glass2>
 
         {/* analysis tabs */}
-        <Glass2 tone="chip" padding={4} style={{ display: 'flex', gap: 2, overflowX: 'auto', scrollbarWidth: 'none' }}>
+        <Glass2 tone="chip" padding={3} style={{ display: 'flex', gap: 2, overflowX: 'auto', scrollbarWidth: 'none' }}>
           {[
-            { id: 'cross', label: 'P&L' },
-            { id: 'greeks', label: 'Greeks' },
-            { id: 'dist', label: 'Dist' },
-            { id: 'attr', label: 'Attr' },
-            { id: 'theta', label: 'Theta' },
+            { id: 'cross', label: '損益' },
+            { id: 'greeks', label: '希臘值' },
+            { id: 'dist', label: '分布' },
+            { id: 'attr', label: '歸因' },
+            { id: 'theta', label: '時間' },
             { id: 'iv', label: 'IV' },
           ].map((tab) => (
             <button key={tab.id} onClick={() => setView(tab.id)} style={{
-              flex: '1 0 auto', minWidth: 56, fontSize: 11, fontWeight: 600, padding: '7px 10px', borderRadius: 999,
+              flex: '1 0 auto', minWidth: 48, fontSize: 11, fontWeight: 600, padding: '6px 8px', borderRadius: 0,
               border: 'none', cursor: 'pointer', transition: 'all .18s',
               background: rv === tab.id ? (light ? 'rgba(20,40,80,0.10)' : 'rgba(255,255,255,0.10)') : 'transparent',
               color: rv === tab.id ? 'inherit' : (light ? 'rgba(20,30,50,0.5)' : 'rgba(255,255,255,0.55)'),
@@ -958,40 +958,40 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
 
         <Glass2 tone="panel" padding={D.panelPad}>
           {rv === 'cross' && (<>
-            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{dte}d</span>}>P&L vs spot</Eyebrow>
+            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{dte} 天</span>}>損益 vs 現價</Eyebrow>
             <CrossSection theme={theme} dte={dte} height={140} width={304} />
           </>)}
           {rv === 'greeks' && (<>
-            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{dte}d · IV {iv}%</span>}>
-              Greeks <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· Δ Γ Θ V vs spot</span>
+            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{dte} 天 · IV {iv}%</span>}>
+              希臘值曲線 <span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· Δ Γ Θ V 對現價</span>
             </Eyebrow>
             <GreeksProfile legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={140} width={304} model={P.model} r={P.r / 100} />
           </>)}
           {rv === 'dist' && (<>
-            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>at expiry</span>}>
-              P&L distribution <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· lognormal</span>
+            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>到期時</span>}>
+              損益分布 <span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· 對數常態</span>
             </Eyebrow>
             <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={140} width={304} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />
           </>)}
           {rv === 'attr' && (<>
-            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>vs baseline</span>}>
-              P&L attribution <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· why up / down</span>
+            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>相對基準</span>}>
+              損益歸因 <span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· 漲跌從哪來</span>
             </Eyebrow>
             <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={150} width={304} baseSpot={P.defaultSpot} baseIv={P.defaultIv} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />
           </>)}
           {rv === 'theta' && (<>
-            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>θ decay</span>}>Time decay</Eyebrow>
+            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>θ</span>}>時間價值衰減</Eyebrow>
             <ThetaDecay theme={theme} dte={dte} height={140} width={304} />
-            <div style={{ marginTop: 6, fontSize: 11, opacity: 0.6 }}>−{P.cur}{(0.12 * P.mult * 100).toFixed(0)} / day at current DTE</div>
+            <div style={{ marginTop: 6, fontSize: 11, opacity: 0.6 }}>目前到期天數下每日約 −{P.cur}{(0.12 * P.mult * 100).toFixed(0)}</div>
           </>)}
           {rv === 'iv' && (<>
-            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{iv}% ATM</span>}>IV smile</Eyebrow>
+            <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>價平 IV {iv}%</span>}>IV 微笑曲線</Eyebrow>
             <IVSmile theme={theme} iv={iv} height={140} width={304} />
           </>)}
         </Glass2>
 
         <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow right={<DataQualityPill quality={quality} />}>Greeks</Eyebrow>
+          <Eyebrow right={<DataQualityPill quality={quality} />}>部位希臘值</Eyebrow>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <GreekChip label="Delta · Δ" helpKey="delta" value={(portfolioG.delta >= 0 ? '+' : '') + portfolioG.delta.toFixed(2)} theme={theme} emphasis={portfolioG.delta >= 0 ? 'up' : 'down'} />
             <GreekChip label="Gamma · Γ" helpKey="gamma" value={portfolioG.gamma.toFixed(4)} theme={theme} />
@@ -1033,15 +1033,15 @@ function LabSurface({ P, theme = 'dark', light = false, t, spot, dte, legs, hove
       {hoverInfo && (
         <div style={{
           position: 'absolute', top: 130, left: '50%', transform: 'translateX(-50%)', zIndex: 6,
-          padding: '8px 14px', borderRadius: 999,
+          padding: '8px 14px', borderRadius: 0,
           background: 'rgba(20,24,34,0.85)', backdropFilter: 'blur(20px)',
           border: '1px solid rgba(255,255,255,0.12)',
           fontSize: 12, fontFamily: 'var(--font-mono)',
           display: 'flex', gap: 14, alignItems: 'center', pointerEvents: 'none',
         }}>
-          <span><span style={{ opacity: 0.55 }}>spot </span>{parseInt(hoverInfo.spotAt).toLocaleString()}</span>
+          <span><span style={{ opacity: 0.55 }}>價格 </span>{parseInt(hoverInfo.spotAt).toLocaleString()}</span>
           <span style={{ opacity: 0.3 }}>·</span>
-          <span><span style={{ opacity: 0.55 }}>DTE </span>{hoverInfo.dteAt}d</span>
+          <span><span style={{ opacity: 0.55 }}>剩 </span>{hoverInfo.dteAt} 天</span>
           <span style={{ opacity: 0.3 }}>·</span>
           <span style={{ color: parseFloat(hoverInfo.pnlAt) >= 0 ? '#f0c068' : '#5fa3d4', fontWeight: 600 }}>
             {P.cur}{parseFloat(hoverInfo.pnlAt) >= 0 ? '+' : ''}{Math.round(parseFloat(hoverInfo.pnlAt)).toLocaleString()}
@@ -1049,15 +1049,15 @@ function LabSurface({ P, theme = 'dark', light = false, t, spot, dte, legs, hove
         </div>
       )}
       <Glass2 tone="panel" padding={D.panelPad} style={{ position: 'absolute', bottom: 24, left: 24, zIndex: 5, width: 300 }}>
-        <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{P.code} · {dte}d</span>}>3D P&L surface</Eyebrow>
+        <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{P.code} · {dte} 天</span>}>3D 損益曲面</Eyebrow>
         <div style={{ fontSize: 11, lineHeight: 1.6, opacity: 0.8 }}>
-          Horizontal = underlying price, depth = days passing (front edge today, back edge expiry), height and color = P&L. Drag to orbit, scroll to zoom.
+          橫軸＝標的價格，縱深＝時間流逝（前緣今天、後緣到期），高度與顏色＝損益。拖曳旋轉、滾輪縮放。
         </div>
         <div style={{ fontSize: 10, marginTop: 8, opacity: 0.55, lineHeight: 1.5 }}>
-          Stylised surface — not yet driven by the {legs.length} working leg{legs.length === 1 ? '' : 's'}. The payoff chart on Calculator is the position's real P&L.
+          示意用曲面，尚未接上目前的 {legs.length} 筆部位；部位的真實損益看「策略」分頁的到期損益圖。
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
-          <span style={{ fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.55, fontWeight: 600 }}>P&L</span>
+          <span style={{ fontSize: 9, opacity: 0.55, fontWeight: 600 }}>損益</span>
           <span className="tnum" style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: '#5fa3d4' }}>−15K</span>
           <div style={{ flex: 1, height: 8, borderRadius: 4,
             background: t.scheme === 'aurora' ? 'linear-gradient(90deg, oklch(0.65 0.18 220), oklch(0.70 0.16 290), oklch(0.70 0.18 350))'
@@ -1083,20 +1083,20 @@ function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, fees = 0,
   const heroColor = profit
     ? (light ? 'oklch(0.60 0.13 75)' : 'oklch(0.84 0.14 75)')
     : (light ? 'oklch(0.50 0.10 220)' : 'oklch(0.74 0.12 220)');
-  const tile = { padding: '7px 10px', borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' };
+  const tile = { padding: '7px 10px', borderRadius: 0, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' };
   return (
-    <Glass2 tone="raised" padding="14px 14px 12px" radius={16}>
+    <Glass2 tone="raised" padding="14px 14px 12px" radius={0}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
         <div style={{ minWidth: 0 }}>
-          <Eyebrow hk="pnlwhatif">P&L what-if · {P.code}</Eyebrow>
+          <Eyebrow hk="pnlwhatif">部位損益試算 · {P.code}</Eyebrow>
           <div className="tnum" style={{ fontSize: 24, fontWeight: 600, letterSpacing: -0.4, lineHeight: 1.05, marginTop: 3, fontFamily: 'var(--font-mono)', color: heroColor }}>
             {profit ? '+' : ''}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
           </div>
-          <div className="tnum" style={{ fontSize: 9, opacity: 0.5, marginTop: 3 }}>{pnlPts >= 0 ? '+' : ''}{pnlPts.toFixed(1)} pts {P.unitLabel}{fees > 0 ? ` · incl. est. fees ${P.cur}${Math.round(fees).toLocaleString()}` : ''}</div>
+          <div className="tnum" style={{ fontSize: 9, opacity: 0.5, marginTop: 3 }}>{pnlPts >= 0 ? '+' : ''}{pnlPts.toFixed(1)} 點 {P.unitLabel}{fees > 0 ? ` · 已扣估計手續費 ${P.cur}${Math.round(fees).toLocaleString()}` : ''}</div>
         </div>
         <div style={{ width: 74, flexShrink: 0 }}>
           <POPGauge theme={theme} size={74} value={popValue} />
-          <div style={{ textAlign: 'center', fontSize: 7, opacity: 0.5, marginTop: 3, letterSpacing: 0.5, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>prob. of profit</div>
+          <div style={{ textAlign: 'center', fontSize: 9, opacity: 0.6, marginTop: 3, whiteSpace: 'nowrap' }}>獲利機率</div>
         </div>
       </div>
       <div style={{ height: 1, background: light ? 'rgba(20,30,50,0.10)' : 'rgba(255,255,255,0.10)', margin: '10px 0 9px' }} />
@@ -1142,7 +1142,7 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiri
       <div style={{ display: 'grid', gap: D.gap, alignItems: 'start', gridTemplateColumns: lay.cols, gridTemplateAreas: lay.areas }}>
         {/* chain */}
         <Glass2 tone="panel" padding={D.panelPad} style={{ gridArea: 'chain', minWidth: 0 }}>
-          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>}>Option Chain · {P.code}</Eyebrow>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.date} {expiry.type === 'monthly' ? '月選' : expiry.label} · {expiry.dte} 天</span>}>{P.nameZh || P.name} T 字報價 · {P.code}</Eyebrow>
           <OptionChain spot={spot} contract={expiry.type} dte={expiry.dte} product={P} rows={rows} legs={legs} onAddLeg={onAddLeg} theme={theme} />
         </Glass2>
 
@@ -1153,8 +1153,8 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiri
 
         {/* payoff */}
         {glassArea('payoff', (<>
-          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>at expiry</span>}>
-            Payoff {t.showProbCone && <span style={{ color: '#a78bfa', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· 1σ/2σ cone</span>}
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>到期時</span>}>
+            到期損益圖 {t.showProbCone && <span style={{ color: '#a78bfa', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· 1σ/2σ 機率錐</span>}
           </Eyebrow>
           <PayoffChart legs={legs} spot={spot} theme={theme} height={150} width={304} iv={iv} dte={dte} showCone={t.showProbCone} sliceFrac={1} rangePct={0.08} showKeyNumbers={true} model={P.model} r={P.r / 100} strikeStep={P.strikeStep} />
         </>))}
@@ -1175,14 +1175,14 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiri
               <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 2 * P.strikeStep) / P.strikeStep) * P.strikeStep, iv, dte, P)])}>+ leg</button>
               {legs.length > 0 && <button style={miniBtn} onClick={() => setLegs([])}>clear</button>}
             </div>
-          }>Legs · {legs.length}</Eyebrow>
+          }>部位明細 · {legs.length} 筆</Eyebrow>
           {legs.length === 0 ? (
             <div style={{ padding: '20px 0', textAlign: 'center', fontSize: 11, opacity: 0.5 }}>Click any chain row to add a leg</div>
           ) : (
             <LegEditor legs={legs} onChange={setLegs} theme={theme} expiries={expiries} defaultDte={dte} />
           )}
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, opacity: 0.6, marginTop: 8, fontFamily: 'var(--font-mono)' }}>
-            <span>{credit >= 0 ? 'Net credit' : 'Net debit'}</span>
+            <span>{credit >= 0 ? '淨收入' : '淨支出'}</span>
             <span>{credit >= 0 ? '+' : ''}{P.cur}{Math.round(credit * P.mult).toLocaleString()}</span>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 10 }}>
@@ -1194,7 +1194,7 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiri
                 setSpot(Math.round(P.defaultSpot * (1 + s.spot / 100) / P.spotStep) * P.spotStep);
                 setIv(Math.max(P.ivMin, Math.min(P.ivMax, P.defaultIv + s.iv)));
               }} style={{
-                padding: '8px 6px', borderRadius: 8, fontSize: 10, fontWeight: 600,
+                padding: '8px 6px', borderRadius: 0, fontSize: 10, fontWeight: 600,
                 border: '1px solid rgba(128,140,170,0.28)', cursor: 'pointer',
                 background: 'rgba(128,140,170,0.12)', color: 'inherit', fontFamily: 'inherit',
               }}>{s.label}</button>
@@ -1206,11 +1206,11 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiri
       {/* OI Profile + Max Pain — kept, below the grid */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: D.gap, marginTop: D.gap }}>
         <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>}>OI profile</Eyebrow>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.date} {expiry.type === 'monthly' ? '月選' : expiry.label} · {expiry.dte} 天</span>}>各履約價未平倉</Eyebrow>
           <OIProfile spot={spot} contract={expiry.type} rows={rows} theme={theme} maxRows={11} />
         </Glass2>
         <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>settlement</span>}>Max pain</Eyebrow>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>結算價</span>}>最大痛苦點</Eyebrow>
           <MaxPain spot={spot} contract={expiry.type} rows={rows} ntdMult={P.mult} cur={P.cur} theme={theme} height={150} width={520} />
         </Glass2>
       </div>
@@ -1458,7 +1458,7 @@ function RangeLevelsPanel({ P, spot, R, light, sourceLabel }) {
     const col = side === 'up' ? LEVEL_COLORS.up : LEVEL_COLORS.down;
     const d = l.price - spot;
     return (
-      <div title={`振幅 ${fmtP(l.dist)} 點`} style={{ display: 'grid', gridTemplateColumns: '34px 1fr auto', gap: 6, alignItems: 'baseline', padding: '4px 8px', borderRadius: 8, opacity: reached ? 0.45 : 1, whiteSpace: 'nowrap',
+      <div title={`振幅 ${fmtP(l.dist)} 點`} style={{ display: 'grid', gridTemplateColumns: '34px 1fr auto', gap: 6, alignItems: 'baseline', padding: '4px 8px', borderRadius: 0, opacity: reached ? 0.45 : 1, whiteSpace: 'nowrap',
         background: hot ? (side === 'up' ? 'rgba(239,83,80,0.10)' : 'rgba(38,166,154,0.10)') : 'transparent', border: `1px solid ${hot ? col : 'transparent'}` }}>
         <span style={{ fontSize: 11.5, fontWeight: 700, color: col }}>{l.name}</span>
         <span className="tnum" style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--font-mono)', color: reached ? dim : 'inherit' }}>{fmtP(l.price)}</span>
@@ -1521,7 +1521,7 @@ function Spark({ series, w = 96, h = 30, light = false }) {
 function LevelTile({ label, hk, value, sub, color, right, light }) {
   const HT = window.HelpTip;
   return (
-    <Glass2 tone="chip" radius={12} padding="10px 12px" style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+    <Glass2 tone="chip" radius={0} padding="10px 12px" style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
       <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.62, marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {(hk && HT) ? <HT k={hk}>{label}</HT> : label}
@@ -1567,11 +1567,11 @@ function LevelsLadder({ P, spot, L, G, light }) {
         return (
           <div key={i} style={{
             position: 'relative', display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 12, alignItems: 'center',
-            padding: r.isSpot ? '10px 12px' : '9px 12px', marginBottom: 6, borderRadius: 10,
-            background: r.isSpot ? 'rgba(240,192,104,0.10)' : (light ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.03)'),
-            border: `1px solid ${r.isSpot ? 'rgba(240,192,104,0.45)' : line}`,
+            padding: r.isSpot ? '9px 10px' : '8px 10px', marginBottom: 6, borderRadius: 0,
+            background: r.isSpot ? 'rgba(240,192,104,0.08)' : 'var(--panel2)',
+            border: `1px solid ${r.isSpot ? 'rgba(240,192,104,0.45)' : 'var(--border)'}`,
           }}>
-            <span aria-hidden style={{ position: 'absolute', left: -18, top: '50%', width: 10, height: 10, marginTop: -5, borderRadius: 5, background: r.color, boxShadow: `0 0 8px ${r.color}` }} />
+            <span aria-hidden style={{ position: 'absolute', left: -18, top: '50%', width: 10, height: 10, marginTop: -5, borderRadius: 5, background: r.color }} />
             <span className="tnum" style={{ fontSize: r.isSpot ? 20 : 17, fontWeight: 700, fontFamily: 'var(--font-mono)', color: r.color, minWidth: 82 }}>{fmtP(r.price)}</span>
             <span style={{ display: 'block', minWidth: 0, overflow: 'hidden' }}>
               <div style={{ fontSize: 12.5, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.label}</div>
@@ -1671,7 +1671,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(380px, 440px) 1fr', gap: D.gap, alignItems: 'start' }}>
         {/* ladder */}
         <Glass2 tone="panel" padding={D.panelPad} style={{ minWidth: 0 }}>
-          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>}>關卡 · {P.code}</Eyebrow>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.date} {expiry.type === 'monthly' ? '月選' : expiry.label} · {expiry.dte} 天</span>}>關卡 · {P.nameZh || P.name}</Eyebrow>
           <LevelsLadder P={P} spot={spot} L={L} G={G} light={light} />
           <div className="mono" style={{ marginTop: 10, fontSize: 9.5, color: dim, display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
             <span>{oiLabel}</span>
@@ -1687,10 +1687,10 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
           {/* K-line with the levels drawn on it */}
           <Glass2 tone="panel" padding={D.panelPad}>
             <Eyebrow right={<div style={{ display: 'flex', gap: 8 }}><KSessionToggle value={barSession} onChange={setBarSession} light={light} /><KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} light={light} /></div>}>
-              台指期 {barSession === 'full' ? '全日盤' : '日盤'} 日K · 關卡疊圖
-              <span style={{ color: dim, fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· {barsLive ? liveLabel(live, P) : '模擬'}</span>
+              台指期 {barSession === 'full' ? '全日盤' : '日盤'} 日K · 關卡價位
+              <span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· {barsLive ? liveLabel(live, P) : '模擬'}</span>
             </Eyebrow>
-            <PriceChart bars={bars} theme={theme} code={P.code} periodLabel={per.label === '日' ? 'Daily' : per.label} levels={chartLevels}
+            <PriceChart bars={bars} theme={theme} code={P.code} periodLabel={per.label === '日' ? '日K' : per.label} levels={chartLevels}
               cone={L.atmIv ? { ivPct: L.atmIv, days: expiry.dte, label: expiry.label } : null} />
           </Glass2>
 
@@ -1723,17 +1723,17 @@ function ChartWorkspace({ P, bars, barsLive, live, theme, light, barPeriodId, se
     <div style={{ position: 'absolute', top: 90, left: 12, right: 12, bottom: 12, zIndex: 5, overflowY: 'auto' }}>
       <Glass2 tone="panel" padding={D.panelPad}>
         <Eyebrow right={<div style={{ display: 'flex', gap: 8 }}><KSessionToggle value={barSession} onChange={setBarSession} light={light} /><KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} light={light} /></div>}>
-          Chart · {P.code}
-          <span style={{ color: light ? 'rgba(20,30,50,0.5)' : 'rgba(255,255,255,0.5)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>
-            · {barsLive ? `front-month · ${liveLabel(live, P)}` : 'mock'}
+          K線 · {P.code}
+          <span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>
+            · {barsLive ? `近月 · ${liveLabel(live, P)}` : '模擬'}
           </span>
         </Eyebrow>
         <PriceChart cone={cone}
           bars={bars} theme={theme} code={P.code}
-          periodLabel={(per.label === '日' ? 'Daily' : per.label) + (barSession === 'full' ? ' · 全日盤' : ' · 日盤')}
+          periodLabel={(per.label === '日' ? '日K' : per.label) + (barSession === 'full' ? ' · 全日盤' : ' · 日盤')}
           sourceLabel={barsLive
-            ? `● ${liveLabel(live, P)} — front-month futures daily bars`
-            : '○ MOCK OHLC — random walk; connect the proxy (server/) for real bars'}
+            ? `● ${liveLabel(live, P)} — 近月期貨日K`
+            : '○ 模擬 K 線 — 隨機漫步；接上本機代理（server/）才有真實行情'}
         />
       </Glass2>
     </div>
@@ -1839,7 +1839,7 @@ function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv
     const active = ivView === id;
     return (
       <button onClick={() => setIvView(id)} style={{
-        fontSize: 9, fontWeight: 700, letterSpacing: 0.5, padding: '3px 10px', borderRadius: 999,
+        fontSize: 9, fontWeight: 700, letterSpacing: 0.5, padding: '3px 10px', borderRadius: 0,
         border: '1px solid ' + (light ? 'rgba(25,40,70,0.14)' : 'rgba(255,255,255,0.14)'),
         background: active ? 'linear-gradient(150deg,oklch(0.66 0.16 250),oklch(0.55 0.18 240))' : 'transparent',
         color: active ? '#fff' : (light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)'),
@@ -1852,14 +1852,14 @@ function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv
   return (
     <div style={{ position: 'absolute', top: 90, left: 12, right: 12, bottom: 12, zIndex: 5, display: 'flex', gap: D.gap }}>
       <Glass2 tone="panel" padding={D.panelPad} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        <Eyebrow right={<span style={{ display: 'inline-flex', gap: 4 }}>{viewChip('3d', '3D')}{viewChip('heat', 'HEATMAP')}</span>}>IV Surface · {P.code}</Eyebrow>
+        <Eyebrow right={<span style={{ display: 'inline-flex', gap: 4 }}>{viewChip('3d', '3D')}{viewChip('heat', '熱圖')}</span>}>隱含波動率曲面 · {P.code}</Eyebrow>
         {ivView === '3d' ? (
-          <div ref={ref} style={{ flex: 1, minHeight: 360, borderRadius: 14, overflow: 'hidden', background: 'radial-gradient(ellipse at 30% 30%, rgba(167,139,250,0.10), transparent 60%)' }} />
+          <div ref={ref} style={{ flex: 1, minHeight: 360, borderRadius: 0, overflow: 'hidden', background: 'radial-gradient(ellipse at 30% 30%, rgba(167,139,250,0.10), transparent 60%)' }} />
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <div style={{ minWidth: 640, fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums', fontSize: 11 }}>
               <div style={{ display: 'flex' }}>
-                <div style={{ width: 64, flexShrink: 0, fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600, padding: '8px 10px' }}>EXP</div>
+                <div style={{ width: 64, flexShrink: 0, fontSize: 9, opacity: 0.5, fontWeight: 600, padding: '8px 10px' }}>到期</div>
                 {heat.header.map((h, i) => (
                   <div key={i} style={{ flex: 1, textAlign: 'center', fontSize: 9, letterSpacing: 0.4, opacity: 0.5, fontWeight: 600, padding: '8px 0' }}>{h}</div>
                 ))}
@@ -1885,7 +1885,7 @@ function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv
         {/* IV vs realized — is premium rich or cheap? */}
         {hv20 != null && (
           <Glass2 tone="raised" padding={D.panelPad}>
-            <Eyebrow hk="hv" right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{hvLive ? `${liveLabel(live, P)} daily bars` : 'mock'}</span>}>IV vs HV · 20d</Eyebrow>
+            <Eyebrow hk="hv" right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{hvLive ? `${liveLabel(live, P)} 日K` : '模擬'}</span>}>隱含 vs 歷史波動 · 20 日</Eyebrow>
             <div className="tnum" style={{ fontSize: 20, fontWeight: 600, fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'baseline', gap: 8 }}>
               <span>{iv.toFixed(1)}%</span>
               <span style={{ opacity: 0.4, fontSize: 13 }}>vs</span>
@@ -1895,9 +1895,9 @@ function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv
               </span>
             </div>
             <div style={{ fontSize: 11, opacity: 0.6, marginTop: 6 }}>
-              {iv / hv20 > 1.15 ? 'IV above realized — premium rich, favors sellers'
-                : iv / hv20 < 0.85 ? 'IV below realized — premium cheap, favors buyers'
-                : 'IV ≈ realized — options fairly priced'}
+              {iv / hv20 > 1.15 ? 'IV 高於實際波動 — 權利金偏貴，利於賣方'
+                : iv / hv20 < 0.85 ? 'IV 低於實際波動 — 權利金偏便宜，利於買方'
+                : 'IV ≈ 實際波動 — 權利金合理'}
             </div>
             <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid ' + (light ? 'rgba(25,40,70,0.12)' : 'rgba(255,255,255,0.08)') }}>
               <Eyebrow hk="volcone">波動率錐 · HV 5/10/20/60 日</Eyebrow>
@@ -1906,11 +1906,11 @@ function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv
           </Glass2>
         )}
         <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>ATM IV</span>}>Term structure</Eyebrow>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>價平 IV</span>}>期限結構</Eyebrow>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {term.map((e) => (
               <div key={e.label + e.dte} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                <span style={{ opacity: 0.7 }}>{e.label} · {e.dte}d</span>
+                <span style={{ opacity: 0.7 }}>{e.label} · {e.dte} 天</span>
                 <span className="mono" style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: e.dte === expiry.dte ? '#f0c068' : (light ? '#3a4658' : '#cdd3df') }}>
                   {e.iv != null ? e.iv.toFixed(1) + '%' : '—'}
                 </span>
@@ -1919,24 +1919,24 @@ function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv
           </div>
         </Glass2>
         <Glass2 tone="panel" padding={D.panelPad}>
-          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>}>Skew · 25Δ</Eyebrow>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.date} {expiry.type === 'monthly' ? '月選' : expiry.label} · {expiry.dte} 天</span>}>偏斜 · 25Δ</Eyebrow>
           {skew != null ? (<>
             <div className="tnum" style={{ fontSize: 22, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
               <span style={{ color: skew >= 0 ? '#5fa3d4' : '#f0c068' }}>{skew >= 0 ? '+' : ''}{skew.toFixed(1)}</span>
-              <span style={{ opacity: 0.4, fontSize: 14 }}> vol pts</span>
+              <span style={{ opacity: 0.4, fontSize: 14 }}> vol 點</span>
             </div>
             <div style={{ fontSize: 11, opacity: 0.55, marginTop: 6 }}>
-              {skew >= 0 ? 'Put skew · downside hedging priced in' : 'Call skew · upside risk premium'}
+              {skew >= 0 ? 'Put 偏斜 · 下檔避險有價' : 'Call 偏斜 · 上檔風險溢價'}
             </div>
           </>) : (
-            <div style={{ fontSize: 11, opacity: 0.5 }}>No usable 25Δ quotes on this expiry</div>
+            <div style={{ fontSize: 11, opacity: 0.5 }}>此到期日沒有可用的 25Δ 報價</div>
           )}
         </Glass2>
         <Glass2 tone="chip" padding={D.panelPad}>
           <div style={{ fontSize: 11, opacity: 0.65, lineHeight: 1.55 }}>
             {ivView === '3d'
-              ? <><strong>Drag</strong> to orbit · <strong>scroll</strong> to zoom. Height = IV at each strike (X) × expiry (depth, front = nearest). Built from the chain's per-strike IVs — expiries beyond the loaded chain use the model smile.</>
-              : <>Heatmap: each cell is the IV (call/put mid) at that strike (columns) and expiry (rows). Warmer = higher IV. Expiries beyond the loaded live chain use the model smile.</>}
+              ? <><strong>拖曳</strong>旋轉 · <strong>滾輪</strong>縮放。高度＝各履約價（X）× 各到期日（縱深，前緣最近）的 IV。取自報價表的每檔 IV；沒載入報價的到期日用模型微笑曲線。</>
+              : <>每格＝該履約價、該到期日的 IV（%）。越亮越高。橫向讀微笑／偏斜，縱向讀期限結構。</>}
           </div>
         </Glass2>
       </div>
@@ -1961,27 +1961,27 @@ function _mkLeg(side, type, S, K, iv, dte, P, qty = 1) {
   return { side, type, strike: K, premium: _bs(type, S, K, iv, dte, r, model), qty, dte };
 }
 const STRATEGY_LIBRARY = [
-  { id: 'bull-call',  name: 'Bull Call Spread',  bias: 'bullish', tag: '看小漲',
+  { id: 'bull-call', nameZh: '買權多頭價差',  name: 'Bull Call Spread',  bias: 'bullish', tag: '看小漲',
     build: (s, iv, dte, P, st = P.strikeStep) => [_mkLeg('long','call',s,s,iv,dte,P), _mkLeg('short','call',s,s+4*st,iv,dte,P)] },
-  { id: 'bear-put',   name: 'Bear Put Spread',   bias: 'bearish', tag: '看小跌',
+  { id: 'bear-put', nameZh: '賣權空頭價差',   name: 'Bear Put Spread',   bias: 'bearish', tag: '看小跌',
     build: (s, iv, dte, P, st = P.strikeStep) => [_mkLeg('long','put',s,s,iv,dte,P), _mkLeg('short','put',s,s-4*st,iv,dte,P)] },
-  { id: 'iron-condor',name: 'Iron Condor',       bias: 'neutral', tag: '盤整收租',
+  { id: 'iron-condor', nameZh: '鐵兀鷹',name: 'Iron Condor',       bias: 'neutral', tag: '盤整收租',
     build: (s, iv, dte, P, st = P.strikeStep) => [_mkLeg('short','put',s,s-6*st,iv,dte,P), _mkLeg('long','put',s,s-10*st,iv,dte,P), _mkLeg('short','call',s,s+6*st,iv,dte,P), _mkLeg('long','call',s,s+10*st,iv,dte,P)] },
-  { id: 'straddle',   name: 'Long Straddle',     bias: 'volatile',tag: '大波動',
+  { id: 'straddle', nameZh: '買進跨式',   name: 'Long Straddle',     bias: 'volatile',tag: '大波動',
     build: (s, iv, dte, P) => [_mkLeg('long','call',s,s,iv,dte,P), _mkLeg('long','put',s,s,iv,dte,P)] },
-  { id: 'strangle',   name: 'Long Strangle',     bias: 'volatile',tag: '大波動(便宜)',
+  { id: 'strangle', nameZh: '買進勒式',   name: 'Long Strangle',     bias: 'volatile',tag: '大波動(便宜)',
     build: (s, iv, dte, P, st = P.strikeStep) => [_mkLeg('long','call',s,s+3*st,iv,dte,P), _mkLeg('long','put',s,s-3*st,iv,dte,P)] },
-  { id: 'short-strangle', name: 'Short Strangle',bias: 'neutral', tag: '盤整裸賣',
+  { id: 'short-strangle', nameZh: '賣出勒式', name: 'Short Strangle',bias: 'neutral', tag: '盤整裸賣',
     build: (s, iv, dte, P, st = P.strikeStep) => [_mkLeg('short','call',s,s+4*st,iv,dte,P), _mkLeg('short','put',s,s-4*st,iv,dte,P)] },
-  { id: 'put-credit', name: 'Put Credit Spread', bias: 'bullish', tag: '看不跌',
+  { id: 'put-credit', nameZh: '賣權多頭價差', name: 'Put Credit Spread', bias: 'bullish', tag: '看不跌',
     build: (s, iv, dte, P, st = P.strikeStep) => [_mkLeg('short','put',s,s-2*st,iv,dte,P), _mkLeg('long','put',s,s-6*st,iv,dte,P)] },
-  { id: 'call-credit',name: 'Call Credit Spread',bias: 'bearish', tag: '看不漲',
+  { id: 'call-credit', nameZh: '買權空頭價差',name: 'Call Credit Spread',bias: 'bearish', tag: '看不漲',
     build: (s, iv, dte, P, st = P.strikeStep) => [_mkLeg('short','call',s,s+2*st,iv,dte,P), _mkLeg('long','call',s,s+6*st,iv,dte,P)] },
-  { id: 'butterfly',  name: 'Long Butterfly',    bias: 'neutral', tag: '精準錨點',
+  { id: 'butterfly', nameZh: '買進蝶式',  name: 'Long Butterfly',    bias: 'neutral', tag: '精準錨點',
     build: (s, iv, dte, P, st = P.strikeStep) => [_mkLeg('long','call',s,s-3*st,iv,dte,P), _mkLeg('short','call',s,s,iv,dte,P,2), _mkLeg('long','call',s,s+3*st,iv,dte,P)] },
-  { id: 'long-call',  name: 'Long Call',         bias: 'bullish', tag: '純多單',
+  { id: 'long-call', nameZh: '買進買權',  name: 'Long Call',         bias: 'bullish', tag: '純多單',
     build: (s, iv, dte, P) => [_mkLeg('long','call',s,s,iv,dte,P)] },
-  { id: 'long-put',   name: 'Long Put',          bias: 'bearish', tag: '純空單',
+  { id: 'long-put', nameZh: '買進賣權',   name: 'Long Put',          bias: 'bearish', tag: '純空單',
     build: (s, iv, dte, P) => [_mkLeg('long','put',s,s,iv,dte,P)] },
 ];
 
@@ -2014,7 +2014,7 @@ function CompareWorkspace({ D, P, spot, iv, dte, theme = 'dark' }) {
               const c = biasColor[s.bias];
               return (
                 <button key={s.id} onClick={() => toggle(s.id)} style={{
-                  padding: '6px 10px', borderRadius: 999, border: '1px solid',
+                  padding: '6px 10px', borderRadius: 0, border: '1px solid',
                   borderColor: active ? c : 'rgba(255,255,255,0.10)',
                   background: active ? `${c}22` : 'rgba(255,255,255,0.02)',
                   color: active ? '#fff' : 'rgba(255,255,255,0.65)',
@@ -2097,7 +2097,7 @@ function CompareCard({ strategy: s, P, spot, iv, dte, D, theme = 'dark', biasCol
           <div style={{ fontSize: 10, opacity: 0.55, marginTop: 2 }}>{legs.length} legs</div>
         </div>
         <button onClick={onRemove} style={{
-          width: 22, height: 22, borderRadius: 11, border: '1px solid rgba(255,255,255,0.12)',
+          width: 22, height: 22, borderRadius: 0, border: '1px solid rgba(255,255,255,0.12)',
           background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.6)', cursor: 'pointer',
           fontSize: 12, lineHeight: 1, padding: 0, fontFamily: 'inherit',
         }}>×</button>
@@ -2106,7 +2106,7 @@ function CompareCard({ strategy: s, P, spot, iv, dte, D, theme = 'dark', biasCol
       <PayoffChart legs={legs} spot={spot} theme={theme} height={170} width={300} iv={iv} dte={dte} showCone={true} sliceFrac={1} rangePct={0.06} showKeyNumbers={true} model={P.model} r={P.r / 100} strikeStep={P.strikeStep} />
 
       {/* Editable strikes */}
-      <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
+      <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 0, background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
         <div style={{ fontSize: 9, letterSpacing: 0.5, textTransform: 'uppercase', opacity: 0.55, fontWeight: 600, marginBottom: 6 }}>Strikes · adjust K</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {legs.map((l, i) => (
@@ -2144,25 +2144,25 @@ function CompareCard({ strategy: s, P, spot, iv, dte, D, theme = 'dark', biasCol
 
       {/* Key numbers */}
       <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: 11 }}>
-        <div style={{ padding: '6px 8px', borderRadius: 6, background: 'rgba(239,83,80,0.10)', border: '1px solid rgba(239,83,80,0.18)' }}>
-          <div style={{ fontSize: 9, letterSpacing: 0.4, opacity: 0.7, fontWeight: 600 }}>MAX PROFIT</div>
+        <div style={{ padding: '6px 8px', borderRadius: 0, background: 'rgba(239,83,80,0.10)', border: '1px solid rgba(239,83,80,0.18)' }}>
+          <div style={{ fontSize: 9, opacity: 0.7, fontWeight: 600 }}>最大獲利</div>
           <div className="tnum" style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#ef5350', fontSize: 13 }}>
             +{P.cur}{Math.round(mp * P.mult).toLocaleString()}
           </div>
         </div>
-        <div style={{ padding: '6px 8px', borderRadius: 6, background: 'rgba(38,166,154,0.10)', border: '1px solid rgba(38,166,154,0.18)' }}>
-          <div style={{ fontSize: 9, letterSpacing: 0.4, opacity: 0.7, fontWeight: 600 }}>MAX LOSS</div>
+        <div style={{ padding: '6px 8px', borderRadius: 0, background: 'rgba(38,166,154,0.10)', border: '1px solid rgba(38,166,154,0.18)' }}>
+          <div style={{ fontSize: 9, opacity: 0.7, fontWeight: 600 }}>最大虧損</div>
           <div className="tnum" style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#26a69a', fontSize: 13 }}>
             {P.cur}{Math.round(ml * P.mult).toLocaleString()}
           </div>
         </div>
-        <div style={{ padding: '6px 8px', borderRadius: 6, background: 'rgba(167,139,250,0.10)', border: '1px solid rgba(167,139,250,0.18)' }}>
-          <div style={{ fontSize: 9, letterSpacing: 0.4, opacity: 0.7, fontWeight: 600 }}>BREAK-EVEN</div>
+        <div style={{ padding: '6px 8px', borderRadius: 0, background: 'rgba(167,139,250,0.10)', border: '1px solid rgba(167,139,250,0.18)' }}>
+          <div style={{ fontSize: 9, opacity: 0.7, fontWeight: 600 }}>損益兩平</div>
           <div className="tnum" style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#a78bfa', fontSize: 12 }}>
             {bes.length ? bes.map((b) => b.toFixed(0)).join(' / ') : '—'}
           </div>
         </div>
-        <div style={{ padding: '6px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+        <div style={{ padding: '6px 8px', borderRadius: 0, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
           <div style={{ fontSize: 9, letterSpacing: 0.4, opacity: 0.7, fontWeight: 600 }}>{credit >= 0 ? 'NET CREDIT' : 'NET DEBIT'}</div>
           <div className="tnum" style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 12, color: credit >= 0 ? '#ef5350' : '#cdd3df' }}>
             {credit >= 0 ? '+' : ''}{P.cur}{Math.round(credit * P.mult).toLocaleString()}
@@ -2174,9 +2174,9 @@ function CompareCard({ strategy: s, P, spot, iv, dte, D, theme = 'dark', biasCol
 }
 
 const miniBtn = {
-  fontSize: 10, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase',
-  padding: '4px 8px', borderRadius: 6, border: '1px solid rgba(128,140,170,0.28)',
-  background: 'rgba(128,140,170,0.12)', color: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap',
+  fontSize: 10.5, fontWeight: 600,
+  padding: '3px 8px', borderRadius: 0, border: '1px solid var(--border)',
+  background: 'transparent', color: 'var(--text)', cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit',
 };
 
 // Strategy template picker (desktop). One click replaces the working legs with
@@ -2188,14 +2188,11 @@ function StrategyMenu({ P, spot, iv, dte, onPick, light }) {
   return (
     <div style={{ position: 'relative' }}>
       {open && <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 30 }} />}
-      <button style={miniBtn} onClick={() => setOpen(!open)} title="Load a strategy template">≡ strategy</button>
+      <button style={miniBtn} onClick={() => setOpen(!open)} title="套用策略範本">策略範本</button>
       {open && (
         <div style={{
-          position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 31, width: 212, padding: 6, borderRadius: 12,
-          backdropFilter: 'blur(36px) saturate(160%)', WebkitBackdropFilter: 'blur(36px) saturate(160%)',
-          background: light ? 'rgba(255,255,255,0.97)' : 'linear-gradient(155deg, rgba(80,90,115,0.92), rgba(36,42,58,0.95))',
-          border: `1px solid ${light ? 'rgba(25,40,70,0.16)' : 'rgba(255,255,255,0.14)'}`,
-          boxShadow: '0 24px 48px -20px rgba(0,0,0,0.7)', color: light ? '#1c2433' : '#e8eaef',
+          position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 31, width: 232, padding: 4,
+          background: 'var(--panel2)', border: '1px solid var(--border)', boxShadow: '0 12px 28px rgba(0,0,0,0.45)', color: 'var(--text)',
           display: 'flex', flexDirection: 'column', gap: 1, maxHeight: 320, overflowY: 'auto',
         }}>
           {STRATEGY_LIBRARY.map((s) => (
@@ -2203,15 +2200,15 @@ function StrategyMenu({ P, spot, iv, dte, onPick, light }) {
               onPick(s.build(Math.round(spot / P.strikeStep) * P.strikeStep, iv, dte, P));
               setOpen(false);
             }} style={{
-              display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 8,
+              display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 0,
               border: 'none', textAlign: 'left', cursor: 'pointer', background: 'transparent',
               color: 'inherit', fontFamily: 'inherit', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap',
             }}
               onMouseEnter={(e) => { e.currentTarget.style.background = light ? 'rgba(20,40,80,0.08)' : 'rgba(255,255,255,0.10)'; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
               <span style={{ width: 6, height: 6, borderRadius: 3, background: biasColor[s.bias], flexShrink: 0 }} />
-              {s.name}
-              <span style={{ marginLeft: 'auto', fontSize: 9, opacity: 0.45, textTransform: 'uppercase' }}>{s.bias}</span>
+              {s.nameZh || s.name}
+              <span style={{ marginLeft: 'auto', fontSize: 9, opacity: 0.55 }}>{s.tag}</span>
             </button>
           ))}
         </div>

@@ -312,9 +312,9 @@ function OIProfile({ spot, contract = 'monthly', theme = 'dark', height, maxRows
   return (
     <div style={{ width: '100%' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 9, opacity: 0.55, marginBottom: 6, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase' }}>
-        <span style={{ color: upColor }}>Call OI</span>
-        <span>Strike</span>
-        <span style={{ color: downColor }}>Put OI</span>
+        <span style={{ color: upColor }}>買權 未平倉</span>
+        <span>履約價</span>
+        <span style={{ color: downColor }}>賣權 未平倉</span>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         {visible.map((r) => {
@@ -367,7 +367,7 @@ function OIProfile({ spot, contract = 'monthly', theme = 'dark', height, maxRows
         })}
       </div>
       <div style={{ marginTop: 6, fontSize: 9, opacity: 0.45, fontFamily: 'var(--font-mono)', textAlign: 'right' }}>
-        max OI in view: {maxOI.toLocaleString()}
+        顯示範圍最大 OI {maxOI.toLocaleString()}
       </div>
     </div>
   );
@@ -415,9 +415,9 @@ function PnLAttribution({ legs, spot, iv, dte, theme = 'dark', height = 150, wid
   const dSpot = spot - baseSpot;
   const dIv   = iv   - baseIv;
   const items = [
-    { key: 'spot',  label: 'Spot Δ',   sub: `${baseSpot.toLocaleString()} → ${spot.toLocaleString()} (${dSpot >= 0 ? '+' : ''}${dSpot})`, value: pg.delta * dSpot * ntdMult },
-    { key: 'iv',    label: 'IV Δ',     sub: `${baseIv}% → ${iv}% (${dIv >= 0 ? '+' : ''}${dIv.toFixed(1)})`, value: pg.vega * dIv * ntdMult },
-    { key: 'theta', label: 'Θ /day',   sub: 'time decay if held 1 day',                                       value: pg.theta * ntdMult },
+    { key: 'spot',  label: '現價變動', sub: `${baseSpot.toLocaleString()} → ${spot.toLocaleString()} (${dSpot >= 0 ? '+' : ''}${dSpot})`, value: pg.delta * dSpot * ntdMult },
+    { key: 'iv',    label: 'IV 變動',  sub: `${baseIv}% → ${iv}% (${dIv >= 0 ? '+' : ''}${dIv.toFixed(1)})`, value: pg.vega * dIv * ntdMult },
+    { key: 'theta', label: 'Θ／日',    sub: '持有一天的時間價值流失',                                          value: pg.theta * ntdMult },
   ];
   const maxAbs = Math.max(...items.map((it) => Math.abs(it.value)), 1);
   const upColor = '#ef5350', downColor = '#26a69a';
@@ -493,8 +493,8 @@ function MaxPain({ spot, contract = 'monthly', theme = 'dark', height = 160, wid
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6, fontSize: 10, fontFamily: 'var(--font-mono)' }}>
-        <span><span style={{ opacity: 0.55 }}>max pain </span><span style={{ color: minColor, fontWeight: 700, fontSize: 12 }}>{maxPainStrike}</span></span>
-        <span><span style={{ opacity: 0.55 }}>vs spot </span><span style={{ color: distance >= 0 ? '#ef5350' : '#26a69a', fontWeight: 600 }}>{distance >= 0 ? '+' : ''}{distance}</span></span>
+        <span><span style={{ opacity: 0.55 }}>最大痛苦點 </span><span style={{ color: minColor, fontWeight: 700, fontSize: 12 }}>{maxPainStrike}</span></span>
+        <span><span style={{ opacity: 0.55 }}>距現價 </span><span style={{ color: distance >= 0 ? '#ef5350' : '#26a69a', fontWeight: 600 }}>{distance >= 0 ? '+' : ''}{distance}</span></span>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} style={{ display: 'block' }}>
         {/* baseline */}
@@ -536,7 +536,7 @@ function MaxPain({ spot, contract = 'monthly', theme = 'dark', height = 160, wid
         <text x={W - pad} y={H - 3} fontSize="9" fill={txt} textAnchor="end" style={{ fontFamily: 'var(--font-mono)' }}>{pains[pains.length - 1].strike}</text>
       </svg>
       <div style={{ marginTop: 4, fontSize: 9, opacity: 0.45, fontFamily: 'var(--font-mono)', textAlign: 'right' }}>
-        min pain = {cur}{Math.round(minPainNTD).toLocaleString()}
+        買方最低總收益 {cur}{Math.round(minPainNTD).toLocaleString()}
       </div>
     </div>
   );
@@ -606,8 +606,8 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
       {/* Type toggle */}
       <div style={{ display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden', border: `1px solid ${fieldBorder}` }}>
         {[
-          { id: 'call', label: 'CALL', color: upColor },
-          { id: 'put',  label: 'PUT',  color: downColor },
+          { id: 'call', label: '買權', color: upColor },
+          { id: 'put',  label: '賣權', color: downColor },
         ].map((opt) => {
           const active = type === opt.id;
           return (
@@ -624,7 +624,7 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
       {/* Strike slider — IV auto-pulled from the smile; spot / DTE from context */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <span style={labelStyle}>Strike</span>
+          <span style={labelStyle}>履約價</span>
           <span className="tnum" style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
             {fmtK(strike)}{strike === atm ? ' · ATM' : ''}
           </span>
@@ -633,7 +633,7 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
           onChange={(e) => setStrike(parseFloat(e.target.value))} style={{ width: '100%', accentColor: accent }} />
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, opacity: 0.5, fontFamily: 'var(--font-mono)' }}>
           <span>{fmtK(kMin)}</span>
-          <span>spot {spot.toLocaleString()} · {dte}d · IV {strikeIv.toFixed(1)}%</span>
+          <span>現價 {spot.toLocaleString()} · {dte} 天 · IV {strikeIv.toFixed(1)}%</span>
           <span>{fmtK(kMax)}</span>
         </div>
       </div>
@@ -646,25 +646,25 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
-            <div style={labelStyle}>Theoretical price</div>
+            <div style={labelStyle}>理論價</div>
             <div className="tnum" style={{
               fontSize: 30, fontWeight: 700, letterSpacing: -0.6,
               fontFamily: 'var(--font-mono)', lineHeight: 1.05,
               color: dark ? '#e8eaef' : '#1d1d22',
             }}>{result.price.toFixed(2)}</div>
             <div style={{ fontSize: 11, opacity: 0.55, marginTop: 4, fontFamily: 'var(--font-mono)' }}>
-              ≈ {P.cur}{Math.round(result.price * P.mult).toLocaleString()} ({type === 'call' ? 'CALL' : 'PUT'} K={fmtK(strike)})
+              ≈ {P.cur}{Math.round(result.price * P.mult).toLocaleString()} （{type === 'call' ? '買權' : '賣權'} {fmtK(strike)}）
             </div>
           </div>
           {hasMarket && (
             <div style={{ textAlign: 'right' }}>
-              <div style={labelStyle}>vs market</div>
+              <div style={labelStyle}>對市價</div>
               <div className="tnum" style={{
                 fontSize: 18, fontWeight: 700, fontFamily: 'var(--font-mono)',
                 color: mispricingPct >= 0 ? upColor : downColor,
               }}>{mispricingPct >= 0 ? '+' : ''}{mispricingPct.toFixed(2)}%</div>
               <div style={{ fontSize: 9, opacity: 0.45, fontFamily: 'var(--font-mono)' }}>
-                {mispricingPct >= 0 ? 'model > market (maybe cheap)' : 'model < market (maybe rich)'}
+                {mispricingPct >= 0 ? '模型 > 市價（可能偏便宜）' : '模型 < 市價（可能偏貴）'}
               </div>
             </div>
           )}
@@ -673,9 +673,9 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
 
       {/* Optional market price comparison */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <span style={labelStyle}>Market price (optional — check cheap / rich)</span>
+        <span style={labelStyle}>市價（選填：比較貴或便宜）</span>
         <input type="number" value={marketPx} onChange={(e) => setMarketPx(e.target.value)}
-          placeholder="Enter market price…" style={fieldStyle} step="0.01" />
+          placeholder="輸入市價…" style={fieldStyle} step="0.01" />
       </div>
 
       {/* Greeks row */}
@@ -882,14 +882,14 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
     <div>
       {/* OHLC readout + overlay legend */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-        <span style={{ fontSize: 10, letterSpacing: 0.8, textTransform: 'uppercase', opacity: 0.6, fontWeight: 600 }}>
+        <span style={{ fontSize: 10, opacity: 0.6, fontWeight: 600 }}>
           {code}{periodLabel ? ` · ${periodLabel}` : ''}
         </span>
         <span className="tnum" style={{ fontSize: 11, fontFamily: 'var(--font-mono)', opacity: 0.85, display: 'inline-flex', gap: 12 }}>
-          <span><span style={{ opacity: 0.5 }}>O</span> {fmt(last.o)}</span>
-          <span><span style={{ opacity: 0.5 }}>H</span> {fmt(last.h)}</span>
-          <span><span style={{ opacity: 0.5 }}>L</span> {fmt(last.l)}</span>
-          <span><span style={{ opacity: 0.5 }}>C</span> <b style={{ color: lastUp ? up : down }}>{fmt(last.c)}</b></span>
+          <span><span style={{ opacity: 0.5 }}>開</span> {fmt(last.o)}</span>
+          <span><span style={{ opacity: 0.5 }}>高</span> {fmt(last.h)}</span>
+          <span><span style={{ opacity: 0.5 }}>低</span> {fmt(last.l)}</span>
+          <span><span style={{ opacity: 0.5 }}>收</span> <b style={{ color: lastUp ? up : down }}>{fmt(last.c)}</b></span>
         </span>
         <span style={{ display: 'inline-flex', gap: 10, fontSize: 10, fontFamily: 'var(--font-mono)', opacity: 0.8 }}>
           {PRICE_MAS.map((m) => {

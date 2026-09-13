@@ -548,7 +548,7 @@ function Slider({ label, value, min, max, step = 1, onChange, suffix = '', theme
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, whiteSpace: 'nowrap' }}>
-        <span style={{ fontSize: 11, opacity: 0.7, letterSpacing: 0.4, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{label}</span>
+        <span style={{ fontSize: 11, opacity: 0.7, whiteSpace: 'nowrap' }}>{label}</span>
         <span className="tnum" style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
           {format ? format(value) : value}{suffix}
         </span>
@@ -602,19 +602,19 @@ function LegEditor({ legs, onChange, theme = 'light', expiries, defaultDte }) {
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: cols, gap, fontSize: 10, letterSpacing: 0.6, textTransform: 'uppercase', color: headerColor, padding: '0 4px' }}>
-        <span>Side</span><span>Type</span><span>Strike</span><span>Premium</span>{withExp && <span>Exp</span>}<span style={{ textAlign: 'right' }}>Qty</span><span></span>
+      <div style={{ display: 'grid', gridTemplateColumns: cols, gap, fontSize: 10, color: headerColor, padding: '0 4px' }}>
+        <span>買賣</span><span>買賣權</span><span>履約價</span><span>權利金</span>{withExp && <span>到期</span>}<span style={{ textAlign: 'right' }}>口數</span><span></span>
       </div>
       {legs.map((leg, i) => (
         <div key={i} style={{
           display: 'grid', gridTemplateColumns: cols, gap,
-          padding: '8px 6px 8px 8px', borderRadius: 10, background: rowBg, border: `1px solid ${rowBorder}`, alignItems: 'center'
+          padding: '6px 6px 6px 8px', borderRadius: 0, background: rowBg, border: `1px solid ${rowBorder}`, alignItems: 'center'
         }}>
           <button
             onClick={() => update(i, { side: leg.side === 'long' ? 'short' : 'long' })}
             style={{
-              fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase',
-              padding: '4px 4px', borderRadius: 6, border: 'none', cursor: 'pointer',
+              fontSize: 10.5, fontWeight: 700,
+              padding: '4px 4px', borderRadius: 0, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
               background: leg.side === 'long'
                 ? (dark ? 'rgba(240,192,104,0.20)' : 'rgba(217,154,44,0.15)')
                 : (dark ? 'rgba(95,163,212,0.20)' : 'rgba(58,127,184,0.15)'),
@@ -622,32 +622,32 @@ function LegEditor({ legs, onChange, theme = 'light', expiries, defaultDte }) {
                 ? (dark ? '#f0c068' : '#a06f1f')
                 : (dark ? '#5fa3d4' : '#2a5e8c'),
             }}
-          >{leg.side === 'long' ? '+ LONG' : '− SHORT'}</button>
+          >{leg.side === 'long' ? '＋買' : '－賣'}</button>
           <button
             onClick={() => update(i, { type: leg.type === 'call' ? 'put' : 'call' })}
             style={{
-              fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase',
-              padding: '4px 4px', borderRadius: 6, border: `1px solid ${rowBorder}`, cursor: 'pointer',
+              fontSize: 10.5, fontWeight: 700,
+              padding: '4px 4px', borderRadius: 0, border: `1px solid ${rowBorder}`, cursor: 'pointer', fontFamily: 'inherit',
               background: 'transparent', color: dark ? '#e8eaef' : '#1d1d22',
             }}
-          >{leg.type}</button>
+          >{leg.type === 'call' ? '買權' : '賣權'}</button>
           <NumField value={leg.strike} step={1} onChange={(v) => update(i, { strike: v })} dark={dark} />
           <NumField value={leg.premium} step={0.05} onChange={(v) => update(i, { premium: v })} dark={dark} />
           {withExp && (() => {
             const effDte = leg.dte != null ? leg.dte : defaultDte;
             const known = expiries.some((e) => e.dte === effDte);
             return (
-              <select value={effDte} onChange={(e) => update(i, { dte: parseInt(e.target.value, 10) })} title="leg expiry" style={selStyle}>
-                {!known && <option value={effDte}>{effDte}d</option>}
-                {expiries.map((e) => <option key={e.id} value={e.dte}>{e.label} · {e.dte}d</option>)}
+              <select value={effDte} onChange={(e) => update(i, { dte: parseInt(e.target.value, 10) })} title="部位到期日" style={selStyle}>
+                {!known && <option value={effDte}>{effDte}天</option>}
+                {expiries.map((e) => <option key={e.id} value={e.dte}>{e.label} · {e.dte}天</option>)}
               </select>
             );
           })()}
           <NumField value={leg.qty} step={1} onChange={(v) => update(i, { qty: v })} dark={dark} align="right" />
           <button
             onClick={() => remove(i)}
-            aria-label="remove leg"
-            title="remove leg"
+            aria-label="刪除部位"
+            title="刪除部位"
             style={{
               width: 22, height: 22, borderRadius: 11, padding: 0,
               border: `1px solid ${rowBorder}`,
