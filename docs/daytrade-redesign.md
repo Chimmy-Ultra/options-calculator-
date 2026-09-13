@@ -450,3 +450,23 @@ snapshot now carries about a year of daily bars for this. On the 2023-05 →
 P 45.8%, R1 54.5%, R2 32.0%, R3 18.4%, S1 39.5%, S2 25.4%, S3 13.5%,
 前日高 57.3%, 前日低 42.1%. The panel's own numbers come from whatever
 history is loaded and say the sample size.
+
+## 10. 基本面 / 盤前脈絡 + 台股籌碼日報 (2026-09-13)
+
+Two more reads on the 關卡 tab, after the owner asked whether "other fundamentals" were worth pulling in. What was added is the pre-open context a Taiwan index day trader actually checks, not news or single-stock fundamentals.
+
+**盤前脈絡** (`/api/premarket/txo`, `PREMARKET` in `server/main.py`, panel `premarket`)
+
+- Rows: S&P 500 and Nasdaq-100 front-month futures (CME), the Philadelphia Semiconductor index (PHLX), VIX (CBOE), TSMC's ADR (TSM, NYSE) against 2330 (TWSE), and USD/TWD. All through the proxy's IB session; the futures resolve to the front month at request time, the rest are pinned by IB conId (resolved with IBKR's contract search on 2026-09-13) so a symbol clash on another exchange cannot swap the instrument.
+- USD/TWD: IB has no TWD forex pair (TWD is non-deliverable), so the row is the SGX TWD future. IB describes it as "SGX Taiwan Dollar in US Dollar Futures"; a connector snapshot on 2026-09-13 read 31.63 with a 31.61 prior close and a 31.10 / 31.815 bid-ask — the TWD-per-USD side, the same as the spot quote. The label says SGX 期貨; if it ever prints ~3, the convention changed and the ADR line must be revisited.
+- ADR 換算 = TSM × USD/TWD ÷ 5 (one ADR is five ordinary shares); 溢價 = that against 2330's last close. Client-side arithmetic on the rows, shown with its formula.
+- Change is IB's own "vs prior close". Without a market-data subscription IB serves delayed or frozen quotes (`marketDataType` 3 / 4); the header shows the data type and capture time, and a row IB cannot quote reads 無報價 / 找不到合約, never a filled-in number.
+- Snapshot: `python3 server/taifex.py --write … --proxy http://127.0.0.1:8720` embeds the block from a running proxy. The build in this branch used a capture taken through IBKR's connector (Friday 2026-09-11 close, delayed-frozen), served through the same `--proxy` path with `source: "ibkr-connector"` so the header says so.
+- Not verified: the endpoint against a live Gateway (no IB session in the sandbox). Contract resolution, market-data permissions for TWSE stocks and SGX futures, and the 2330 quote all need one run on the owner's machine.
+
+**台股籌碼日報** (`/api/twse/txo`, `taifex._fetch_twse_flows`, panel `twse`)
+
+- TWSE's after-close tables: 三大法人買賣超 by category (`fund/BFI82U`, NT$) and 融資融券餘額 (`marginTrading/MI_MARGN`, 張 and 仟元) with the day-before balance. Row names are the exchange's own. Previous session by construction.
+- TWSE answers bursts with a 307 to a rate-limit page; every request retries with a pause and a non-trading date steps back. Both tables were confirmed for 2026/09/11 in the sandbox.
+
+**Left out on purpose**: news feeds, single-stock fundamentals, an economic calendar. A user-maintained event list (FOMC, TSMC earnings, TAIFEX settlement) would be cheap to add if wanted; nothing here should quote a number this site cannot fetch.

@@ -90,6 +90,10 @@
     top20: (pid) => get('/api/top20/' + encodeURIComponent(pid), 15000),
     // { source, flow: 'tick-type' | 'tick-rule', date, month, day: { bars: [[hhmm,o,h,l,c,lots,cost,net,cum]…], high, low, cost, buy, sell, net }, night } | null
     intraday: (pid) => get('/api/intraday/' + encodeURIComponent(pid), 20000),
+    // { source: 'twse', date, institutional: [{ name, buy, sell, net }] (NT$), margin: { 項目: { prev, today } } } | null — 前一交易日
+    twse: (pid) => get('/api/twse/' + encodeURIComponent(pid), 15000),
+    // { source: 'ib', asOf, marketDataType, rows: [{ key, symbol, localSymbol, exchange, last, prevClose, chg, chgPct, high, low, time, status }] } | null
+    premarket: (pid) => get('/api/premarket/' + encodeURIComponent(pid), 15000),
   };
   // health.source 'eod' + a label tells the top bar what it is showing; no proxy ⇒ never "STALE".
   const fallback = {};
@@ -123,6 +127,8 @@
   fallback.market = async (pid) => { const s = eod(pid); return (s && s.market) || null; };
   fallback.top20 = async (pid) => { const s = eod(pid); return (s && s.top20) || null; };
   fallback.intraday = async (pid) => { const s = eod(pid); return (s && s.intraday) || null; };
+  fallback.twse = async (pid) => { const s = eod(pid); return (s && s.twse) || null; };
+  fallback.premarket = async (pid) => { const s = eod(pid); return (s && s.premarket) || null; };
 
   // Proxy first; the snapshot only answers when the proxy could not.
   window.LiveData = {};

@@ -398,6 +398,8 @@ const GRID_DEFAULTS = {
     { i: 'intraday', x: 4, y: 28, w: 8,  h: 12 },
     { i: 'top20',    x: 4, y: 40, w: 8,  h: 8 },
     { i: 'gex',      x: 4, y: 48, w: 8,  h: 11 },
+    { i: 'premarket', x: 0, y: 50, w: 4, h: 8 },
+    { i: 'twse',      x: 0, y: 58, w: 4, h: 9 },
   ],
   chart: [{ i: 'kline', x: 0, y: 0, w: 12, h: 19 }],
   chain: [
@@ -447,6 +449,8 @@ function Obsidian3() {
   const [marketData, setMarketData] = uS(null); // daily positioning (P/C ratio, 外資, top-10) — same source
   const [top20Data, setTop20Data] = uS(null);   // 權值股 TOP20: TAIFEX index weights + TWSE daily quotes
   const [intradayData, setIntradayData] = uS(null); // 1-min bars + 成本線 + 多空差額 (Shioaji ticks live, TAIFEX tick file otherwise)
+  const [twseData, setTwseData] = uS(null);         // 台股籌碼日報: TWSE 三大法人 + 融資融券 (previous session)
+  const [premarketData, setPremarketData] = uS(null); // 盤前脈絡: ES / NQ / SOX / VIX / TSM ADR / 2330 / USDTWD via the proxy's IB session
   const [lastLiveAt, setLastLiveAt] = uS(null); // ② timestamp of last successful live fetch
   const [liveBars, setLiveBars] = uS(null); // 近月期貨的 IB 歷史 K
   const [liveDayBars, setLiveDayBars] = uS(null); // daily 日盤 bars regardless of the K-line toggles — the 關卡價 input
@@ -580,6 +584,18 @@ function Obsidian3() {
         if (!dead && it && it.day && it.day.bars && it.day.bars.length) setIntradayData(it);
       })();
     }
+    if (P.oiSource === 'taifex' && window.LiveData.twse) {
+      (async () => {
+        const w = await window.LiveData.twse(P.id);
+        if (!dead && w && w.institutional && w.institutional.length) setTwseData(w);
+      })();
+    }
+    if (P.oiSource === 'taifex' && window.LiveData.premarket) {
+      (async () => {
+        const pm = await window.LiveData.premarket(P.id);
+        if (!dead && pm && pm.rows && pm.rows.length) setPremarketData(pm);
+      })();
+    }
     return () => { dead = true; };
   }, [productId]);
 
@@ -636,12 +652,19 @@ function Obsidian3() {
       if (dead || !it || !it.day || !it.day.bars || !it.day.bars.length) return;
       setIntradayData(it);
     };
+    const pullPremarket = async () => {
+      if (document.hidden || P.oiSource !== 'taifex' || !window.LiveData.premarket || (live.health && live.health.source === 'eod')) return;
+      const pm = await window.LiveData.premarket(P.id);
+      if (dead || !pm || !pm.rows || !pm.rows.length) return;
+      setPremarketData(pm);
+    };
     const qId = setInterval(pullQuote, 10000);
     const cId = setInterval(pullChain, 30000);
     const iId = setInterval(pullIntraday, 60000);
+    const pmId = setInterval(pullPremarket, 60000);
     const onVis = () => { if (!document.hidden) { pullQuote(); pullChain(); } };
     document.addEventListener('visibilitychange', onVis);
-    return () => { dead = true; clearInterval(qId); clearInterval(cId); clearInterval(iId); document.removeEventListener('visibilitychange', onVis); };
+    return () => { dead = true; clearInterval(qId); clearInterval(cId); clearInterval(iId); clearInterval(pmId); document.removeEventListener('visibilitychange', onVis); };
   }, [live, productId, expiryId]);
 
   // IB live：K 線依所選週期抓歷史 K 棒。剛連上 + 每次換週期都會重抓；
@@ -870,7 +893,7 @@ function Obsidian3() {
       {workspace === 'levels' && (
         <LevelsWorkspace
           P={P} theme={theme} light={light} spot={spot} expiry={expiry} levels={levels} live={live} market={marketData}
-          rangeLevels={rangeLevels} dayBarsLive={!!liveDayBars} gex={gex} grid={grid} top20={top20Data} intraday={intradayData} keyLevels={keyLevels}
+          rangeLevels={rangeLevels} dayBarsLive={!!liveDayBars} gex={gex} grid={grid} top20={top20Data} intraday={intradayData} keyLevels={keyLevels} twse={twseData} premarket={premarketData}
           bars={bars} barsLive={!!liveBars} barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
           barSession={barSession} setBarSession={setBarSession}
           D={D}
@@ -1859,7 +1882,105 @@ function Top20Panel({ T, light = false }) {
   );
 }
 
-function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, levels: L, live, market: M, rangeLevels: R, dayBarsLive, gex: G, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D, grid, top20: T, intraday: I, keyLevels: K }) {
+// 盤前脈絡 — the overseas quotes a Taiwan day trader reads before 08:45. Rows
+// follow the proxy's PREMARKET list; a row IB could not quote says so, and
+// the ADR line is arithmetic on the rows (ADR × USD/TWD ÷ 5 shares).
+const PREMARKET_ROWS = [
+  { key: 'es', label: 'S&P 500 期指', dp: 2 },
+  { key: 'nq', label: '那斯達克期指', dp: 2 },
+  { key: 'sox', label: '費城半導體', dp: 1 },
+  { key: 'vix', label: 'VIX 恐慌指數', dp: 2 },
+  { key: 'tsm', label: '台積電 ADR (US$)', dp: 2 },
+  { key: '2330', label: '台積電 (NT$)', dp: 0 },
+  { key: 'usdtwd', label: '美元／台幣 (SGX 期貨)', dp: 3 },
+];
+const PREMARKET_STATUS = { 'no-data': '無報價', 'no-contract': '找不到合約' };
+function PremarketPanel({ PM, light = false }) {
+  const dim = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
+  if (!PM || !PM.rows || !PM.rows.length) return <div className="mono" style={{ fontSize: 11, color: dim }}>沒有盤前資料（代理要連上 IB Gateway；部署站讀快照）。</div>;
+  const by = {};
+  PM.rows.forEach((r) => { by[r.key] = r; });
+  const fmt = (v, dp) => (v == null ? '—' : v.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp }));
+  const tsm = by.tsm, tw = by['2330'], fx = by.usdtwd;
+  const implied = (tsm && tsm.last && fx && fx.last) ? tsm.last * fx.last / 5 : null;
+  const prem = (implied && tw && tw.last) ? (implied / tw.last - 1) * 100 : null;
+  const hhmm = (iso) => (iso ? iso.slice(5, 16).replace('T', ' ') : '');
+  const mono = { fontFamily: 'var(--font-mono)', textAlign: 'right', whiteSpace: 'nowrap' };
+  return (
+    <div>
+      {PREMARKET_ROWS.map((d) => {
+        const r = by[d.key];
+        const ok = !!(r && r.status === 'ok' && r.last != null);
+        const tip = r ? `${r.localSymbol || r.symbol} · ${r.exchange}${ok ? ` · 高 ${fmt(r.high, d.dp)} · 低 ${fmt(r.low, d.dp)} · 前收 ${fmt(r.prevClose, d.dp)}` : ''}${r.time ? ` · ${hhmm(r.time)} UTC` : ''}` : '';
+        return (
+          <div key={d.key} title={tip} style={{ display: 'grid', gridTemplateColumns: '1fr auto 64px 72px', alignItems: 'baseline', gap: 8, fontSize: 11.5, padding: '3px 0', borderBottom: '1px solid var(--border)' }}>
+            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.label}<span className="mono" style={{ fontSize: 9, color: dim, marginLeft: 5 }}>{r && r.localSymbol ? r.localSymbol : ''}</span></span>
+            <span className="tnum" style={{ ...mono, fontWeight: 700, fontSize: 13 }}>{ok ? fmt(r.last, d.dp) : '—'}</span>
+            <span className="tnum" style={{ ...mono, fontSize: 10.5 }}>{ok ? <Chg v={r.chg} fmt={(x) => fmt(x, d.dp)} /> : <span style={{ color: dim }}>{r ? (PREMARKET_STATUS[r.status] || '無報價') : '未回報'}</span>}</span>
+            <span className="tnum" style={{ ...mono, fontSize: 10.5 }}>{ok && r.chgPct != null ? <Chg v={r.chgPct} fmt={(x) => x.toFixed(2)} suffix="%" /> : ''}</span>
+          </div>
+        );
+      })}
+      <div className="mono tnum" style={{ marginTop: 8, fontSize: 10.5, color: dim, lineHeight: 1.5 }}>
+        ADR 換算台股價 <b style={{ color: 'var(--text)' }}>{implied != null ? fmt(implied, 0) : '—'}</b>
+        {prem != null ? <> · 對 2330 收盤 <Chg v={prem} fmt={(x) => x.toFixed(2)} suffix="%" /></> : ''}
+        <span> · ADR × 匯率 ÷ 5（1 ADR = 5 股）</span>
+      </div>
+    </div>
+  );
+}
+
+// 台股籌碼日報 — TWSE's after-close 三大法人 and margin tables, previous
+// session. Money in 億 (NT$), lots in 張, the exchange's own row names.
+const MARGIN_LABELS = { '融資(交易單位)': '融資餘額 (張)', '融券(交易單位)': '融券餘額 (張)', '融資金額(仟元)': '融資金額' };
+function TwseFlowsPanel({ W, light = false }) {
+  const dim = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
+  if (!W || !W.institutional || !W.institutional.length) return <div className="mono" style={{ fontSize: 11, color: dim }}>沒有證交所籌碼資料。</div>;
+  const yi = (v, dp = 1) => `${v < 0 ? '−' : v > 0 ? '+' : ''}${(Math.abs(v) / 1e8).toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp })}億`;
+  const col = (v) => (v > 0 ? LEVEL_COLORS.up : v < 0 ? LEVEL_COLORS.down : 'inherit');
+  const rows = W.institutional;
+  const maxAbs = Math.max(...rows.filter((r) => r.name !== '合計').map((r) => Math.abs(r.net)), 1);
+  const m = W.margin || {};
+  const margin = Object.keys(m).map((k) => {
+    const money = k.includes('金額');
+    const d = m[k].today - m[k].prev;
+    return { k, label: MARGIN_LABELS[k] || k, d,
+      today: money ? `${Math.round(m[k].today * 1e3 / 1e8).toLocaleString()}億` : m[k].today.toLocaleString(),
+      dText: money ? yi(d * 1e3) : `${d < 0 ? '−' : d > 0 ? '+' : ''}${Math.abs(d).toLocaleString()} 張` };
+  });
+  const cell = { fontFamily: 'var(--font-mono)', textAlign: 'right', whiteSpace: 'nowrap' };
+  return (
+    <div>
+      <div className="mono" style={{ fontSize: 9.5, color: dim, marginBottom: 3 }}>三大法人買賣超（億元）</div>
+      {rows.map((r) => {
+        const total = r.name === '合計';
+        const w = total ? 0 : Math.abs(r.net) / maxAbs * 50;
+        return (
+          <div key={r.name} title={`買進 ${(r.buy / 1e8).toFixed(1)}億 · 賣出 ${(r.sell / 1e8).toFixed(1)}億`} style={{ display: 'grid', gridTemplateColumns: '1fr 72px 1fr', alignItems: 'center', gap: 8, fontSize: 11, padding: '2px 0', borderTop: total ? '1px solid var(--border)' : 'none', fontWeight: total ? 700 : 500 }}>
+            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</span>
+            <span className="tnum" style={{ ...cell, color: col(r.net), fontWeight: 700 }}>{yi(r.net)}</span>
+            <div style={{ position: 'relative', height: 8 }}>
+              <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, background: 'var(--border)' }} />
+              {!total && <div style={{ position: 'absolute', top: 1, bottom: 1, background: col(r.net), left: r.net >= 0 ? '50%' : `${50 - w}%`, width: `${w}%` }} />}
+            </div>
+          </div>
+        );
+      })}
+      {margin.length > 0 && <>
+        <div className="mono" style={{ fontSize: 9.5, color: dim, margin: '8px 0 3px' }}>融資融券餘額 · 較前日</div>
+        {margin.map((x) => (
+          <div key={x.k} style={{ display: 'grid', gridTemplateColumns: '1fr 92px 96px', gap: 8, fontSize: 11, padding: '2px 0' }}>
+            <span>{x.label}</span>
+            <span className="tnum" style={cell}>{x.today}</span>
+            <span className="tnum" style={{ ...cell, color: col(x.d), fontWeight: 600 }}>{x.dText}</span>
+          </div>
+        ))}
+      </>}
+    </div>
+  );
+}
+
+function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, levels: L, live, market: M, rangeLevels: R, dayBarsLive, gex: G, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D, grid, top20: T, intraday: I, keyLevels: K, twse: W, premarket: PM }) {
   const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
   const chg = (v) => (v == null ? '' : `（${v > 0 ? '+' : ''}${v.toLocaleString()}）`);
@@ -1969,6 +2090,12 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
     { i: 'top20', title: '權值股 TOP20 · 當日漲跌', hk: 'top20',
       right: gridCap(T ? `權重 期交所 ${T.weightsDate} · 行情 證交所 ${T.date.slice(0, 4)}/${T.date.slice(4, 6)}/${T.date.slice(6)}` : ''),
       body: <Top20Panel T={T} light={light} /> },
+    { i: 'premarket', title: '盤前脈絡 · 美股期指 · 台積電 ADR · 匯率', hk: 'premarket',
+      right: gridCap(PM ? `${PM.source === 'ib' ? 'IB' : PM.source} · ${({ 1: '即時', 2: '凍結', 3: '延遲', 4: '延遲凍結' })[PM.marketDataType] || ''} · ${PM.asOf ? PM.asOf.slice(5, 16).replace('T', ' ') : ''}` : ''),
+      body: <PremarketPanel PM={PM} light={light} /> },
+    { i: 'twse', title: '台股籌碼日報 · 三大法人 · 融資融券', hk: 'twseflows',
+      right: gridCap(W ? `證交所 ${W.date.slice(0, 4)}/${W.date.slice(4, 6)}/${W.date.slice(6)} · 前一交易日` : ''),
+      body: <TwseFlowsPanel W={W} light={light} /> },
     { i: 'gex', title: 'Gamma 曝險 · 各履約價（本到期日）', hk: 'gex',
       right: <span className="mono tnum" style={{ fontSize: 9.5, opacity: 0.7 }}>{G ? <>總 GEX <b style={{ color: G.total >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down }}>{fmtBig(G.total, P)}</b>/1%{G.flip != null ? ` · 零 Gamma ${fmtP(Math.round(G.flip))}` : ''} · </> : ''}{oiLabel}</span>,
       body: (<>
