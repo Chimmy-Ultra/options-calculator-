@@ -392,6 +392,7 @@ const GRID_DEFAULTS = {
     { i: 'strip',  x: 0, y: 0,  w: 12, h: 4 },
     { i: 'ladder', x: 0, y: 4,  w: 4,  h: 19 },
     { i: 'range',  x: 0, y: 23, w: 4,  h: 10 },
+    { i: 'keylevels', x: 0, y: 33, w: 4, h: 17 },
     { i: 'kline',  x: 4, y: 4,  w: 8,  h: 14 },
     { i: 'oi',       x: 4, y: 18, w: 8,  h: 10 },
     { i: 'intraday', x: 4, y: 28, w: 8,  h: 12 },
@@ -736,6 +737,7 @@ function Obsidian3() {
     if (liveBars && liveBars.length) return null; // connected but no daily 日盤 series yet — never mix in mock
     return window.genBars ? window.genBars({ spot: P.defaultSpot, n: 60, volScale: 1, product: P }) : null;
   }, [liveDayBars, liveBars, productId]);
+  const keyLevels = uM(() => computeKeyLevels({ bars: dayBars, today: taipeiDate(), profile: intradayData && intradayData.day ? intradayData.day.profile : null }), [dayBars, intradayData]);
   const rangeLevels = uM(() => {
     const q = quoteNow || (live && live.quote);
     const today = (q && q.high > 0 && q.low > 0) ? { date: taipeiDate(), high: q.high, low: q.low } : { date: taipeiDate() };
@@ -868,7 +870,7 @@ function Obsidian3() {
       {workspace === 'levels' && (
         <LevelsWorkspace
           P={P} theme={theme} light={light} spot={spot} expiry={expiry} levels={levels} live={live} market={marketData}
-          rangeLevels={rangeLevels} dayBarsLive={!!liveDayBars} gex={gex} grid={grid} top20={top20Data} intraday={intradayData}
+          rangeLevels={rangeLevels} dayBarsLive={!!liveDayBars} gex={gex} grid={grid} top20={top20Data} intraday={intradayData} keyLevels={keyLevels}
           bars={bars} barsLive={!!liveBars} barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
           barSession={barSession} setBarSession={setBarSession}
           D={D}
@@ -1484,6 +1486,93 @@ function computeRangeLevels({ bars, today, N = RANGE_LEVEL_N }) {
   return { base, up, down, n: ranges.length, min: sorted[0], max: sorted[sorted.length - 1], mean, sd, from: String(win[0].t).slice(0, 8), to: String(win[win.length - 1].t).slice(0, 8) };
 }
 
+// 關鍵價位 — this site's own level set, each with the rate at which the
+// exchange's own history reached it (no formula is taken on faith):
+//   樞軸 (floor-trader pivots from the previous session's H / L / C):
+//     P = (H+L+C)/3, R1 = 2P−L, S1 = 2P−H, R2 = P+(H−L), S2 = P−(H−L),
+//     R3 = H+2(P−L), S3 = L−2(H−P)   (Person, A Complete Guide to Technical
+//     Trading Tactics, 2004 — the CME floor convention)
+//   前日高 / 前日低 / 前日收
+// Hit rate = share of past sessions whose high reached the level (above) or
+// whose low reached it (below), the level being recomputed from each
+// session's predecessor; for P and 前日收, share of sessions whose range
+// contained it. Sample = every completed session in the loaded daily bars.
+// Volume-profile levels (POC / value area / VWAP) come from the previous
+// session's ticks (server, `intraday.day.profile`) and carry no rate: only
+// ~two weeks of tick files exist.
+function computeKeyLevels({ bars, today, profile }) {
+  if (!bars || bars.length < 3) return null;
+  const last = bars[bars.length - 1];
+  const lastIsToday = !!(today && String(last.t).slice(0, 8) === today);
+  const hist = lastIsToday ? bars.slice(0, -1) : bars;
+  if (hist.length < 3) return null;
+  const pivots = (b) => {
+    const P = (b.h + b.l + b.c) / 3, rng = b.h - b.l;
+    return { P, R1: 2 * P - b.l, S1: 2 * P - b.h, R2: P + rng, S2: P - rng, R3: b.h + 2 * (P - b.l), S3: b.l - 2 * (b.h - P), PDH: b.h, PDL: b.l, PDC: b.c };
+  };
+  const keys = ['P', 'R1', 'R2', 'R3', 'S1', 'S2', 'S3', 'PDH', 'PDL', 'PDC'];
+  const hits = {}; keys.forEach((k) => { hits[k] = 0; });
+  let n = 0;
+  for (let i = 1; i < hist.length; i++) {
+    const lv = pivots(hist[i - 1]), t = hist[i];
+    n++;
+    if (t.l <= lv.P && lv.P <= t.h) hits.P++;
+    if (t.l <= lv.PDC && lv.PDC <= t.h) hits.PDC++;
+    ['R1', 'R2', 'R3', 'PDH'].forEach((k) => { if (t.h >= lv[k]) hits[k]++; });
+    ['S1', 'S2', 'S3', 'PDL'].forEach((k) => { if (t.l <= lv[k]) hits[k]++; });
+  }
+  const prev = hist[hist.length - 1];
+  const lv = pivots(prev);
+  const NAMES = { P: '軸心', R1: '壓力一', R2: '壓力二', R3: '壓力三', S1: '支撐一', S2: '支撐二', S3: '支撐三', PDH: '前日高', PDL: '前日低', PDC: '前日收' };
+  const levels = keys.map((k) => ({ key: k, name: NAMES[k], price: Math.round(lv[k]), hit: n ? hits[k] / n : null, group: 'pivot' }));
+  if (profile) {
+    levels.push({ key: 'POC', name: '前日量價中心', price: profile.poc, hit: null, group: 'profile' });
+    levels.push({ key: 'VAH', name: '價值區上緣', price: profile.vah, hit: null, group: 'profile' });
+    levels.push({ key: 'VAL', name: '價值區下緣', price: profile.val, hit: null, group: 'profile' });
+    levels.push({ key: 'VWAP', name: '前日均價', price: Math.round(profile.vwap), hit: null, group: 'profile' });
+  }
+  return { levels, n, prevDate: String(prev.t).slice(0, 8), prev: { h: prev.h, l: prev.l, c: prev.c } };
+}
+
+// The list in price order with spot in the middle, a hit-rate bar per row.
+function KeyLevelsPanel({ K, P, spot, light = false }) {
+  const dim = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
+  if (!K) return <div className="mono" style={{ fontSize: 11, color: dim }}>日K不足，無法計算。</div>;
+  const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
+  const rows = [...K.levels, { key: 'SPOT', name: `現價 ${P.code}`, price: spot, hit: null, group: 'spot' }].sort((a, b) => b.price - a.price);
+  const col = (r) => r.group === 'spot' ? LEVEL_COLORS.spot : r.group === 'profile' ? LEVEL_COLORS.band : r.price > spot ? LEVEL_COLORS.up : r.price < spot ? LEVEL_COLORS.down : 'var(--text)';
+  return (
+    <div>
+      <div className="mono tnum" style={{ fontSize: 9.5, color: dim, marginBottom: 6 }}>
+        前日 {K.prevDate.slice(4, 6)}/{K.prevDate.slice(6)} 高 {fmtP(K.prev.h)} 低 {fmtP(K.prev.l)} 收 {fmtP(K.prev.c)} · 觸及率＝過去 {K.n} 個交易日中，隔日高／低碰到該價位的比例
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {rows.map((r) => {
+          const d = r.price - spot;
+          const isSpot = r.group === 'spot';
+          return (
+            <div key={r.key} style={{ display: 'grid', gridTemplateColumns: '92px 1fr auto 74px', gap: 8, alignItems: 'center', padding: '3px 8px',
+              background: isSpot ? 'rgba(240,192,104,0.08)' : 'transparent', border: `1px solid ${isSpot ? 'rgba(240,192,104,0.45)' : 'transparent'}` }}>
+              <span style={{ fontSize: 11, fontWeight: isSpot ? 700 : 600, color: col(r), whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</span>
+              <span className="tnum" style={{ fontSize: 14, fontWeight: 700, fontFamily: 'var(--font-mono)', color: col(r) }}>{fmtP(r.price)}</span>
+              <span className="tnum" style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: dim, whiteSpace: 'nowrap' }}>{isSpot ? '—' : `${d >= 0 ? '+' : '−'}${fmtP(Math.abs(d))}`}</span>
+              <span className="tnum" style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: dim, display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'flex-end' }}>
+                {r.hit != null ? (<>
+                  <span style={{ width: 36, height: 5, background: 'var(--border)', position: 'relative' }}><span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${Math.round(r.hit * 100)}%`, background: col(r) }} /></span>
+                  {Math.round(r.hit * 100)}%
+                </>) : (r.group === 'profile' ? '成交量分布' : '')}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mono" style={{ marginTop: 8, fontSize: 9.5, color: dim, lineHeight: 1.5 }}>
+        樞軸＝場內交易員慣用公式（Person 2004）：軸心 (高+低+收)÷3、壓力一 2×軸心−低、支撐一 2×軸心−高、壓力／支撐二 軸心±(高−低)、三 高+2(軸心−低)／低−2(高−軸心)。量價中心／價值區＝前一日成交量分布（Market Profile，Steidlmayer 1986）：最大量價位與涵蓋七成成交量的價帶；前日均價＝成交量加權均價。觸及率是本站用期交所日K實算，不是他人宣稱。
+      </div>
+    </div>
+  );
+}
+
 // Today's date in Taiwan (YYYYMMDD) — bars are stamped in exchange time.
 function taipeiDate() {
   return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10).replace(/-/g, '');
@@ -1770,7 +1859,7 @@ function Top20Panel({ T, light = false }) {
   );
 }
 
-function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, levels: L, live, market: M, rangeLevels: R, dayBarsLive, gex: G, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D, grid, top20: T, intraday: I }) {
+function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, levels: L, live, market: M, rangeLevels: R, dayBarsLive, gex: G, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D, grid, top20: T, intraday: I, keyLevels: K }) {
   const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
   const chg = (v) => (v == null ? '' : `（${v > 0 ? '+' : ''}${v.toLocaleString()}）`);
@@ -1866,6 +1955,8 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
       </>) },
     { i: 'range', title: '關卡價 · 振幅', hk: 'rangelevels', right: gridCap(`近${RANGE_LEVEL_N}日振幅`),
       body: <RangeLevelsPanel P={P} spot={spot} R={R} light={light} sourceLabel={rangeSource} /> },
+    { i: 'keylevels', title: '關鍵價位 · 歷史觸及率', hk: 'keylevels', right: gridCap(K ? `樣本 ${K.n} 日 · ${rangeSource}` : ''),
+      body: <KeyLevelsPanel K={K} P={P} spot={spot} light={light} /> },
     { i: 'kline', title: <>台指期 {barSession === 'full' ? '全日盤' : '日盤'} {per.label}K · 關卡價位<span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4 }}>· {barsLive ? liveLabel(live, P) : '模擬'}</span></>,
       right: <div style={{ display: 'flex', gap: 8 }}><KSessionToggle value={barSession} onChange={setBarSession} /><KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} /></div>,
       body: <PriceChart bars={bars} theme={theme} code={P.code} periodLabel={`${per.label}K`} levels={chartLevels}

@@ -550,6 +550,39 @@ def _parse_ticks(raw_zip: bytes, symbol: str = FUT_COMMODITY) -> dict:
     return {"date": trade_date, "month": month, "day": day, "night": night}
 
 
+def _volume_profile(ticks: list) -> dict | None:
+    """Market-Profile style levels of one session from its ticks: poc = the
+    price with the most lots, vah / val = the bounds of the value area (the
+    contiguous band around the POC holding 70% of the session's lots, grown
+    one adjacent price at a time toward the larger neighbour), vwap = the
+    lots-weighted average price."""
+    if not ticks:
+        return None
+    by_px: dict = {}
+    total = 0
+    pv = 0.0
+    for _, px, q in ticks:
+        by_px[px] = by_px.get(px, 0) + q
+        total += q
+        pv += px * q
+    if total <= 0:
+        return None
+    prices = sorted(by_px)
+    poc = max(prices, key=lambda x: (by_px[x], -abs(x - pv / total)))
+    lo = hi = prices.index(poc)
+    cum = by_px[poc]
+    while cum < 0.7 * total and (lo > 0 or hi < len(prices) - 1):
+        up = by_px[prices[hi + 1]] if hi < len(prices) - 1 else -1
+        dn = by_px[prices[lo - 1]] if lo > 0 else -1
+        if up >= dn:
+            hi += 1
+            cum += up
+        else:
+            lo -= 1
+            cum += dn
+    return {"poc": poc, "vah": prices[hi], "val": prices[lo], "vwap": round(pv / total, 1), "lots": total}
+
+
 def _minute_series(ticks: list) -> dict:
     """1-minute bars with the running 成本線 and the tick-rule 多空差額.
     bars: [hhmm, o, h, l, c, lots, cost, net, cum]; cost = (running high +
@@ -586,7 +619,7 @@ def _minute_series(ticks: list) -> dict:
         cum += b[7]
         b[8] = cum
     return {"bars": bars, "high": hi, "low": lo, "cost": (hi + lo) / 2 if hi is not None else None,
-            "buy": buy, "sell": sell, "net": buy - sell}
+            "buy": buy, "sell": sell, "net": buy - sell, "profile": _volume_profile(ticks)}
 
 
 async def intraday(day: str | None = None, days_back: int = 10):
@@ -685,7 +718,12 @@ def _fetch_bars(days: int = 150) -> dict:
     end = today
     while (today - end).days < days:
         start = end - timedelta(days=29)
-        sessions.update(_parse_bars(_fetch_csv(start, end, url=FUT_CSV_URL, commodity=FUT_COMMODITY)))
+        try:
+            sessions.update(_parse_bars(_fetch_csv(start, end, url=FUT_CSV_URL, commodity=FUT_COMMODITY)))
+        except (KeyError, ValueError):
+            # a window the download refuses (the site answers an error page far
+            # enough back) ends the walk; everything newer is kept
+            break
         end = start - timedelta(days=1)
     day, full = [], []
     for t in sorted(sessions):
@@ -713,7 +751,7 @@ async def build_snapshot(product_id: str = "txo", n_expiries: int = 5, strike_pc
     if tbl is None:
         return None
     idx = await asyncio.to_thread(_fetch_index)
-    bars = await asyncio.to_thread(_fetch_bars)
+    bars = await asyncio.to_thread(_fetch_bars, 400)  # ~a year of sessions: the 關鍵價位 hit rates need the history
     mkt = await market()
     t20 = await top20()
     intra = None

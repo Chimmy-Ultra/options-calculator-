@@ -422,3 +422,31 @@ Data note: TAIFEX keeps only about two weeks of `Daily_YYYY_MM_DD.zip`
 2023 / 2024 screenshot days can only be validated with a broker's historical
 ticks (Shioaji `api.ticks(contract, date)`), which needs the owner's API key
 on a machine that can reach api.sinotrade.com.tw.
+
+## 9. 關鍵價位 — this site's own levels, with measured hit rates (2026-09-13)
+
+Owner's direction: the 五大盤型 need not be his; compute key prices that
+have data or research behind them and name them ourselves. The 關卡 tab's
+關鍵價位 panel therefore shows:
+
+- **樞軸** — floor-trader pivots from the previous session's H / L / C
+  (P = (H+L+C)/3, R1 = 2P−L, S1 = 2P−H, R2/S2 = P ± range, R3/S3 one range
+  further; John L. Person, *A Complete Guide to Technical Trading Tactics*,
+  Wiley 2004). Named 軸心 / 壓力一二三 / 支撐一二三.
+- **前日高 / 前日低 / 前日收**.
+- **前日量價中心 / 價值區上緣 / 價值區下緣 / 前日均價** — Market Profile
+  levels from the previous session's ticks (POC = most-traded price; value
+  area = the contiguous band around it holding 70% of the lots, grown one
+  adjacent price at a time toward the larger neighbour; VWAP), in
+  `taifex._volume_profile` / `intraday.day.profile`. Steidlmayer & Koy,
+  *Markets and Market Logic*, 1986.
+
+The support is measured, not quoted: for every completed session in the
+loaded daily bars the level is recomputed from its predecessor and the panel
+shows how often the session's high (levels above) or low (levels below)
+reached it — P and 前日收 count when the day's range contained them. The
+snapshot now carries about a year of daily bars for this. On the 2023-05 →
+2024-09 TX history (347 sessions, an up-trending stretch) the rates were:
+P 45.8%, R1 54.5%, R2 32.0%, R3 18.4%, S1 39.5%, S2 25.4%, S3 13.5%,
+前日高 57.3%, 前日低 42.1%. The panel's own numbers come from whatever
+history is loaded and say the sample size.
