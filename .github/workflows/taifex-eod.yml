@@ -1,0 +1,38 @@
+# Rebuild the TAIFEX end-of-day snapshot (design_handoff_options_lab/taifex-eod.js)
+# once per trading day and commit it, so the deployed site shows the previous
+# session's real numbers without anyone running the proxy. Runs after the day
+# session's data is published (TAIFEX posts the daily reports from ~15:00
+# Taipei; 08:30 UTC = 16:30 Taipei) and on demand. A weekend or holiday run
+# fetches the same last session and changes nothing, so it commits nothing.
+name: TAIFEX end-of-day snapshot
+
+on:
+  schedule:
+    - cron: "30 8 * * 1-5"   # 16:30 Taipei, Mon–Fri
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build snapshot
+        working-directory: server
+        run: python3 taifex.py --write ../design_handoff_options_lab/taifex-eod.js
+      - name: Commit if the session changed
+        run: |
+          if git diff --quiet -- design_handoff_options_lab/taifex-eod.js; then
+            echo "snapshot unchanged"; exit 0
+          fi
+          DATE=$(python3 -c "import re;print(re.search(r'\"date\":\"([^\"]+)\"', open('design_handoff_options_lab/taifex-eod.js').read()).group(1))")
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add design_handoff_options_lab/taifex-eod.js
+          git commit -m "chore: TAIFEX snapshot $DATE"
+          git push
