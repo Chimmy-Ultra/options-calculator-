@@ -213,7 +213,7 @@ function ProductDropdown({ productId, P, spot, live, open, setOpen, onPick, ligh
             }}>
               <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 5px', borderRadius: 4, background: light ? 'rgba(20,40,80,0.08)' : 'rgba(255,255,255,0.08)', minWidth: 26, textAlign: 'center' }}>{p.code}</span>
               <span style={{ fontSize: 11, opacity: 0.85, flex: 1 }}>{p.name}</span>
-              <span className="tnum" style={{ fontSize: 11, fontWeight: 600, fontFamily: 'ui-monospace, Menlo, monospace', opacity: 0.8 }}>{fmtSpot(p.defaultSpot)}</span>
+              <span className="tnum" style={{ fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-mono)', opacity: 0.8 }}>{fmtSpot(p.defaultSpot)}</span>
             </button>
           ))}
         </div>
@@ -241,7 +241,7 @@ function ExpiryStrip({ value, onChange, expiries = TXO_EXPIRIES, light }) {
             position: 'relative', minWidth: 52, flexShrink: 0,
           }}>
             <span style={{ fontSize: 11 }}>{e.label}</span>
-            <span style={{ fontSize: 9, opacity: 0.75, fontFamily: 'ui-monospace, SF Mono, monospace' }}>{e.date}</span>
+            <span style={{ fontSize: 9, opacity: 0.75, fontFamily: 'var(--font-mono)' }}>{e.date}</span>
             {isMonthly && <span style={{ position: 'absolute', top: -3, right: -3, width: 6, height: 6, borderRadius: 3, background: '#f0c068', boxShadow: '0 0 6px rgba(240,192,104,0.8)' }} />}
           </button>
         );
@@ -278,7 +278,7 @@ function WhatIfRail({ P, spot, setSpot, spotMin, spotMax, iv, setIv, open, setOp
       <Glass2 tone="chip" radius={999} padding="8px 14px" onClick={() => setOpen(true)}
         style={{ position: 'fixed', bottom: 20, right: 24, zIndex: 15, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', whiteSpace: 'nowrap' }}>
         <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.3 }}>⇅ What-if</span>
-        <span className="tnum" style={{ fontSize: 11, opacity: 0.7, fontFamily: 'ui-monospace, Menlo, monospace' }}>{P.code} {spot.toLocaleString()} · IV {iv}%</span>
+        <span className="tnum" style={{ fontSize: 11, opacity: 0.7, fontFamily: 'var(--font-mono)' }}>{P.code} {spot.toLocaleString()} · IV {iv}%</span>
       </Glass2>
     );
   }
@@ -306,7 +306,7 @@ function SettlementCountdown({ dte, note = '13:30' }) {
     }}>
       <span style={{ width: 6, height: 6, borderRadius: 3, background: isSettleDay ? '#ef4444' : '#f0c068', boxShadow: `0 0 8px ${isSettleDay ? '#ef4444' : '#f0c068'}` }} />
       <span style={{ fontSize: 10, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.6, fontWeight: 600 }}>Settle</span>
-      <span className="mono" style={{ fontSize: 12, fontWeight: 600, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
+      <span className="mono" style={{ fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
         {dte}d · {note}
       </span>
     </Glass2>
@@ -328,7 +328,7 @@ function FreshnessChip({ lastLiveAt }) {
   const hhmmss = [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
   return (
     <span className="mono" title={stale ? 'live data may be stale — last update shown' : 'last live update'} style={{
-      fontSize: 9, fontWeight: 700, letterSpacing: 0.4, fontFamily: 'ui-monospace, SF Mono, monospace',
+      fontSize: 9, fontWeight: 700, letterSpacing: 0.4, fontFamily: 'var(--font-mono)',
       color: stale ? '#f0c068' : 'inherit', opacity: stale ? 0.8 : 0.5,
       display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap', flexShrink: 0,
     }}>
@@ -348,6 +348,7 @@ function Obsidian3() {
   const [live, setLive] = uS(null);         // { quote, expiries, health } — IB proxy 抓到的
   const [liveRows, setLiveRows] = uS(null); // 當前到期日的 IB 期權鏈 rows
   const [oiData, setOiData] = uS(null);     // per-strike OI for the current expiry (TAIFEX via proxy; products with oiSource)
+  const [marketData, setMarketData] = uS(null); // daily positioning (P/C ratio, 外資, top-10) — same source
   const [lastLiveAt, setLastLiveAt] = uS(null); // ② timestamp of last successful live fetch
   const [liveBars, setLiveBars] = uS(null); // 近月期貨的 IB 歷史 K
   const [barPeriodId, setBarPeriodId] = uS('D'); // K 線週期：D / 4H / 1H
@@ -432,6 +433,7 @@ function Obsidian3() {
     setLive(null);
     setLiveRows(null);
     setOiData(null);
+    setMarketData(null);
     setLiveBars(null);
     setLastLiveAt(null);
     setExpiryId(e0.id);
@@ -457,6 +459,11 @@ function Obsidian3() {
       if (exps && exps.length) setExpiryId(exps[0].id);
       // K 棒交給下面的專屬 effect 抓（換週期會重抓，避免重複邏輯）。
       setLive({ quote, expiries: exps && exps.length ? exps : null, health });
+      // Daily positioning (published once after the close) — one fetch per connect.
+      if (P.oiSource && window.LiveData.market) {
+        const m = await window.LiveData.market(P.id);
+        if (!dead && m) setMarketData(m);
+      }
     })();
     return () => { dead = true; };
   }, [productId]);
@@ -713,7 +720,7 @@ function Obsidian3() {
       <div style={{ position: 'absolute', top: 64, left: 24, right: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 10, gap: 12 }}>
         <ExpiryStrip value={expiryId} onChange={setExpiryId} expiries={expiries} light={light} />
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <Glass2 tone="chip" radius={8} padding="5px 10px" style={{ fontSize: 10, opacity: 0.7, fontFamily: 'ui-monospace, SF Mono, monospace', whiteSpace: 'nowrap' }}>
+          <Glass2 tone="chip" radius={8} padding="5px 10px" style={{ fontSize: 10, opacity: 0.7, fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
             {P.unitLabel}
           </Glass2>
         </div>
@@ -722,7 +729,7 @@ function Obsidian3() {
       {/* WORKSPACE BODY */}
       {workspace === 'levels' && (
         <LevelsWorkspace
-          P={P} theme={theme} light={light} spot={spot} expiry={expiry} levels={levels} live={live}
+          P={P} theme={theme} light={light} spot={spot} expiry={expiry} levels={levels} live={live} market={marketData}
           bars={bars} barsLive={!!liveBars} barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
           D={D}
         />
@@ -854,7 +861,7 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
           padding: '8px 14px', borderRadius: 999,
           background: 'rgba(20,24,34,0.85)', backdropFilter: 'blur(20px)',
           border: '1px solid rgba(255,255,255,0.12)',
-          fontSize: 12, fontFamily: 'ui-monospace, SF Mono, monospace',
+          fontSize: 12, fontFamily: 'var(--font-mono)',
           display: 'flex', gap: 14, alignItems: 'center', pointerEvents: 'none',
         }}>
           <span><span style={{ opacity: 0.55 }}>spot </span>{parseInt(hoverInfo.spotAt).toLocaleString()}</span>
@@ -882,7 +889,7 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
             </div>
           }>Legs</Eyebrow>
           <LegEditor legs={legs} onChange={setLegs} theme={theme} expiries={expiries} defaultDte={dte} />
-          {importNote && <div style={{ fontSize: 10, opacity: 0.6, marginTop: 6, fontFamily: 'ui-monospace, SF Mono, monospace' }}>{importNote}</div>}
+          {importNote && <div style={{ fontSize: 10, opacity: 0.6, marginTop: 6, fontFamily: 'var(--font-mono)' }}>{importNote}</div>}
         </Glass2>
 
         {/* Single-contract pricer — folded in from the removed Pricer tab.
@@ -906,7 +913,7 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
               <div className="tnum" style={{
                 fontSize: 32, fontWeight: 600, letterSpacing: -0.6,
                 color: netPnl >= 0 ? (light ? 'oklch(0.60 0.13 75)' : 'oklch(0.84 0.14 75)') : (light ? 'oklch(0.50 0.10 220)' : 'oklch(0.74 0.12 220)'),
-                fontFamily: 'ui-monospace, SF Mono, monospace', lineHeight: 1,
+                fontFamily: 'var(--font-mono)', lineHeight: 1,
               }}>
                 {netPnl >= 0 ? '+' : ''}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
               </div>
@@ -1024,14 +1031,14 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
         display: 'flex', alignItems: 'center', gap: 12,
       }}>
         <span style={{ fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.55, fontWeight: 600 }}>P&L</span>
-        <span className="tnum" style={{ fontSize: 11, fontFamily: 'ui-monospace, SF Mono, monospace', color: '#5fa3d4' }}>−15K</span>
+        <span className="tnum" style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: '#5fa3d4' }}>−15K</span>
         <div style={{ width: 88, height: 8, borderRadius: 4,
           background: t.scheme === 'aurora' ? 'linear-gradient(90deg, oklch(0.65 0.18 220), oklch(0.70 0.16 290), oklch(0.70 0.18 350))'
                    : t.scheme === 'viridis' ? 'linear-gradient(90deg, #440154, #21918c, #fde725)'
                    : t.scheme === 'classic' ? 'linear-gradient(90deg, #d94d4d, #4d4d59, #4dc870)'
                    :                          'linear-gradient(90deg, #5fa3d4, #4d4d59, #f0c068)',
         }} />
-        <span className="tnum" style={{ fontSize: 11, fontFamily: 'ui-monospace, SF Mono, monospace', color: '#f0c068' }}>+45K</span>
+        <span className="tnum" style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: '#f0c068' }}>+45K</span>
       </div>
     </>
   );
@@ -1054,7 +1061,7 @@ function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, fees = 0,
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
         <div style={{ minWidth: 0 }}>
           <Eyebrow hk="pnlwhatif">P&L what-if · {P.code}</Eyebrow>
-          <div className="tnum" style={{ fontSize: 24, fontWeight: 600, letterSpacing: -0.4, lineHeight: 1.05, marginTop: 3, fontFamily: 'ui-monospace, SF Mono, monospace', color: heroColor }}>
+          <div className="tnum" style={{ fontSize: 24, fontWeight: 600, letterSpacing: -0.4, lineHeight: 1.05, marginTop: 3, fontFamily: 'var(--font-mono)', color: heroColor }}>
             {profit ? '+' : ''}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
           </div>
           <div className="tnum" style={{ fontSize: 9, opacity: 0.5, marginTop: 3 }}>{pnlPts >= 0 ? '+' : ''}{pnlPts.toFixed(1)} pts {P.unitLabel}{fees > 0 ? ` · incl. est. fees ${P.cur}${Math.round(fees).toLocaleString()}` : ''}</div>
@@ -1068,11 +1075,11 @@ function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, fees = 0,
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
         <div className="lt-tile" style={tile}>
           <div style={{ fontSize: 9, letterSpacing: 0.5, textTransform: 'uppercase', opacity: 0.6 }}>Max profit</div>
-          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'ui-monospace, Menlo, monospace', color: '#f0c068' }}>+{P.cur}{Math.round(netMaxProfit).toLocaleString()}</div>
+          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'var(--font-mono)', color: '#f0c068' }}>+{P.cur}{Math.round(netMaxProfit).toLocaleString()}</div>
         </div>
         <div className="lt-tile" style={tile}>
           <div style={{ fontSize: 9, letterSpacing: 0.5, textTransform: 'uppercase', opacity: 0.6 }}>Max loss</div>
-          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'ui-monospace, Menlo, monospace', color: '#5fa3d4' }}>{P.cur}{Math.round(netMaxLoss).toLocaleString()}</div>
+          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'var(--font-mono)', color: '#5fa3d4' }}>{P.cur}{Math.round(netMaxLoss).toLocaleString()}</div>
         </div>
       </div>
     </Glass2>
@@ -1162,7 +1169,7 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiri
           ) : (
             <LegEditor legs={legs} onChange={setLegs} theme={theme} expiries={expiries} defaultDte={dte} />
           )}
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, opacity: 0.6, marginTop: 8, fontFamily: 'ui-monospace, Menlo, monospace' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, opacity: 0.6, marginTop: 8, fontFamily: 'var(--font-mono)' }}>
             <span>{credit >= 0 ? 'Net credit' : 'Net debit'}</span>
             <span>{credit >= 0 ? '+' : ''}{P.cur}{Math.round(credit * P.mult).toLocaleString()}</span>
           </div>
@@ -1245,16 +1252,48 @@ function computeLevels({ spot, rows, oi, P }) {
 
 const LEVEL_COLORS = { up: '#ef5350', down: '#26a69a', band: '#a78bfa', spot: '#f0c068' };
 
-// One tile of the Levels header row: label (hover help), a big mono value, a sub line.
-function LevelTile({ label, hk, value, sub, color, light }) {
+// Signed change, Taiwan colors (up = red, down = teal). fmt formats the magnitude.
+function Chg({ v, fmt = (x) => x.toLocaleString(), suffix = '' }) {
+  if (v == null || !Number.isFinite(v)) return null;
+  const c = v > 0 ? LEVEL_COLORS.up : v < 0 ? LEVEL_COLORS.down : 'inherit';
+  return <span style={{ color: c, fontWeight: 600 }}>{v > 0 ? '▲' : v < 0 ? '▼' : '—'}{fmt(Math.abs(v))}{suffix}</span>;
+}
+
+// 23-session sparkline for the put/call ratio: area fill, faint 1.0 line, emphasized last point.
+function Spark({ series, w = 96, h = 30, light = false }) {
+  if (!series || series.length < 2) return null;
+  const vs = series.map((p) => p.ratio);
+  const lo = Math.min(...vs, 1), hi = Math.max(...vs, 1);
+  const x = (i) => (i / (vs.length - 1)) * (w - 4) + 2;
+  const y = (v) => h - 3 - ((v - lo) / Math.max(hi - lo, 1e-9)) * (h - 6);
+  const pts = vs.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const last = vs[vs.length - 1];
+  const col = last >= 1 ? LEVEL_COLORS.down : LEVEL_COLORS.up;
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: 'block', flexShrink: 0 }} aria-hidden>
+      <line x1="2" x2={w - 2} y1={y(1)} y2={y(1)} stroke={light ? 'rgba(20,30,50,0.25)' : 'rgba(255,255,255,0.22)'} strokeDasharray="2 3" />
+      <polygon points={`${x(0)},${h - 3} ${pts} ${x(vs.length - 1)},${h - 3}`} fill={col} fillOpacity="0.12" />
+      <polyline points={pts} fill="none" stroke={col} strokeWidth="1.4" strokeLinejoin="round" />
+      <circle cx={x(vs.length - 1)} cy={y(last)} r="2.4" fill={col} />
+    </svg>
+  );
+}
+
+// One number of the strip, the way a Taiwanese day-trading terminal shows it:
+// a short Chinese label, one big tabular figure in the reading's color, one
+// line of context underneath (change vs the previous session, source).
+function LevelTile({ label, hk, value, sub, color, right, light }) {
   const HT = window.HelpTip;
   return (
-    <Glass2 tone="chip" radius={12} padding="10px 14px" style={{ minWidth: 0 }}>
-      <div style={{ fontSize: 9, letterSpacing: 0.7, textTransform: 'uppercase', opacity: 0.55, fontWeight: 600, marginBottom: 4, whiteSpace: 'nowrap' }}>
-        {(hk && HT) ? <HT k={hk}>{label}</HT> : label}
+    <Glass2 tone="chip" radius={12} padding="10px 12px" style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.62, marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {(hk && HT) ? <HT k={hk}>{label}</HT> : label}
+        </div>
+        <div className="tnum" style={{ fontSize: 21, fontWeight: 700, fontFamily: 'var(--font-mono)', color: color || 'inherit', lineHeight: 1.1, whiteSpace: 'nowrap' }}>{value}</div>
+        {sub && <div className="tnum" style={{ fontSize: 10.5, marginTop: 4, opacity: 0.72, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: 'var(--font-mono)' }}>{sub}</div>}
       </div>
-      <div className="tnum" style={{ fontSize: 20, fontWeight: 700, fontFamily: 'ui-monospace, SF Mono, monospace', color: color || 'inherit', lineHeight: 1.1 }}>{value}</div>
-      {sub && <div className="mono" style={{ fontSize: 10, marginTop: 4, opacity: 0.6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub}</div>}
+      {right}
     </Glass2>
   );
 }
@@ -1265,21 +1304,20 @@ function LevelTile({ label, hk, value, sub, color, light }) {
 // distance from spot.
 function LevelsLadder({ P, spot, L, light }) {
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
-  const chg = (v) => (v == null ? '' : ` (${v > 0 ? '+' : ''}${v.toLocaleString()})`);
+  const chg = (v) => (v == null ? '' : `（${v > 0 ? '+' : ''}${v.toLocaleString()}）`);
   const rows = [];
-  if (L.resistance) rows.push({ price: L.resistance.strike, label: 'Resistance', zh: '壓力', detail: `max call OI ${L.resistance.oi.toLocaleString()}${chg(L.resistance.oiChg)}`, color: LEVEL_COLORS.up });
+  if (L.resistance) rows.push({ price: L.resistance.strike, label: '壓力', detail: `Call OI 最大 ${L.resistance.oi.toLocaleString()}${chg(L.resistance.oiChg)}`, color: LEVEL_COLORS.up });
   if (L.straddle != null) {
-    rows.push({ price: L.atm.strike + L.straddle, label: 'ATM + straddle', zh: '價平 + 價平和', detail: `${fmtP(L.atm.strike)} + ${window.fmtPx(L.straddle, P)}`, color: LEVEL_COLORS.band });
-    rows.push({ price: L.atm.strike - L.straddle, label: 'ATM − straddle', zh: '價平 − 價平和', detail: `${fmtP(L.atm.strike)} − ${window.fmtPx(L.straddle, P)}`, color: LEVEL_COLORS.band });
+    rows.push({ price: L.atm.strike + L.straddle, label: '價平＋價平和', detail: `${fmtP(L.atm.strike)} + ${window.fmtPx(L.straddle, P)}`, color: LEVEL_COLORS.band });
+    rows.push({ price: L.atm.strike - L.straddle, label: '價平－價平和', detail: `${fmtP(L.atm.strike)} − ${window.fmtPx(L.straddle, P)}`, color: LEVEL_COLORS.band });
   }
-  rows.push({ price: spot, label: `${P.code} spot`, zh: '現價', detail: L.straddle != null ? `straddle ${window.fmtPx(L.straddle, P)} · ATM ${fmtP(L.atm.strike)}` : 'no ATM premiums', color: LEVEL_COLORS.spot, isSpot: true });
-  if (L.support) rows.push({ price: L.support.strike, label: 'Support', zh: '支撐', detail: `max put OI ${L.support.oi.toLocaleString()}${chg(L.support.oiChg)}`, color: LEVEL_COLORS.down });
+  rows.push({ price: spot, label: `現價 ${P.code}`, detail: L.straddle != null ? `價平和 ${window.fmtPx(L.straddle, P)} · 價平 ${fmtP(L.atm.strike)}` : '沒有價平權利金', color: LEVEL_COLORS.spot, isSpot: true });
+  if (L.support) rows.push({ price: L.support.strike, label: '支撐', detail: `Put OI 最大 ${L.support.oi.toLocaleString()}${chg(L.support.oiChg)}`, color: LEVEL_COLORS.down });
   rows.sort((a, b) => b.price - a.price);
-  const dim = light ? 'rgba(20,30,50,0.5)' : 'rgba(255,255,255,0.5)';
+  const dim = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
   const line = light ? 'rgba(25,40,70,0.18)' : 'rgba(255,255,255,0.12)';
   return (
     <div style={{ position: 'relative', paddingLeft: 18 }}>
-      {/* spine */}
       <div aria-hidden style={{ position: 'absolute', left: 5, top: 10, bottom: 10, width: 2, background: line, borderRadius: 1 }} />
       {rows.map((r, i) => {
         const d = r.price - spot;
@@ -1292,14 +1330,14 @@ function LevelsLadder({ P, spot, L, light }) {
             border: `1px solid ${r.isSpot ? 'rgba(240,192,104,0.45)' : line}`,
           }}>
             <span aria-hidden style={{ position: 'absolute', left: -18, top: '50%', width: 10, height: 10, marginTop: -5, borderRadius: 5, background: r.color, boxShadow: `0 0 8px ${r.color}` }} />
-            <span className="tnum" style={{ fontSize: r.isSpot ? 18 : 15, fontWeight: 700, fontFamily: 'ui-monospace, SF Mono, monospace', color: r.color, minWidth: 74 }}>{fmtP(r.price)}</span>
+            <span className="tnum" style={{ fontSize: r.isSpot ? 20 : 17, fontWeight: 700, fontFamily: 'var(--font-mono)', color: r.color, minWidth: 82 }}>{fmtP(r.price)}</span>
             <span style={{ display: 'block', minWidth: 0, overflow: 'hidden' }}>
-              <div style={{ fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.label} <span style={{ opacity: 0.55, fontWeight: 500 }}>{r.zh}</span></div>
-              <div className="mono" style={{ fontSize: 10, color: dim, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.detail}</div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.label}</div>
+              <div className="tnum" style={{ fontSize: 10.5, color: dim, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: 'var(--font-mono)' }}>{r.detail}</div>
             </span>
-            <span className="tnum" style={{ fontFamily: 'ui-monospace, SF Mono, monospace', textAlign: 'right', whiteSpace: 'nowrap', color: r.isSpot ? dim : (d >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down) }}>
-              <div style={{ fontSize: 11, fontWeight: 700 }}>{r.isSpot ? '—' : `${d >= 0 ? '+' : '−'}${fmtP(Math.abs(d))}`}</div>
-              {!r.isSpot && <div style={{ fontSize: 9, opacity: 0.75 }}>{`${d >= 0 ? '+' : '−'}${Math.abs(pct).toFixed(2)}%`}</div>}
+            <span className="tnum" style={{ fontFamily: 'var(--font-mono)', textAlign: 'right', whiteSpace: 'nowrap', color: r.isSpot ? dim : (d >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down) }}>
+              <div style={{ fontSize: 12, fontWeight: 700 }}>{r.isSpot ? '—' : `${d >= 0 ? '+' : '−'}${fmtP(Math.abs(d))}`}</div>
+              {!r.isSpot && <div style={{ fontSize: 9.5, opacity: 0.75 }}>{`${d >= 0 ? '+' : '−'}${Math.abs(pct).toFixed(2)}%`}</div>}
             </span>
           </div>
         );
@@ -1308,64 +1346,73 @@ function LevelsLadder({ P, spot, L, light }) {
   );
 }
 
-function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, levels: L, live, bars, barsLive, barPeriodId, setBarPeriodId, D }) {
+function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, levels: L, live, market: M, bars, barsLive, barPeriodId, setBarPeriodId, D }) {
   const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
-  const chg = (v) => (v == null ? '' : ` (${v > 0 ? '+' : ''}${v.toLocaleString()})`);
-  // What the OI numbers are: TAIFEX daily report (dated), the live chain (IB), or mock.
-  const oiLabel = L.oiSource === 'taifex' ? `● TAIFEX ${L.oiDate} · previous session`
-    : (live && P.live) ? `● ${liveLabel(live, P)} chain OI · ±8 strikes`
-    : '○ MOCK OI';
+  const chg = (v) => (v == null ? '' : `（${v > 0 ? '+' : ''}${v.toLocaleString()}）`);
+  const isLive = !!(live && P.live);
+  // What the OI numbers are: TAIFEX daily report (dated), the live chain, or mock.
+  const oiLabel = L.oiSource === 'taifex' ? `● 期交所 ${L.oiDate}（前一交易日）`
+    : isLive ? `● ${liveLabel(live, P)} 鏈上 OI（±8 檔）`
+    : '○ 模擬資料';
   const straddleDelta = (L.straddle != null && L.prevStraddle != null) ? L.straddle - L.prevStraddle : null;
-  const pc = L.totals.callOi > 0 ? L.totals.putOi / L.totals.callOi : null;
+  const pcExpiry = L.totals.callOi > 0 ? L.totals.putOi / L.totals.callOi : null;
+  const q = live && live.quote;
+  const spotChg = (q && q.last > 0 && q.close > 0) ? q.last - q.close : null;
   // K-line overlays: the four option-derived levels (spot has its own tag).
   const chartLevels = [];
-  if (L.resistance) chartLevels.push({ price: L.resistance.strike, label: '壓力 max call OI', color: LEVEL_COLORS.up });
+  if (L.resistance) chartLevels.push({ price: L.resistance.strike, label: '壓力 Call OI最大', color: LEVEL_COLORS.up });
   if (L.straddle != null) {
-    chartLevels.push({ price: L.atm.strike + L.straddle, label: '+straddle', color: LEVEL_COLORS.band });
-    chartLevels.push({ price: L.atm.strike - L.straddle, label: '−straddle', color: LEVEL_COLORS.band });
+    chartLevels.push({ price: L.atm.strike + L.straddle, label: '價平＋和', color: LEVEL_COLORS.band });
+    chartLevels.push({ price: L.atm.strike - L.straddle, label: '價平－和', color: LEVEL_COLORS.band });
   }
-  if (L.support) chartLevels.push({ price: L.support.strike, label: '支撐 max put OI', color: LEVEL_COLORS.down });
+  if (L.support) chartLevels.push({ price: L.support.strike, label: '支撐 Put OI最大', color: LEVEL_COLORS.down });
   // OI table centered on the strike nearest spot, walls highlighted.
   let atmK = null;
   for (const r of L.oiRows) if (atmK == null || Math.abs(r.strike - spot) < Math.abs(atmK - spot)) atmK = r.strike;
   const oiRows = L.oiRows.map((r) => ({ ...r, atm: r.strike === atmK }));
   const walls = { call: L.resistance ? L.resistance.strike : null, put: L.support ? L.support.strike : null };
-  const dim = light ? 'rgba(20,30,50,0.5)' : 'rgba(255,255,255,0.5)';
+  const dim = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
+  const pc = M && M.pcRatio, fx = M && M.foreign, t10 = M && M.top10;
+  const noMkt = isLive ? '期交所資料未載入' : '模擬模式沒有籌碼資料';
   return (
     <div style={{ position: 'absolute', top: 110, left: 24, right: 24, bottom: 24, zIndex: 5, overflowY: 'auto', paddingBottom: 4 }}>
-      {/* header tiles */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: D.gap, marginBottom: D.gap }}>
-        <LevelTile label="ATM straddle · 價平和" hk="straddle"
-          value={L.straddle != null ? `${window.fmtPx(L.straddle, P)} pts` : '—'}
-          sub={L.atm ? `ATM ${fmtP(L.atm.strike)} · call ${window.fmtPx(L.atm.call.last, P)} + put ${window.fmtPx(L.atm.put.last, P)}` : 'no chain rows'}
-          color={LEVEL_COLORS.band} light={light} />
-        <LevelTile label="vs prev settle · 流失" hk="straddle"
-          value={straddleDelta != null ? `${straddleDelta >= 0 ? '+' : '−'}${window.fmtPx(Math.abs(straddleDelta), P)}` : '—'}
-          sub={L.prevStraddle != null ? `prev session ${window.fmtPx(L.prevStraddle, P)} (TAIFEX settle)` : 'needs TAIFEX settlement prices'}
-          color={straddleDelta == null ? undefined : straddleDelta >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down} light={light} />
-        <LevelTile label="Resistance · 壓力" hk="resistance"
+      {/* the strip: 關卡 on the left, 籌碼 on the right — one row of big numbers */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(172px, 1fr))', gap: D.gap, marginBottom: D.gap }}>
+        <LevelTile label={`現價 ${P.code}`} value={fmtP(spot)} color={spotChg == null ? LEVEL_COLORS.spot : spotChg >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down}
+          sub={spotChg != null ? <><Chg v={spotChg} fmt={(x) => fmtP(x)} /> {q.chgPct != null ? `（${q.chgPct >= 0 ? '+' : ''}${q.chgPct}%）` : ''}</> : (isLive ? liveLabel(live, P) : '模擬')} light={light} />
+        <LevelTile label="價平和" hk="straddle" color={LEVEL_COLORS.band}
+          value={L.straddle != null ? window.fmtPx(L.straddle, P) : '—'}
+          sub={L.atm ? <>價平 {fmtP(L.atm.strike)}{straddleDelta != null ? <> · 流失 <Chg v={straddleDelta} fmt={(x) => window.fmtPx(x, P)} /></> : ''}</> : '沒有鏈資料'} light={light} />
+        <LevelTile label="壓力" hk="resistance" color={LEVEL_COLORS.up}
           value={L.resistance ? fmtP(L.resistance.strike) : '—'}
-          sub={L.resistance ? `max call OI ${L.resistance.oi.toLocaleString()}${chg(L.resistance.oiChg)}` : 'no OI'}
-          color={LEVEL_COLORS.up} light={light} />
-        <LevelTile label="Support · 支撐" hk="support"
+          sub={L.resistance ? `Call OI ${L.resistance.oi.toLocaleString()}${chg(L.resistance.oiChg)}` : '沒有 OI'} light={light} />
+        <LevelTile label="支撐" hk="support" color={LEVEL_COLORS.down}
           value={L.support ? fmtP(L.support.strike) : '—'}
-          sub={L.support ? `max put OI ${L.support.oi.toLocaleString()}${chg(L.support.oiChg)}` : 'no OI'}
-          color={LEVEL_COLORS.down} light={light} />
-        <LevelTile label="Put / Call OI" hk="pcratio"
-          value={pc != null ? pc.toFixed(2) : '—'}
-          sub={`put ${L.totals.putOi.toLocaleString()} / call ${L.totals.callOi.toLocaleString()}`}
-          color={pc == null ? undefined : pc >= 1 ? LEVEL_COLORS.down : LEVEL_COLORS.up} light={light} />
+          sub={L.support ? `Put OI ${L.support.oi.toLocaleString()}${chg(L.support.oiChg)}` : '沒有 OI'} light={light} />
+        <LevelTile label="外資期貨淨部位" hk="foreign"
+          value={fx ? `${fx.net > 0 ? '+' : ''}${fx.net.toLocaleString()}` : '—'}
+          color={fx ? (fx.net >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down) : undefined}
+          sub={fx ? <>較前日 <Chg v={fx.chg} /></> : noMkt} light={light} />
+        <LevelTile label="十大交易人淨部位" hk="top10"
+          value={t10 ? `${t10.net > 0 ? '+' : ''}${t10.net.toLocaleString()}` : '—'}
+          color={t10 ? (t10.net >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down) : undefined}
+          sub={t10 ? <>較前日 <Chg v={t10.chg} /></> : noMkt} light={light} />
+        <LevelTile label="P/C 比（全市場）" hk="pcratio"
+          value={pc ? pc.ratio.toFixed(2) : '—'}
+          color={pc ? (pc.ratio >= 1 ? LEVEL_COLORS.down : LEVEL_COLORS.up) : undefined}
+          sub={pc ? <>較前日 <Chg v={pc.chg} fmt={(x) => x.toFixed(2)} /></> : noMkt}
+          right={pc ? <Spark series={pc.series} w={64} light={light} /> : null} light={light} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(380px, 440px) 1fr', gap: D.gap, alignItems: 'start' }}>
         {/* ladder */}
         <Glass2 tone="panel" padding={D.panelPad} style={{ minWidth: 0 }}>
-          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>}>Levels · {P.code}</Eyebrow>
+          <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>}>關卡 · {P.code}</Eyebrow>
           <LevelsLadder P={P} spot={spot} L={L} light={light} />
-          <div className="mono" style={{ marginTop: 10, fontSize: 9, color: dim, display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+          <div className="mono" style={{ marginTop: 10, fontSize: 9.5, color: dim, display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
             <span>{oiLabel}</span>
-            <span>premiums: {live && P.live ? `● ${liveLabel(live, P)}` : '○ mock'}</span>
+            <span>權利金：{isLive ? `● ${liveLabel(live, P)}` : '○ 模擬'}</span>
           </div>
         </Glass2>
 
@@ -1373,15 +1420,15 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
           {/* K-line with the levels drawn on it */}
           <Glass2 tone="panel" padding={D.panelPad}>
             <Eyebrow right={<KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} light={light} />}>
-              Chart · {P.code}
-              <span style={{ color: dim, fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· levels overlaid · {barsLive ? 'live' : 'mock'}</span>
+              台指期 日K · 關卡疊圖
+              <span style={{ color: dim, fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· {barsLive ? liveLabel(live, P) : '模擬'}</span>
             </Eyebrow>
             <PriceChart bars={bars} theme={theme} code={P.code} periodLabel={per.label === '日' ? 'Daily' : per.label} levels={chartLevels} />
           </Glass2>
 
           {/* OI by strike with change column */}
           <Glass2 tone="panel" padding={D.panelPad}>
-            <Eyebrow hk="oichg" right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{oiLabel}</span>}>OI by strike · change vs prev</Eyebrow>
+            <Eyebrow hk="oichg" right={<span className="mono tnum" style={{ fontSize: 9.5, opacity: 0.6 }}>{pcExpiry != null ? `本到期日 P/C ${pcExpiry.toFixed(2)} · ` : ''}{oiLabel}</span>}>各履約價未平倉 · 對前日增減</Eyebrow>
             <OIProfile spot={spot} contract={expiry.type} rows={oiRows} theme={theme} maxRows={15} showChange walls={walls} />
           </Glass2>
         </div>
@@ -1533,7 +1580,7 @@ function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv
           <div ref={ref} style={{ flex: 1, minHeight: 360, borderRadius: 14, overflow: 'hidden', background: 'radial-gradient(ellipse at 30% 30%, rgba(167,139,250,0.10), transparent 60%)' }} />
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <div style={{ minWidth: 640, fontFamily: 'ui-monospace, SF Mono, monospace', fontVariantNumeric: 'tabular-nums', fontSize: 11 }}>
+            <div style={{ minWidth: 640, fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums', fontSize: 11 }}>
               <div style={{ display: 'flex' }}>
                 <div style={{ width: 64, flexShrink: 0, fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600, padding: '8px 10px' }}>EXP</div>
                 {heat.header.map((h, i) => (
@@ -1562,7 +1609,7 @@ function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv
         {hv20 != null && (
           <Glass2 tone="raised" padding={D.panelPad}>
             <Eyebrow hk="hv" right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{hvLive ? 'IB daily bars' : 'mock'}</span>}>IV vs HV · 20d</Eyebrow>
-            <div className="tnum" style={{ fontSize: 20, fontWeight: 600, fontFamily: 'ui-monospace, SF Mono, monospace', display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <div className="tnum" style={{ fontSize: 20, fontWeight: 600, fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'baseline', gap: 8 }}>
               <span>{iv.toFixed(1)}%</span>
               <span style={{ opacity: 0.4, fontSize: 13 }}>vs</span>
               <span style={{ opacity: 0.75 }}>{hv20.toFixed(1)}%</span>
@@ -1583,7 +1630,7 @@ function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv
             {term.map((e) => (
               <div key={e.label + e.dte} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                 <span style={{ opacity: 0.7 }}>{e.label} · {e.dte}d</span>
-                <span className="mono" style={{ fontFamily: 'ui-monospace, SF Mono, monospace', fontWeight: 600, color: e.dte === expiry.dte ? '#f0c068' : (light ? '#3a4658' : '#cdd3df') }}>
+                <span className="mono" style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: e.dte === expiry.dte ? '#f0c068' : (light ? '#3a4658' : '#cdd3df') }}>
                   {e.iv != null ? e.iv.toFixed(1) + '%' : '—'}
                 </span>
               </div>
@@ -1593,7 +1640,7 @@ function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>}>Skew · 25Δ</Eyebrow>
           {skew != null ? (<>
-            <div className="tnum" style={{ fontSize: 22, fontWeight: 600, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
+            <div className="tnum" style={{ fontSize: 22, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
               <span style={{ color: skew >= 0 ? '#5fa3d4' : '#f0c068' }}>{skew >= 0 ? '+' : ''}{skew.toFixed(1)}</span>
               <span style={{ opacity: 0.4, fontSize: 14 }}> vol pts</span>
             </div>
@@ -1803,12 +1850,12 @@ function CompareCard({ strategy: s, P, spot, iv, dte, D, theme = 'dark', biasCol
                   flex: 1, padding: '3px 6px', borderRadius: 4,
                   border: '1px solid rgba(255,255,255,0.10)',
                   background: 'rgba(0,0,0,0.20)', color: '#e8eaef',
-                  fontFamily: 'ui-monospace, SF Mono, monospace', fontSize: 11, fontWeight: 600,
+                  fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600,
                   fontVariantNumeric: 'tabular-nums', textAlign: 'right',
                   outline: 'none',
                 }}
               />
-              <span className="mono" style={{ fontSize: 10, opacity: 0.5, fontFamily: 'ui-monospace, SF Mono, monospace', minWidth: 38, textAlign: 'right' }}>@{l.premium}</span>
+              <span className="mono" style={{ fontSize: 10, opacity: 0.5, fontFamily: 'var(--font-mono)', minWidth: 38, textAlign: 'right' }}>@{l.premium}</span>
             </div>
           ))}
         </div>
@@ -1818,25 +1865,25 @@ function CompareCard({ strategy: s, P, spot, iv, dte, D, theme = 'dark', biasCol
       <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: 11 }}>
         <div style={{ padding: '6px 8px', borderRadius: 6, background: 'rgba(239,83,80,0.10)', border: '1px solid rgba(239,83,80,0.18)' }}>
           <div style={{ fontSize: 9, letterSpacing: 0.4, opacity: 0.7, fontWeight: 600 }}>MAX PROFIT</div>
-          <div className="tnum" style={{ fontFamily: 'ui-monospace, SF Mono, monospace', fontWeight: 700, color: '#ef5350', fontSize: 13 }}>
+          <div className="tnum" style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#ef5350', fontSize: 13 }}>
             +{P.cur}{Math.round(mp * P.mult).toLocaleString()}
           </div>
         </div>
         <div style={{ padding: '6px 8px', borderRadius: 6, background: 'rgba(38,166,154,0.10)', border: '1px solid rgba(38,166,154,0.18)' }}>
           <div style={{ fontSize: 9, letterSpacing: 0.4, opacity: 0.7, fontWeight: 600 }}>MAX LOSS</div>
-          <div className="tnum" style={{ fontFamily: 'ui-monospace, SF Mono, monospace', fontWeight: 700, color: '#26a69a', fontSize: 13 }}>
+          <div className="tnum" style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#26a69a', fontSize: 13 }}>
             {P.cur}{Math.round(ml * P.mult).toLocaleString()}
           </div>
         </div>
         <div style={{ padding: '6px 8px', borderRadius: 6, background: 'rgba(167,139,250,0.10)', border: '1px solid rgba(167,139,250,0.18)' }}>
           <div style={{ fontSize: 9, letterSpacing: 0.4, opacity: 0.7, fontWeight: 600 }}>BREAK-EVEN</div>
-          <div className="tnum" style={{ fontFamily: 'ui-monospace, SF Mono, monospace', fontWeight: 700, color: '#a78bfa', fontSize: 12 }}>
+          <div className="tnum" style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#a78bfa', fontSize: 12 }}>
             {bes.length ? bes.map((b) => b.toFixed(0)).join(' / ') : '—'}
           </div>
         </div>
         <div style={{ padding: '6px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
           <div style={{ fontSize: 9, letterSpacing: 0.4, opacity: 0.7, fontWeight: 600 }}>{credit >= 0 ? 'NET CREDIT' : 'NET DEBIT'}</div>
-          <div className="tnum" style={{ fontFamily: 'ui-monospace, SF Mono, monospace', fontWeight: 700, fontSize: 12, color: credit >= 0 ? '#ef5350' : '#cdd3df' }}>
+          <div className="tnum" style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 12, color: credit >= 0 ? '#ef5350' : '#cdd3df' }}>
             {credit >= 0 ? '+' : ''}{P.cur}{Math.round(credit * P.mult).toLocaleString()}
           </div>
         </div>
@@ -2013,7 +2060,7 @@ function MobileApp({
                 position: 'relative',
               }}>
                 <span>{e.label}</span>
-                <span style={{ fontSize: 9, opacity: 0.7, fontFamily: 'ui-monospace, SF Mono, monospace' }}>{e.date}</span>
+                <span style={{ fontSize: 9, opacity: 0.7, fontFamily: 'var(--font-mono)' }}>{e.date}</span>
                 {isMonthly && <span style={{ width: 4, height: 4, borderRadius: 2, background: '#f0c068' }} />}
               </button>
             );
@@ -2132,7 +2179,7 @@ function MobileCalc({
               color: netPnl >= 0
                 ? (light ? 'oklch(0.60 0.13 75)' : 'oklch(0.84 0.14 75)')
                 : (light ? 'oklch(0.50 0.10 220)' : 'oklch(0.74 0.12 220)'),
-              fontFamily: 'ui-monospace, SF Mono, monospace', lineHeight: 1.05,
+              fontFamily: 'var(--font-mono)', lineHeight: 1.05,
             }}>
               {netPnl >= 0 ? '+' : ''}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
             </div>
@@ -2192,7 +2239,7 @@ function MobileCalc({
           <div style={{ marginTop: 10 }}>
             <input type="range" min="0" max="1" step="0.01" value={sliceFrac} onChange={(e) => setSliceFrac(parseFloat(e.target.value))}
               style={{ width: '100%', accentColor: accent }} />
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, opacity: 0.5, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, opacity: 0.5, fontFamily: 'var(--font-mono)' }}>
               <span>now</span><span>expiry</span>
             </div>
           </div>
@@ -2343,7 +2390,7 @@ function MobileIV({ expiry, expiries = TXO_EXPIRIES, P, spot, rows, theme = 'dar
           {term.map((e) => (
             <div key={e.label + e.dte} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '4px 0', borderBottom: `1px solid ${rule}` }}>
               <span style={{ opacity: 0.7 }}>{e.label} · {e.dte}d</span>
-              <span className="mono" style={{ fontFamily: 'ui-monospace, SF Mono, monospace', fontWeight: 600, color: e.dte === expiry.dte ? (light ? '#8a6410' : '#f0c068') : (light ? '#3a4658' : '#cdd3df') }}>
+              <span className="mono" style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: e.dte === expiry.dte ? (light ? '#8a6410' : '#f0c068') : (light ? '#3a4658' : '#cdd3df') }}>
                 {e.iv != null ? e.iv.toFixed(1) + '%' : '—'}
               </span>
             </div>
@@ -2353,7 +2400,7 @@ function MobileIV({ expiry, expiries = TXO_EXPIRIES, P, spot, rows, theme = 'dar
       <Glass2 tone="panel" padding={14}>
         <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{expiry.label} · {expiry.dte}d</span>}>Skew · 25Δ</Eyebrow>
         {skew != null ? (<>
-          <div className="tnum" style={{ fontSize: 22, fontWeight: 600, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
+          <div className="tnum" style={{ fontSize: 22, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
             <span style={{ color: skew >= 0 ? (light ? '#2b6a99' : '#5fa3d4') : (light ? '#8a6410' : '#f0c068') }}>{skew >= 0 ? '+' : ''}{skew.toFixed(1)}</span>
             <span style={{ opacity: 0.4, fontSize: 14 }}> vol pts</span>
           </div>
@@ -2381,7 +2428,7 @@ function MobileChain({ isFold, chartW, P, rows, spot, expiry, expiries, legs, se
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <Eyebrow right={<DataQualityPill quality={quality} />}>Net premium</Eyebrow>
-            <div className="tnum" style={{ fontSize: 22, fontWeight: 700, fontFamily: 'ui-monospace, SF Mono, monospace', letterSpacing: -0.3 }}>
+            <div className="tnum" style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--font-mono)', letterSpacing: -0.3 }}>
               {P.cur}{Math.round(legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0) * P.mult).toLocaleString()}
             </div>
             <div style={{ fontSize: 10, opacity: 0.55, marginTop: 3 }}>
@@ -2457,7 +2504,7 @@ function MobileChainTable({ spot, contract, rows: rowsProp, onAddLeg, side = 'lo
     <div style={{
       display: 'grid',
       gridTemplateColumns: '1fr 1fr 70px 1fr 1fr',
-      fontFamily: 'ui-monospace, SF Mono, monospace',
+      fontFamily: 'var(--font-mono)',
       fontSize: 11, fontVariantNumeric: 'tabular-nums',
       borderRadius: 8, overflow: 'hidden',
       border: `1px solid ${light ? 'rgba(25,40,70,0.10)' : 'rgba(255,255,255,0.06)'}`,

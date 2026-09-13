@@ -34,8 +34,10 @@ const HELP_COPY = {
   straddle: { term: 'ATM straddle (價平和)', short: 'ATM call premium + ATM put premium for the selected expiry. Adding the two cancels direction, so what is left is the move the market is pricing in until expiry, in index points. ATM ± this value is the expected range.', example: 'ATM 46,150 · call 131 + put 158 → 289 pts → band 45,861–46,439' },
   resistance: { term: 'Resistance (壓力)', short: 'The strike with the largest call open interest. Read from the sellers’ side: call writers do not expect the index to close above it. The change vs the previous session shows whether the wall is still being built.' },
   support: { term: 'Support (支撐)', short: 'The strike with the largest put open interest — put writers do not expect the index to close below it.' },
-  pcratio: { term: 'Put/Call OI ratio', short: 'Total put open interest ÷ total call open interest for the expiry. Above 1 = more put positions outstanding (hedged / bearish positioning); below 1 = call-heavy.' },
+  pcratio: { term: 'Put/Call OI ratio', short: 'Put open interest ÷ call open interest. The strip shows TAIFEX’s market-wide number for all TXO expiries with its 23-session trend; the OI table’s footer shows the same ratio for the selected expiry only. Above 1 = more put positions outstanding; below 1 = call-heavy.' },
   oichg: { term: 'OI change', short: 'Open interest today minus the previous session. Red = positions added, teal = closed out. A growing wall matters more than a static one.' },
+  foreign: { term: '外資期貨淨部位 (foreign net futures position)', short: 'Foreign investors’ net open interest in TAIEX futures, summed across the large, mini and micro contracts in large-contract equivalents (TX + MTX/4 + TMF/20, the exchange’s own conversion). Negative = net short. Published by TAIFEX after the close.' },
+  top10: { term: '十大交易人淨部位 (top-10 traders)', short: 'Net position (buy − sell) of the ten largest traders in the front-month TAIEX futures, from TAIFEX’s large-trader report. The institutional subset (特定法人) is in the data (/api/market → top10.specificNet).' },
 };
 
 // Drawer sections. `tabs` lists the workspaces a section is relevant to; on open
@@ -117,7 +119,7 @@ function HelpTip({ k, children }) {
         }}>
           <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>{info.term}</div>
           <div style={{ fontSize: 11, lineHeight: 1.5, opacity: 0.85 }}>{info.short}</div>
-          {info.example && <div style={{ fontSize: 10, marginTop: 6, opacity: 0.7, fontFamily: 'ui-monospace, SF Mono, monospace' }}>{info.example}</div>}
+          {info.example && <div style={{ fontSize: 10, marginTop: 6, opacity: 0.7, fontFamily: 'var(--font-mono)' }}>{info.example}</div>}
         </div>
       )}
     </span>
