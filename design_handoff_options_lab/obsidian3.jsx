@@ -4,6 +4,11 @@ const { useState: uS, useMemo: uM, useEffect: uE, useRef: uR } = React;
 
 // Live data providers, keyed by the product's `live` field (products.js).
 const BROKER = { ib: 'IB', sinopac: 'SinoPac' };
+// What the live badge says: the source's own label when the probe supplied one
+// (the TAIFEX end-of-day snapshot: "TAIFEX 09/11 EOD"), else the broker name.
+function liveLabel(live, P) {
+  return (live && live.health && live.health.label) || BROKER[P.live] || 'live';
+}
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "scheme": "diverging",
@@ -187,7 +192,7 @@ function ProductDropdown({ productId, P, spot, live, open, setOpen, onPick, ligh
         <span className="lt-prodsel" style={{ fontSize: 10, fontWeight: 700, padding: '2px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)' }}>{P.code} ▾</span>
         <span className="tnum" style={{ fontSize: 13, fontWeight: 600 }}>{spot.toLocaleString()}</span>
         {P.live ? (
-          <span className={`mono ${live ? '' : 'lt-mock'}`} title={live ? `${BROKER[P.live]} connected (delayed/realtime per subscription)` : `no local data proxy — mock data`} style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.5, color: live ? '#4dd0c8' : 'rgba(255,255,255,0.45)' }}>{live ? `● ${BROKER[P.live]}` : '○ MOCK'}</span>
+          <span className={`mono ${live ? '' : 'lt-mock'}`} title={live ? (live.health && live.health.source === 'eod' ? `previous session from TAIFEX (${live.health.asOf}) — no live feed` : `${BROKER[P.live]} connected (delayed/realtime per subscription)`) : `no local data proxy — mock data`} style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.5, color: live ? '#4dd0c8' : 'rgba(255,255,255,0.45)' }}>{live ? `● ${liveLabel(live, P)}` : '○ MOCK'}</span>
         ) : (
           <span className="tnum" style={{ fontSize: 11, color: 'oklch(0.78 0.14 145)' }}>+0.84%</span>
         )}
@@ -671,7 +676,7 @@ function Obsidian3() {
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
           <DataQualityPill quality={quality} />
-          {live && P.live && <FreshnessChip lastLiveAt={lastLiveAt} />}
+          {live && P.live && !(live.health && live.health.source === 'eod') && <FreshnessChip lastLiveAt={lastLiveAt} />}
           <ProductDropdown
             productId={productId} P={P} spot={spot} live={live}
             open={prodMenuOpen} setOpen={setProdMenuOpen}
@@ -754,7 +759,7 @@ function Obsidian3() {
       )}
       {workspace === 'chart' && (
         <ChartWorkspace
-          P={P} bars={bars} barsLive={!!liveBars} theme={theme} light={light}
+          P={P} bars={bars} barsLive={!!liveBars} live={live} theme={theme} light={light}
           barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
           D={D}
         />
@@ -1211,10 +1216,14 @@ function computeLevels({ spot, rows, oi, P }) {
   let atm = null;
   for (const r of rows) if (!atm || Math.abs(r.strike - spot) < Math.abs(atm.strike - spot)) atm = r;
   const straddle = (atm && atm.call.last > 0 && atm.put.last > 0) ? atm.call.last + atm.put.last : null;
+  // Reference = the session before the premiums on screen: TAIFEX's latest
+  // settlement under a live feed, or the previous session's settlement when
+  // the premiums themselves are the end-of-day snapshot (prevSettle).
   let prevStraddle = null;
   if (oi && oi.rows && atm) {
     const r = oi.rows.find((x) => x.strike === atm.strike);
-    if (r && r.call.settle != null && r.put.settle != null) prevStraddle = r.call.settle + r.put.settle;
+    const ref = (x) => (x.prevSettle != null ? x.prevSettle : x.settle);
+    if (r && ref(r.call) != null && ref(r.put) != null) prevStraddle = ref(r.call) + ref(r.put);
   }
   const oiRows = (oi && oi.rows && oi.rows.length) ? oi.rows : rows;
   const wall = (side) => {
@@ -1305,7 +1314,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
   const chg = (v) => (v == null ? '' : ` (${v > 0 ? '+' : ''}${v.toLocaleString()})`);
   // What the OI numbers are: TAIFEX daily report (dated), the live chain (IB), or mock.
   const oiLabel = L.oiSource === 'taifex' ? `● TAIFEX ${L.oiDate} · previous session`
-    : (live && P.live) ? `● ${BROKER[P.live]} chain OI · ±8 strikes`
+    : (live && P.live) ? `● ${liveLabel(live, P)} chain OI · ±8 strikes`
     : '○ MOCK OI';
   const straddleDelta = (L.straddle != null && L.prevStraddle != null) ? L.straddle - L.prevStraddle : null;
   const pc = L.totals.callOi > 0 ? L.totals.putOi / L.totals.callOi : null;
@@ -1356,7 +1365,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
           <LevelsLadder P={P} spot={spot} L={L} light={light} />
           <div className="mono" style={{ marginTop: 10, fontSize: 9, color: dim, display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
             <span>{oiLabel}</span>
-            <span>premiums: {live && P.live ? `● ${BROKER[P.live]}` : '○ mock'}</span>
+            <span>premiums: {live && P.live ? `● ${liveLabel(live, P)}` : '○ mock'}</span>
           </div>
         </Glass2>
 
@@ -1384,7 +1393,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
 // ───────────────────────────────────────────────── CHART WORKSPACE
 // Top-level Chart tab (from the design): full-width candles + MA + RSI.
 // Desktop only — mobile keeps the K線 sub-tab inside Calc.
-function ChartWorkspace({ P, bars, barsLive, theme, light, barPeriodId, setBarPeriodId, D }) {
+function ChartWorkspace({ P, bars, barsLive, live, theme, light, barPeriodId, setBarPeriodId, D }) {
   const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
   return (
     <div style={{ position: 'absolute', top: 110, left: 24, right: 24, bottom: 24, zIndex: 5, overflowY: 'auto' }}>
@@ -1392,15 +1401,15 @@ function ChartWorkspace({ P, bars, barsLive, theme, light, barPeriodId, setBarPe
         <Eyebrow right={<KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} light={light} />}>
           Chart · {P.code}
           <span style={{ color: light ? 'rgba(20,30,50,0.5)' : 'rgba(255,255,255,0.5)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>
-            · {barsLive ? 'front-month · IB' : 'mock'}
+            · {barsLive ? `front-month · ${liveLabel(live, P)}` : 'mock'}
           </span>
         </Eyebrow>
         <PriceChart
           bars={bars} theme={theme} code={P.code}
           periodLabel={per.label === '日' ? 'Daily' : per.label}
           sourceLabel={barsLive
-            ? '● IB feed — front-month futures via server/ proxy (TWS / Gateway)'
-            : '○ MOCK OHLC — random walk; connect the IB proxy (server/) for real bars'}
+            ? `● ${liveLabel(live, P)} — front-month futures daily bars`
+            : '○ MOCK OHLC — random walk; connect the proxy (server/) for real bars'}
         />
       </Glass2>
     </div>
@@ -2095,7 +2104,7 @@ function MobileLiveBadge({ live, P, lastLiveAt, light }) {
     <span className="mono" title={stale ? 'live data may be stale' : 'live'} style={{
       fontSize: 8, fontWeight: 700, letterSpacing: 0.4,
       color: stale ? '#f0c068' : '#4dd0c8',
-    }}>{stale ? '●STALE' : `●${BROKER[P.live]}`}</span>
+    }}>{stale && !(live.health && live.health.source === 'eod') ? '●STALE' : `●${liveLabel(live, P)}`}</span>
   );
 }
 

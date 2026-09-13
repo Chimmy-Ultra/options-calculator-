@@ -1,7 +1,7 @@
 // Options Lab service worker.
 // Strategy: cache-first for the app shell + same-origin assets, network-first for HTML.
 // Bumping CACHE_VERSION purges old caches.
-const CACHE_VERSION = 'options-lab-v31';
+const CACHE_VERSION = 'options-lab-v32';
 const APP_SHELL = [
   './',
   './index.html',
@@ -17,6 +17,7 @@ const APP_SHELL = [
   './iv-surface.js',
   './products.js',
   './data-live.js',
+  './taifex-eod.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png',
