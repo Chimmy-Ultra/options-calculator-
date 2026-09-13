@@ -368,7 +368,8 @@ const GRID_DEFAULTS = {
     { i: 'range',  x: 0, y: 23, w: 4,  h: 10 },
     { i: 'kline',  x: 4, y: 4,  w: 8,  h: 14 },
     { i: 'oi',     x: 4, y: 18, w: 8,  h: 10 },
-    { i: 'gex',    x: 4, y: 28, w: 8,  h: 11 },
+    { i: 'top20',  x: 4, y: 28, w: 8,  h: 8 },
+    { i: 'gex',    x: 4, y: 36, w: 8,  h: 11 },
   ],
   chart: [{ i: 'kline', x: 0, y: 0, w: 12, h: 19 }],
   chain: [
@@ -416,6 +417,7 @@ function Obsidian3() {
   const [liveRows, setLiveRows] = uS(null); // 當前到期日的 IB 期權鏈 rows
   const [oiData, setOiData] = uS(null);     // per-strike OI for the current expiry (TAIFEX via proxy; products with oiSource)
   const [marketData, setMarketData] = uS(null); // daily positioning (P/C ratio, 外資, top-10) — same source
+  const [top20Data, setTop20Data] = uS(null);   // 權值股 TOP20: TAIFEX index weights + TWSE daily quotes
   const [lastLiveAt, setLastLiveAt] = uS(null); // ② timestamp of last successful live fetch
   const [liveBars, setLiveBars] = uS(null); // 近月期貨的 IB 歷史 K
   const [liveDayBars, setLiveDayBars] = uS(null); // daily 日盤 bars regardless of the K-line toggles — the 關卡價 input
@@ -537,6 +539,12 @@ function Obsidian3() {
         if (!dead && m) setMarketData(m);
       }
     })();
+    if (P.oiSource === 'taifex' && window.LiveData.top20) {
+      (async () => {
+        const t = await window.LiveData.top20(P.id);
+        if (!dead && t && t.rows && t.rows.length) setTop20Data(t);
+      })();
+    }
     return () => { dead = true; };
   }, [productId]);
 
@@ -818,7 +826,7 @@ function Obsidian3() {
       {workspace === 'levels' && (
         <LevelsWorkspace
           P={P} theme={theme} light={light} spot={spot} expiry={expiry} levels={levels} live={live} market={marketData}
-          rangeLevels={rangeLevels} dayBarsLive={!!liveDayBars} gex={gex} grid={grid}
+          rangeLevels={rangeLevels} dayBarsLive={!!liveDayBars} gex={gex} grid={grid} top20={top20Data}
           bars={bars} barsLive={!!liveBars} barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
           barSession={barSession} setBarSession={setBarSession}
           D={D}
@@ -1584,7 +1592,50 @@ function LevelsLadder({ P, spot, L, G, light }) {
   );
 }
 
-function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, levels: L, live, market: M, rangeLevels: R, dayBarsLive, gex: G, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D, grid }) {
+// 權值股 TOP20 — the 多空指南針 "權值股 TOP20 日K型態圖" read: the twenty
+// largest TAIEX constituents by index weight (TAIFEX's monthly 成分股暨市值比重
+// table) with the previous session's move from TWSE's daily closing table.
+// One bar per stock, red up / teal down, weight underneath; the header sums
+// how many rose and the weight they carry.
+function Top20Panel({ T, light = false }) {
+  const dim = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
+  if (!T || !T.rows || !T.rows.length) return <div className="mono" style={{ fontSize: 11, color: dim }}>沒有權值股資料（需要期交所權重表與證交所日行情）。</div>;
+  const rows = T.rows.slice(0, 20);
+  const maxAbs = Math.max(...rows.map((r) => Math.abs(r.chgPct || 0)), 0.5);
+  const up = rows.filter((r) => r.chgPct > 0).length, down = rows.filter((r) => r.chgPct < 0).length;
+  const wUp = rows.filter((r) => r.chgPct > 0).reduce((a, r) => a + r.weight, 0);
+  const wAll = rows.reduce((a, r) => a + r.weight, 0);
+  const H = 110, mid = 52;
+  return (
+    <div>
+      <div className="mono tnum" style={{ display: 'flex', gap: 14, fontSize: 10.5, color: dim, marginBottom: 6, flexWrap: 'wrap' }}>
+        <span>上漲 <b style={{ color: LEVEL_COLORS.up }}>{up}</b> · 下跌 <b style={{ color: LEVEL_COLORS.down }}>{down}</b> · 平盤 {rows.length - up - down}</span>
+        <span>上漲權重 {wUp.toFixed(1)}% / 前20合計 {wAll.toFixed(1)}%</span>
+        <span>台積電 {rows[0] && rows[0].code === '2330' ? `${rows[0].chgPct >= 0 ? '+' : ''}${rows[0].chgPct.toFixed(2)}%` : '—'}</span>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${rows.length}, minmax(0, 1fr))`, gap: 3, alignItems: 'end' }}>
+        {rows.map((r) => {
+          const pct = r.chgPct || 0;
+          const h = Math.max(2, Math.abs(pct) / maxAbs * (mid - 6));
+          const col = pct > 0 ? LEVEL_COLORS.up : pct < 0 ? LEVEL_COLORS.down : dim;
+          return (
+            <div key={r.code} title={`${r.code} ${r.name} · 收 ${r.close} · ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}% · 權重 ${r.weight.toFixed(2)}%`} style={{ minWidth: 0, textAlign: 'center' }}>
+              <div className="tnum" style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: col, height: 12, lineHeight: '12px', whiteSpace: 'nowrap', overflow: 'hidden' }}>{pct >= 0 ? '+' : ''}{pct.toFixed(1)}</div>
+              <div style={{ position: 'relative', height: H - 12 }}>
+                <div style={{ position: 'absolute', left: 0, right: 0, top: mid, height: 1, background: 'var(--border)' }} />
+                <div style={{ position: 'absolute', left: '15%', right: '15%', height: h, background: col, top: pct >= 0 ? mid - h : mid + 1 }} />
+              </div>
+              <div style={{ fontSize: 10, lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</div>
+              <div className="tnum" style={{ fontSize: 8.5, color: dim, fontFamily: 'var(--font-mono)' }}>{r.weight.toFixed(1)}%</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, levels: L, live, market: M, rangeLevels: R, dayBarsLive, gex: G, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D, grid, top20: T }) {
   const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
   const chg = (v) => (v == null ? '' : `（${v > 0 ? '+' : ''}${v.toLocaleString()}）`);
@@ -1679,6 +1730,9 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
               cone={L.atmIv ? { ivPct: L.atmIv, days: expiry.dte, label: expiry.label } : null} /> },
     { i: 'oi', title: '各履約價未平倉 · 對前日增減', hk: 'oichg', right: gridCap(`${pcExpiry != null ? `本到期日 P/C ${pcExpiry.toFixed(2)} · ` : ''}${oiLabel}`),
       body: <OIProfile spot={spot} contract={expiry.type} rows={oiRows} theme={theme} maxRows={15} showChange walls={walls} /> },
+    { i: 'top20', title: '權值股 TOP20 · 當日漲跌', hk: 'top20',
+      right: gridCap(T ? `權重 期交所 ${T.weightsDate} · 行情 證交所 ${T.date.slice(0, 4)}/${T.date.slice(4, 6)}/${T.date.slice(6)}` : ''),
+      body: <Top20Panel T={T} light={light} /> },
     { i: 'gex', title: 'Gamma 曝險 · 各履約價（本到期日）', hk: 'gex',
       right: <span className="mono tnum" style={{ fontSize: 9.5, opacity: 0.7 }}>{G ? <>總 GEX <b style={{ color: G.total >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down }}>{fmtBig(G.total, P)}</b>/1%{G.flip != null ? ` · 零 Gamma ${fmtP(Math.round(G.flip))}` : ''} · </> : ''}{oiLabel}</span>,
       body: (<>

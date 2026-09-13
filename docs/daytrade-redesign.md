@@ -321,7 +321,9 @@ builder move under a **Lab** tab. They keep working unchanged.
   IVolatility): dealer gamma exposure per strike with Call / Put gamma walls
   and the zero-gamma flip, max pain on the ladder, ±1σ expected-move tile, a
   probability cone on the K-line, a price × date P&L heatmap in Calculator,
-  and a 5/10/20/60-day volatility cone in Lab.
+  and a 5/10/20/60-day volatility cone in Lab. Then the terminal redesign
+  (flat skin, system fonts, Chinese labels, adjustable panel grid) and the
+  權值股 TOP20 panel (TAIFEX constituent weights + TWSE daily closes).
 - **P1**: 價平和 intraday sampler; 成本線 (VWAP re-anchored on volume
   spikes — needs ticks); 多空差額 (needs bid/ask ticks on a trading day).
 - **P2**: 籌碼差額 proxy from ticks; weekly/monthly ladder toggle; Lab tab

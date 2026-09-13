@@ -32,6 +32,9 @@ COMMODITY = "TXO"
 FUT_CSV_URL = "https://www.taifex.com.tw/cht/3/dlFutDataDown"
 FUT_COMMODITY = "TX"
 MIS_URL = "https://mis.taifex.com.tw/futures/api/getQuoteList"
+# 權值股 TOP20: TAIFEX's monthly TAIEX constituent-weight table + TWSE's daily closing table.
+WEIGHTS_URL = "https://www.taifex.com.tw/cht/9/futuresQADetail"
+TWSE_MI_URL = "https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX"
 RISK_FREE_TW = float(os.environ.get("RISK_FREE_TW", "0.015"))
 WINDOW_DAYS = 7          # calendar days back — enough for 2 trading days across holidays
 CACHE_TTL_S = 15 * 60.0
@@ -374,6 +377,128 @@ async def market():
     return data
 
 
+# ── 權值股 TOP20 ────────────────────────────────────────────────────────────
+# The 多空指南針 "權值股 TOP20" read. Weights: TAIFEX's 臺灣證券交易所發行量加權
+# 股價指數成分股暨市值比重 page (updated once a month, 資料日期 on the page).
+# Moves: TWSE's 每日收盤行情 table for the latest trading day (one request for
+# every listed stock; a non-trading date answers stat != OK, so the date steps
+# back). Both public, no login.
+
+def _fetch_weights() -> dict:
+    """{date: 'YYYY/M/D', rows: [{rank, code, name, weight}] by rank}. The page
+    lays the list out in two column groups (headers rank_a/name_a/propertion_a
+    and *_b); cells are read in document order and grouped per column."""
+    import re
+    req = urllib.request.Request(WEIGHTS_URL, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=40) as r:
+        html = r.read().decode("utf-8", "replace")
+    m = re.search(r"資料日期[：:]\s*(\d{4}/\d{1,2}/\d{1,2})", html)
+    cells = re.findall(r"<td[^>]*headers=\"?(rank|name|propertion|proportion)_([ab])\"?[^>]*>\s*([^<]*?)\s*</td>", html, flags=re.I | re.S)
+    cur: dict = {}
+    rows: list = []
+    for kind, col, text in cells:
+        kind = kind.lower()
+        if kind == "rank":
+            rec = {"rank": int(_num(text, 0) or 0), "code": None, "name": None, "weight": None}
+            cur[col] = rec
+            rows.append(rec)
+        elif col in cur and kind == "name":
+            if cur[col]["code"] is None:
+                cur[col]["code"] = text.strip()
+            else:
+                cur[col]["name"] = text.strip()
+        elif col in cur:
+            cur[col]["weight"] = _num(text.replace("%", ""))
+    rows = [r for r in rows if r["rank"] and r["code"] and r["name"] and r["weight"] is not None]
+    rows.sort(key=lambda r: r["rank"])
+    if not rows:
+        raise ValueError("weights table not found")
+    return {"date": m.group(1) if m else None, "rows": rows}
+
+
+def _fetch_twse_daily(days_back: int = 7) -> dict:
+    """{date: 'YYYYMMDD', stocks: {code: {name, open, high, low, close, chg, vol}}} for the latest trading day."""
+    last_err = None
+    for back in range(days_back):
+        d = date.today() - timedelta(days=back)
+        url = TWSE_MI_URL + "?" + urllib.parse.urlencode({"response": "json", "date": d.strftime("%Y%m%d"), "type": "ALLBUT0999"})
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        j = None
+        # TWSE rate-limits bursts with a 307 to a "too many requests" page —
+        # wait and retry the same date before giving up on it.
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(req, timeout=40) as r:
+                    j = json.loads(r.read().decode("utf-8", "replace"))
+                break
+            except Exception as e:  # network / JSON / 307
+                last_err = e
+                time.sleep(2.5 * (attempt + 1))
+        if not j or j.get("stat") != "OK":
+            time.sleep(1.0)
+            continue
+        for t in j.get("tables") or []:
+            f = t.get("fields") or []
+            if "證券代號" not in f or "收盤價" not in f:
+                continue
+            ix = {k: f.index(k) for k in f}
+            stocks = {}
+            for row in t.get("data") or []:
+                try:
+                    code = str(row[ix["證券代號"]]).strip()
+                    close = _num(str(row[ix["收盤價"]]).replace(",", ""))
+                    if close is None:
+                        continue
+                    sign_cell = str(row[ix["漲跌(+/-)"]])
+                    sign = 1 if "+" in sign_cell else -1 if "-" in sign_cell else 0
+                    diff = _num(str(row[ix["漲跌價差"]]).replace(",", ""), 0.0) or 0.0
+                    stocks[code] = {
+                        "name": str(row[ix["證券名稱"]]).strip(),
+                        "open": _num(str(row[ix["開盤價"]]).replace(",", "")),
+                        "high": _num(str(row[ix["最高價"]]).replace(",", "")),
+                        "low": _num(str(row[ix["最低價"]]).replace(",", "")),
+                        "close": close, "chg": sign * diff,
+                        "vol": int(_num(str(row[ix["成交股數"]]).replace(",", ""), 0) or 0),
+                    }
+                except (IndexError, KeyError, ValueError):
+                    continue
+            if stocks:
+                return {"date": d.strftime("%Y%m%d"), "stocks": stocks}
+    raise last_err or ValueError("TWSE daily table unavailable")
+
+
+async def top20(n: int = 20):
+    """The twenty heaviest TAIEX constituents with the previous session's move.
+    None when either source failed — the panel needs both."""
+    hit = _cache.get("top20")
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+
+    async def part(fn):
+        try:
+            return await asyncio.to_thread(fn)
+        except Exception:
+            return None
+
+    w, q = await asyncio.gather(part(_fetch_weights), part(_fetch_twse_daily))
+    if not w or not q:
+        return None
+    rows = []
+    for rec in w["rows"][:n]:
+        st = q["stocks"].get(rec["code"])
+        chg = st["chg"] if st else None
+        close = st["close"] if st else None
+        prev = (close - chg) if (close is not None and chg is not None) else None
+        rows.append({**rec,
+                     "close": close, "chg": chg,
+                     "chgPct": round(chg / prev * 100, 2) if (prev and chg is not None) else None,
+                     "open": st["open"] if st else None, "high": st["high"] if st else None, "low": st["low"] if st else None,
+                     "vol": st["vol"] if st else None})
+    data = {"source": "taifex+twse", "weightsDate": w["date"], "date": q["date"], "rows": rows}
+    _cache["top20"] = (time.monotonic() + CACHE_TTL_S, data)
+    return data
+
+
 # ── End-of-day snapshot ─────────────────────────────────────────────────────
 # Everything the frontend needs for the previous session, from TAIFEX alone:
 # index close (MIS quote list), per-strike close / best bid-ask / settlement /
@@ -466,6 +591,7 @@ async def build_snapshot(product_id: str = "txo", n_expiries: int = 5, strike_pc
     idx = await asyncio.to_thread(_fetch_index)
     bars = await asyncio.to_thread(_fetch_bars)
     mkt = await market()
+    t20 = await top20()
     spot = idx["price"]
     data_date = max(d for e in tbl.values() for d in e["dates"])          # yyyy/mm/dd
     asof = data_date.replace("/", "")
@@ -520,6 +646,7 @@ async def build_snapshot(product_id: str = "txo", n_expiries: int = 5, strike_pc
         "expiries": expiries, "chains": chains, "oi": oi,
         "bars": bars["day"], "barsFull": bars["full"],
         "market": mkt,
+        "top20": t20,
     }
 
 
@@ -536,7 +663,8 @@ def main(argv):
             "window.TAIFEX_EOD = " + json.dumps(snap, separators=(",", ":")) + ";\n")  # ASCII-safe: no charset dependence
     print(f"snapshot {snap['date']} (prev {snap['prevDate']}) spot {snap['spot']['price']} "
           f"expiries {[e['id'] for e in snap['expiries']]} chain rows {[len(c['rows']) for c in snap['chains'].values()]} "
-          f"bars {len(snap['bars'])} day / {len(snap['barsFull'])} full; market {sorted((snap['market'] or {}).keys())} -> {len(text) // 1024} KB")
+          f"bars {len(snap['bars'])} day / {len(snap['barsFull'])} full; market {sorted((snap['market'] or {}).keys())}; "
+          f"top20 {len((snap.get('top20') or {}).get('rows') or [])} rows -> {len(text) // 1024} KB")
     if out:
         with open(out, "w", encoding="utf-8") as f:
             f.write(text)

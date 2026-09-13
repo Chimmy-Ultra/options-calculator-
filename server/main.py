@@ -13,6 +13,7 @@
   GET /api/positions/{pid}   → 目前帳戶的選擇權部位（唯讀，載入前端 legs 用）
   GET /api/oi/{pid}          → ?expiry=YYYYMMDD 的每檔未平倉（TAIFEX 每日行情，見 taifex.py）
   GET /api/market/{pid}      → 籌碼：P/C 比、外資淨未平倉、十大交易人（TAIFEX 每日，見 taifex.py）
+  GET /api/top20/{pid}       → 權值股 TOP20：期交所成分股權重 + 證交所日收盤（見 taifex.py）
 
 唯讀行情 + 部位代理：只讀行情與持倉，不下單、不改單（沒有任何下單端點）。
 沒訂閱 CME 即時行情時自動退到 15 分鐘延遲數據（IB_MARKET_DATA_TYPE=3）。
@@ -453,6 +454,20 @@ async def market(pid: str):
     data = await taifex.market()
     if data is None:
         raise HTTPException(503, "TAIFEX daily reports unavailable")
+    return data
+
+
+@app.get("/api/top20/{pid}")
+async def top20(pid: str):
+    """權值股 TOP20: the twenty heaviest TAIEX constituents (TAIFEX's monthly
+    constituent-weight table) with the previous session's move from TWSE's
+    daily closing table. Public data; None → 503."""
+    spec = _product(pid)
+    if spec.get("oi") != "taifex":
+        raise HTTPException(404, f"no index-weight source for {pid!r}")
+    data = await taifex.top20()
+    if data is None:
+        raise HTTPException(503, "TAIFEX weights / TWSE daily table unavailable")
     return data
 
 

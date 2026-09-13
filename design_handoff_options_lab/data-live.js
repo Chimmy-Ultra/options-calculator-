@@ -86,6 +86,8 @@
     // { date, pcRatio: { ratio, chg, series: [{date, ratio}] }, foreign: { net, chg, ... },
     //   top10: { net, chg, specificNet, month } } | null — 籌碼（TAIFEX 每日，前一交易日）。
     market: (pid) => get('/api/market/' + encodeURIComponent(pid), 15000),
+    // { source, weightsDate, date, rows: [{ rank, code, name, weight, close, chg, chgPct, open, high, low, vol }] } | null
+    top20: (pid) => get('/api/top20/' + encodeURIComponent(pid), 15000),
   };
   // health.source 'eod' + a label tells the top bar what it is showing; no proxy ⇒ never "STALE".
   const fallback = {};
@@ -117,6 +119,7 @@
   };
   fallback.oi = async (pid, expiry) => { const s = eod(pid); return s ? eodOi(s, expiry) : null; };
   fallback.market = async (pid) => { const s = eod(pid); return (s && s.market) || null; };
+  fallback.top20 = async (pid) => { const s = eod(pid); return (s && s.top20) || null; };
 
   // Proxy first; the snapshot only answers when the proxy could not.
   window.LiveData = {};
