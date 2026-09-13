@@ -931,7 +931,7 @@ function Obsidian3() {
           pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss} fees={fees}
           popValue={popValue} portfolioG={portfolioG}
           accent={accent} t={t} D={D}
-          quality={quality} grid={grid}
+          quality={quality} grid={grid} hv20={hv20}
         />
       )}
       {workspace === 'chart' && (
@@ -1228,7 +1228,7 @@ function LayoutToggle({ value, onChange }) {
 }
 
 function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiries, onAddLeg, legs, setLegs,
-  iv, setIv, dte, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, popValue, portfolioG, accent, t, D, quality, grid }) {
+  iv, setIv, dte, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, popValue, portfolioG, accent, t, D, quality, grid, hv20 = null }) {
   const light = theme === 'light';
   const credit = legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0);
   const greekGrid = (
@@ -1241,7 +1241,7 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiri
   );
   const panels = [
     { i: 'chain', title: `${P.nameZh || P.name} T 字報價 · ${P.code}`, right: gridCap(expCap(expiry)),
-      body: <OptionChain spot={spot} contract={expiry.type} dte={expiry.dte} product={P} rows={rows} legs={legs} onAddLeg={onAddLeg} theme={theme} /> },
+      body: <OptionChain spot={spot} contract={expiry.type} dte={expiry.dte} product={P} rows={rows} legs={legs} onAddLeg={onAddLeg} theme={theme} hv20={hv20} /> },
     { i: 'whatif', title: `部位損益試算 · ${P.code}`, hk: 'pnlwhatif', tone: 'raised',
       body: <WhatIfCard bare P={P} pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss} fees={fees} popValue={popValue} theme={theme} light={light} D={D} /> },
     { i: 'payoff', title: <>到期損益圖 {t.showProbCone && <span style={{ color: '#a78bfa', fontWeight: 500, marginLeft: 4 }}>· 1σ/2σ 機率錐</span>}</>, right: gridCap('到期時'),

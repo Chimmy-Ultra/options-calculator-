@@ -63,12 +63,30 @@ function fmtStrike(k, step) {
 }
 
 const CHAIN_COLS =
-  'minmax(0,.8fr) minmax(0,.75fr) minmax(0,.6fr) minmax(0,.65fr) minmax(0,1.5fr) 84px minmax(0,1.5fr) minmax(0,.65fr) minmax(0,.6fr) minmax(0,.75fr) minmax(0,.8fr)';
+  'minmax(0,.8fr) minmax(0,.75fr) minmax(0,.6fr) minmax(0,.65fr) minmax(0,1.3fr) minmax(0,1.5fr) 84px minmax(0,1.5fr) minmax(0,1.3fr) minmax(0,.65fr) minmax(0,.6fr) minmax(0,.75fr) minmax(0,.8fr)';
 
-function OptionChain({ spot, contract = 'monthly', dte, product, rows: rowsProp, legs, onAddLeg, theme = 'dark' }) {
+// Rich / cheap colours for the 理論價 difference, the same pair the IV
+// workspace uses for IV above / below realized volatility.
+const THEO_RICH = '#f0c068', THEO_CHEAP = '#5fa3d4';
+
+function OptionChain({ spot, contract = 'monthly', dte, product, rows: rowsProp, legs, onAddLeg, theme = 'dark', hv20 = null }) {
   const genRows = cnM(() => genChain({ spot, contract, dte, product }), [spot, contract, dte, product]);
   const rows = (rowsProp && rowsProp.length) ? rowsProp : genRows;
   const [hov, setHov] = cnS(null); // { row, side }
+  // 理論價: the product's own model (Black-Scholes on spot / Black-76 on the
+  // future) at ONE reference vol for the whole chain, so the difference to the
+  // market reads as a premium: at the ATM IV the difference is the strike's
+  // skew premium; at the 20-day realized vol it is what the market charges
+  // over what the underlying has actually moved. Market = bid/ask mid, else last.
+  const [theoMode, setTheoMode] = cnS('atm'); // 'atm' | 'hv'
+  const Pm = product || {};
+  let atmRow = null;
+  for (const r of rows) if (!atmRow || Math.abs(r.strike - spot) < Math.abs(atmRow.strike - spot)) atmRow = r;
+  const atmIv = atmRow ? ((atmRow.call.iv > 0 && atmRow.put.iv > 0) ? (atmRow.call.iv + atmRow.put.iv) / 2 : (atmRow.call.iv || atmRow.put.iv || null)) : null;
+  const theoVol = theoMode === 'hv' ? hv20 : atmIv;
+  const theoOf = (type, strike) => ((theoVol > 0 && dte != null && window.bsPrice)
+    ? window.bsPrice(type, spot, strike, theoVol, dte, (Pm.r != null ? Pm.r : 1.5) / 100, Pm.model || 'bs') : null);
+  const midOf = (opt) => ((opt.bid > 0 && opt.ask > 0) ? (opt.bid + opt.ask) / 2 : (opt.last > 0 ? opt.last : null));
   // Clicking a quote opens a BUY / SELL chooser anchored at the cell instead of
   // silently adding a long leg. { strike, type: 'call'|'put', opt, x, y }.
   const [popover, setPopover] = cnS(null);
@@ -122,17 +140,26 @@ function OptionChain({ spot, contract = 'monthly', dte, product, rows: rowsProp,
           <span style={{ color: '#26a69a', fontWeight: 600 }}>賣權</span>
           <span style={{ opacity: 0.5, marginLeft: 12 }}>· 點一列加入部位</span>
         </div>
-        <div className="mono" style={{ fontSize: 10, opacity: 0.5 }}>
-          {(product && product.unitLabel) || '×50 NTD/pt'} · 價平 {fmtStrike(rows.find((r) => r.atm)?.strike ?? spot, step)}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span className="mono" style={{ fontSize: 10, opacity: 0.6 }} title="理論價 = 本商品定價模型（Black-Scholes／Black-76）用同一個參考波動率算的價格；差 = 市價中值 − 理論價，＋為市場高估、－為低估">
+            理論價 {theoVol > 0 ? `${theoVol.toFixed(1)}%` : '—'} · 差＝市價中值 − 理論價
+          </span>
+          <div className="seg">
+            <button className={theoMode === 'atm' ? 'on' : ''} onClick={() => setTheoMode('atm')} title="用這個到期日價平的隱含波動率">價平 IV</button>
+            <button className={theoMode === 'hv' ? 'on' : ''} onClick={() => hv20 != null && setTheoMode('hv')} disabled={hv20 == null} title={hv20 == null ? '日K不足，沒有 20 日歷史波動率' : `20 日歷史波動率 ${hv20.toFixed(1)}%`} style={hv20 == null ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}>20日 HV</button>
+          </div>
+          <span className="mono" style={{ fontSize: 10, opacity: 0.5 }}>
+            {(product && product.unitLabel) || '×50 NTD/pt'} · 價平 {fmtStrike(rows.find((r) => r.atm)?.strike ?? spot, step)}
+          </span>
         </div>
       </div>
 
       <div className="lt-chainbg" style={{ overflowX: 'auto', borderRadius: 0, border: `1px solid ${border}`, background: dark ? 'rgba(20,24,34,0.4)' : 'rgba(255,255,255,0.55)' }}>
-        <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: CHAIN_COLS, minWidth: 900, borderRadius: 0, overflow: 'hidden', fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>
+        <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: CHAIN_COLS, minWidth: 1040, borderRadius: 0, overflow: 'hidden', fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>
           {/* Header */}
-          <HCol>未平倉</HCol><HCol>量</HCol><HCol>Δ</HCol><HCol>IV</HCol><HCol>買價/賣價</HCol>
+          <HCol>未平倉</HCol><HCol>量</HCol><HCol>Δ</HCol><HCol>IV</HCol><HCol>理論價 · 差</HCol><HCol>買價/賣價</HCol>
           <div style={{ fontSize: 10, color: colHead, fontWeight: 600, padding: '8px 0', textAlign: 'center' }}>履約價</div>
-          <HCol align="left">買價/賣價</HCol><HCol align="left">IV</HCol><HCol align="left">Δ</HCol><HCol align="left">量</HCol><HCol align="left">未平倉</HCol>
+          <HCol align="left">買價/賣價</HCol><HCol align="left">理論價 · 差</HCol><HCol align="left">IV</HCol><HCol align="left">Δ</HCol><HCol align="left">量</HCol><HCol align="left">未平倉</HCol>
 
           {rows.map((r, i) => {
             const isHov = hov && hov.row === i;
@@ -184,12 +211,30 @@ function OptionChain({ spot, contract = 'monthly', dte, product, rows: rowsProp,
               );
             };
 
+            // 理論價 + the difference to the market mid (＋ rich in gold, － cheap in blue).
+            const TheoCell = ({ side }) => {
+              const opt = side === 'call' ? r.call : r.put;
+              const th = theoOf(side, r.strike);
+              const mid = midOf(opt);
+              const diff = (th != null && mid != null) ? mid - th : null;
+              const col = diff == null || diff === 0 ? undefined : diff > 0 ? THEO_RICH : THEO_CHEAP;
+              return (
+                <Cell side={side} align={side === 'call' ? 'right' : 'left'}>
+                  {th == null ? <span style={{ opacity: 0.4 }}>—</span> : (<>
+                    <span style={{ opacity: 0.85 }}>{fmtPx(th, P)}</span>
+                    {diff != null && <span style={{ color: col, fontSize: 10.5, fontWeight: 700, marginLeft: 5 }}>{diff > 0 ? '+' : diff < 0 ? '−' : '±'}{fmtPx(Math.abs(diff), P)}</span>}
+                  </>)}
+                </Cell>
+              );
+            };
+
             return (
               <React.Fragment key={r.strike}>
                 <Cell side="call">{r.call.oi.toLocaleString()}</Cell>
                 <Cell side="call">{r.call.vol.toLocaleString()}</Cell>
                 <Cell side="call"><span style={{ opacity: 0.85 }}>{fmtDelta(r.call.delta)}</span></Cell>
                 <Cell side="call">{r.call.iv.toFixed(1)}%</Cell>
+                <TheoCell side="call" />
                 <BaCell side="call" />
                 <div style={{
                   padding: '7px 0', borderTop: `1px solid ${border}`,
@@ -203,6 +248,7 @@ function OptionChain({ spot, contract = 'monthly', dte, product, rows: rowsProp,
                   {fmtStrike(r.strike, step)}
                 </div>
                 <BaCell side="put" />
+                <TheoCell side="put" />
                 <Cell side="put" align="left">{r.put.iv.toFixed(1)}%</Cell>
                 <Cell side="put" align="left"><span style={{ opacity: 0.85 }}>{fmtDelta(r.put.delta)}</span></Cell>
                 <Cell side="put" align="left">{r.put.vol.toLocaleString()}</Cell>
