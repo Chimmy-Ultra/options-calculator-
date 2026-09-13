@@ -128,7 +128,7 @@ function OptionChain({ spot, contract = 'monthly', dte, product, rows: rowsProp,
       </div>
 
       <div className="lt-chainbg" style={{ overflowX: 'auto', borderRadius: 12, border: `1px solid ${border}`, background: dark ? 'rgba(20,24,34,0.4)' : 'rgba(255,255,255,0.55)' }}>
-        <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: CHAIN_COLS, minWidth: 900, borderRadius: 12, overflow: 'hidden', fontFamily: 'ui-monospace, SF Mono, monospace', fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>
+        <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: CHAIN_COLS, minWidth: 900, borderRadius: 12, overflow: 'hidden', fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>
           {/* Header */}
           <HCol>OI</HCol><HCol>Vol</HCol><HCol>Δ</HCol><HCol>IV</HCol><HCol>BID/ASK</HCol>
           <div style={{ fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', color: colHead, fontWeight: 600, padding: '8px 0', textAlign: 'center' }}>STRIKE</div>
@@ -238,7 +238,7 @@ function OptionChain({ spot, contract = 'monthly', dte, product, rows: rowsProp,
             boxShadow: '0 20px 48px -18px rgba(0,0,0,0.7)', color: dark ? '#e8eaef' : '#1c2433',
             backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)',
           }}>
-            <div style={{ fontSize: 10, fontFamily: 'ui-monospace, SF Mono, monospace', opacity: 0.75, marginBottom: 8, textAlign: 'center' }}>
+            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', opacity: 0.75, marginBottom: 8, textAlign: 'center' }}>
               {fmtStrike(popover.strike, step)} <span style={{ color: popover.type === 'call' ? '#ef5350' : '#26a69a', fontWeight: 700 }}>{popover.type === 'call' ? 'CALL' : 'PUT'}</span> @ {fmtPx(popover.opt.last, P)}
             </div>
             <div style={{ display: 'flex', gap: 6 }}>

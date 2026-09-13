@@ -178,7 +178,7 @@ function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, i
         const bound = (x, s, dash, label) => (
           <g>
             <line x1={x} x2={x} y1={pad / 2} y2={H - pad} stroke={coneLine} strokeWidth="1" strokeDasharray={dash} strokeOpacity="0.9" />
-            {inRange(s) && <text x={x} y={pad / 2 + 7} fontSize="7.5" fill={coneLine} textAnchor="middle" fontWeight="700" fontFamily="ui-monospace, SF Mono, monospace">{label}</text>}
+            {inRange(s) && <text x={x} y={pad / 2 + 7} fontSize="7.5" fill={coneLine} textAnchor="middle" fontWeight="700" style={{ fontFamily: 'var(--font-mono)' }}>{label}</text>}
           </g>
         );
         return (
@@ -221,7 +221,7 @@ function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, i
         return (
           <g>
             <line x1={ex} x2={ex} y1={pad/2} y2={H - pad/2} stroke={textColor} strokeWidth="1" strokeDasharray="3 3" strokeOpacity="0.4" />
-            <text x={left ? ex + 4 : ex - 4} y={H - pad/2 - 2} fontSize="9" fill={textColor} textAnchor={left ? 'start' : 'end'} fontFamily="ui-monospace, SF Mono, monospace">
+            <text x={left ? ex + 4 : ex - 4} y={H - pad/2 - 2} fontSize="9" fill={textColor} textAnchor={left ? 'start' : 'end'} style={{ fontFamily: 'var(--font-mono)' }}>
               {left ? '←' : '→'} spot {spot.toFixed(0)}
             </text>
           </g>
@@ -240,7 +240,7 @@ function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, i
         return (
           <g key={`be${k}`}>
             <line x1={tx} x2={tx} y1={pad + 2} y2={H - pad} stroke="#a78bfa" strokeWidth="1" strokeDasharray="2 3" strokeOpacity="0.55" />
-            <text x={tx + dx} y={ty} fontSize="9" fill="#a78bfa" textAnchor="middle" fontFamily="ui-monospace, SF Mono, monospace" fontWeight="700">{be.toFixed(0)}</text>
+            <text x={tx + dx} y={ty} fontSize="9" fill="#a78bfa" textAnchor="middle" style={{ fontFamily: 'var(--font-mono)' }} fontWeight="700">{be.toFixed(0)}</text>
           </g>
         );
       })}
@@ -248,19 +248,19 @@ function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, i
         <g>
           <circle cx={x(maxProfitIdx)} cy={y(maxProfit)} r="2.5" fill={upColor} />
           {/* anchor max profit to the right edge of chart instead of plot point so it never overlaps spot/break-evens */}
-          <text x={W - pad} y={pad + 2} fontSize="10" fill={upColor} textAnchor="end" fontFamily="ui-monospace, SF Mono, monospace" fontWeight="700">↑ +{maxProfit.toFixed(0)}</text>
+          <text x={W - pad} y={pad + 2} fontSize="10" fill={upColor} textAnchor="end" style={{ fontFamily: 'var(--font-mono)' }} fontWeight="700">↑ +{maxProfit.toFixed(0)}</text>
         </g>
       )}
       {showKeyNumbers && maxLoss < 0 && (
         <g>
           <circle cx={x(maxLossIdx)} cy={y(maxLoss)} r="2.5" fill={downColor} />
-          <text x={pad} y={H - 4} fontSize="10" fill={downColor} textAnchor="start" fontFamily="ui-monospace, SF Mono, monospace" fontWeight="700">↓ {maxLoss.toFixed(0)}</text>
+          <text x={pad} y={H - 4} fontSize="10" fill={downColor} textAnchor="start" style={{ fontFamily: 'var(--font-mono)' }} fontWeight="700">↓ {maxLoss.toFixed(0)}</text>
         </g>
       )}
       {!showKeyNumbers && (
         <>
-          <text x={pad} y={H - 4} fontSize="10" fill={textColor} fontFamily="ui-monospace, SF Mono, monospace">{xs[0].toFixed(0)}</text>
-          <text x={W - pad} y={H - 4} fontSize="10" fill={textColor} textAnchor="end" fontFamily="ui-monospace, SF Mono, monospace">{xs[xs.length - 1].toFixed(0)}</text>
+          <text x={pad} y={H - 4} fontSize="10" fill={textColor} style={{ fontFamily: 'var(--font-mono)' }}>{xs[0].toFixed(0)}</text>
+          <text x={W - pad} y={H - 4} fontSize="10" fill={textColor} textAnchor="end" style={{ fontFamily: 'var(--font-mono)' }}>{xs[xs.length - 1].toFixed(0)}</text>
         </>
       )}
     </svg>
@@ -549,7 +549,7 @@ function Slider({ label, value, min, max, step = 1, onChange, suffix = '', theme
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, whiteSpace: 'nowrap' }}>
         <span style={{ fontSize: 11, opacity: 0.7, letterSpacing: 0.4, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{label}</span>
-        <span className="tnum" style={{ fontSize: 13, fontWeight: 600, fontFamily: 'ui-monospace, SF Mono, monospace', whiteSpace: 'nowrap' }}>
+        <span className="tnum" style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
           {format ? format(value) : value}{suffix}
         </span>
       </div>
@@ -590,7 +590,7 @@ function LegEditor({ legs, onChange, theme = 'light', expiries, defaultDte }) {
   const selStyle = {
     width: '100%', padding: '3px 2px', borderRadius: 6, border: `1px solid ${rowBorder}`,
     background: 'transparent', color: dark ? '#e8eaef' : '#1d1d22',
-    fontFamily: 'ui-monospace, SF Mono, monospace', fontSize: 10, fontWeight: 600,
+    fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600,
     outline: 'none', cursor: 'pointer',
   };
   function update(i, patch) {
@@ -671,7 +671,7 @@ function NumField({ value, step = 1, onChange, dark, align = 'left' }) {
       onChange={(e) => onChange(parseFloat(e.target.value))}
       style={{
         width: '100%', background: 'transparent', border: 'none', outline: 'none',
-        color: dark ? '#e8eaef' : '#1d1d22', fontFamily: 'ui-monospace, SF Mono, monospace',
+        color: dark ? '#e8eaef' : '#1d1d22', fontFamily: 'var(--font-mono)',
         fontSize: 13, fontWeight: 500, textAlign: align, padding: 0, fontVariantNumeric: 'tabular-nums',
       }}
     />
@@ -692,7 +692,7 @@ function GreekChip({ label, value, theme = 'light', emphasis, helpKey }) {
     }}>
       <div style={{ fontSize: 10, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.6 }}>{labelEl}</div>
       <div className="tnum" style={{
-        fontSize: 18, fontWeight: 600, marginTop: 2, fontFamily: 'ui-monospace, SF Mono, monospace',
+        fontSize: 18, fontWeight: 600, marginTop: 2, fontFamily: 'var(--font-mono)',
         color: emphasis === 'up' ? (dark ? '#f0c068' : '#a06f1f')
              : emphasis === 'down' ? (dark ? '#5fa3d4' : '#2a5e8c')
              : 'inherit',

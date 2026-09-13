@@ -1,10 +1,14 @@
 /* Liquid Glass design tokens — shared across all 3 directions */
 
 :root {
-  /* Type stack — Apple system fonts with web fallbacks */
-  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter Display", "Inter", system-ui, sans-serif;
-  --font-text: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  /* Type stack. Loaded from Google Fonts in index.html so every platform
+     renders the same faces: IBM Plex Sans for Latin text, Noto Sans TC for
+     Chinese, IBM Plex Mono for every number column (tabular figures). The
+     system fonts remain as fallbacks. Components must use these variables —
+     no inline font stacks. */
+  --font-display: "IBM Plex Sans", "Noto Sans TC", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --font-text: "IBM Plex Sans", "Noto Sans TC", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "Noto Sans TC", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
   /* Diverging P&L palette (oklch — colorblind-friendlier than red/green) */
   --pnl-up:    oklch(0.78 0.14 75);   /* warm amber */
@@ -20,7 +24,7 @@
 /* Tabular figures for any number column */
 .tnum {
   font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum" 1, "cv11" 1;
+  font-feature-settings: "tnum" 1;
 }
 .mono { font-family: var(--font-mono); }
 
