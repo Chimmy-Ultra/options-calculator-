@@ -12,6 +12,7 @@
   GET /api/bars/{pid}        → 近月期貨歷史 K 棒
   GET /api/positions/{pid}   → 目前帳戶的選擇權部位（唯讀，載入前端 legs 用）
   GET /api/oi/{pid}          → ?expiry=YYYYMMDD 的每檔未平倉（TAIFEX 每日行情，見 taifex.py）
+  GET /api/market/{pid}      → 籌碼：P/C 比、外資淨未平倉、十大交易人（TAIFEX 每日，見 taifex.py）
 
 唯讀行情 + 部位代理：只讀行情與持倉，不下單、不改單（沒有任何下單端點）。
 沒訂閱 CME 即時行情時自動退到 15 分鐘延遲數據（IB_MARKET_DATA_TYPE=3）。
@@ -433,6 +434,21 @@ async def open_interest(pid: str, expiry: str | None = None):
     if not data:
         tbl = await taifex.table()
         raise HTTPException(404, f"expiry {expiry} not in TAIFEX report (have {[e['id'] for e in taifex.expiries(tbl or {})]})")
+    return data
+
+
+@app.get("/api/market/{pid}")
+async def market(pid: str):
+    """Daily positioning from TAIFEX: market-wide put/call ratio (with ~23
+    sessions of history), 外資 net futures position in TX-equivalent contracts
+    (TX + MTX/4 + TMF/20, the exchange's own conversion) and the top-10 large
+    traders' net position in the front month. Previous session's numbers."""
+    spec = _product(pid)
+    if spec.get("oi") != "taifex":
+        raise HTTPException(404, f"no positioning source for {pid!r}")
+    data = await taifex.market()
+    if data is None:
+        raise HTTPException(503, "TAIFEX daily reports unavailable")
     return data
 
 

@@ -134,6 +134,7 @@ python3 -m http.server 8080
 | `GET /api/bars/{pid}?bar=1 day&duration=3 M` | 近月期貨歷史 K 棒 `{bars: [{t,o,h,l,c,v}]}` |
 | `GET /api/positions/{pid}` | 帳戶內該商品的選擇權部位 `{positions: [{side, type, strike, premium, qty, expiry, dte}]}` |
 | `GET /api/oi/txo?expiry=20260916` | 該到期日**全部履約價**的未平倉（期交所前一交易日）`{date, prevDate, rows: [{strike, call: {oi, oiChg, vol, settle}, put}], maxCallOi, maxPutOi, totals}`；只有 `PRODUCTS` 標了 `"oi": "taifex"` 的商品有，其他回 404 |
+| `GET /api/market/txo` | 籌碼（期交所前一交易日）`{pcRatio: {ratio, chg, series[23 日]}, foreign: {net, chg, byContract}, top10: {net, chg, specificNet, month}}`。外資淨未平倉是大台＋小台/4＋微台/20 的大台當量口數（期交所大額交易人表自己的換算） |
 
 `/api/positions` 只回 secType == FOP 且 symbol / tradingClass 對得上的部位；premium 已換算成
 「點數」（averageCost ÷ multiplier），跟前端 legs 的 premium 慣例一致。**沒有任何下單端點。**
@@ -164,6 +165,14 @@ Shioaji 沒有 OI；期交所每天收盤後（日盤約 15:00）公布每檔履
 - `/api/chain/txo` 自動把 OI 併進 rows（`oi`, `oiChg`），Chain 頁的 OI 欄 / OI Profile / Max Pain 就有資料。
 - `/api/oi/txo?expiry=YYYYMMDD` 回**整個履約價範圍**（鏈只有 ±8 檔），附最大 Call OI（壓力）/
   最大 Put OI（支撐）的履約價與總量，給 Levels 頁用。不帶 `expiry` → 最近一個未到期的。
+- `/api/market/txo` 回籌碼三項：OpenAPI `PutCallRatio`（全市場 P/C，約 23 個交易日）、
+  三大法人期貨 CSV（`futContractsDateDown`，TXF / MXF / TMF 三支）算出外資大台當量淨未平倉與對前日增減、
+  大額交易人 CSV（`largeTraderFutDown`）的近月前十大淨部位與特定法人子集。
+
+**收盤快照**：`python3 taifex.py --write ../design_handoff_options_lab/taifex-eod.js` 把上面所有東西
+（加權指數收盤、五個到期日的每檔收盤/最佳買賣/結算/OI、60 根真實台指期日 K、籌碼三項）寫成一個
+純 ASCII 的 JS 檔；前端沒有 proxy 時就吃它（`data-live.js` 的 fallback），頂欄標 `● TAIFEX 09/11 EOD`。
+Vercel 上看到的就是這份；交易日 15:00 後重跑一次再 commit 就是新的。
 
 要先確認你的機器連得到期交所（含 OpenAPI 與 MIS 即時報價的 OI 欄位）：
 

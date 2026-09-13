@@ -207,6 +207,173 @@ def merge_into_chain(chain: dict, oi: dict | None) -> dict:
     return {**chain, "rows": rows, "oi": {"source": oi["source"], "date": oi["date"], "prevDate": oi["prevDate"]}}
 
 
+# ── Daily positioning (籌碼) ──────────────────────────────────────────────────
+# Three more public TAIFEX sources, all published after the close:
+#   PutCallRatio (OpenAPI)        — market-wide TXO put/call OI + volume ratio, ~23 sessions
+#   futContractsDateDown (CSV)    — 三大法人 futures positions by contract, by date
+#   largeTraderFutDown (CSV)      — 大額交易人 top-5 / top-10 positions, by date
+# 外資 net position is reported in TX-equivalent contracts using the exchange's
+# own conversion (its large-trader table is labelled "TX+MTX/4+TMF/20").
+
+OPENAPI = "https://openapi.taifex.com.tw/v1/"
+INST_CSV_URL = "https://www.taifex.com.tw/cht/3/futContractsDateDown"
+LARGE_CSV_URL = "https://www.taifex.com.tw/cht/3/largeTraderFutDown"
+TX_EQUIV = {"臺股期貨": 1.0, "小型臺指期貨": 0.25, "微型臺指期貨": 0.05}
+INST_IDS = ("TXF", "MXF", "TMF")
+FOREIGN = "外資"
+
+
+def _post_csv(url: str, form: dict) -> list:
+    req = urllib.request.Request(url, data=urllib.parse.urlencode(form).encode(), headers={"User-Agent": "options-lab/1"})
+    with urllib.request.urlopen(req, timeout=TIMEOUT_S) as r:
+        text = _decode(r.read())
+    if text.lstrip().startswith("<"):
+        raise ValueError(f"{url.rsplit('/', 1)[-1]} answered with a page, not a table")
+    rows = list(csv.reader(io.StringIO(text)))
+    if len(rows) < 2:
+        raise ValueError(f"{url.rsplit('/', 1)[-1]} answered without a table")
+    header = [h.strip() for h in rows[0]]
+    return [dict(zip(header, (c.strip() for c in r))) for r in rows[1:] if len(r) >= len(header) - 1]
+
+
+def _fetch_pc_ratio() -> list:
+    """Oldest first: [{date, putOi, callOi, ratio, volRatio}], ratio as a decimal."""
+    with urllib.request.urlopen(urllib.request.Request(OPENAPI + "PutCallRatio", headers={"User-Agent": "options-lab/1"}), timeout=TIMEOUT_S) as r:
+        rows = json.loads(_decode(r.read()))
+    out = []
+    for r in rows:
+        d = r.get("Date", "")
+        if len(d) != 8:
+            continue
+        out.append({"date": f"{d[:4]}/{d[4:6]}/{d[6:]}", "putOi": int(_num(r.get("PutOI"), 0)), "callOi": int(_num(r.get("CallOI"), 0)),
+                    "ratio": round((_num(r.get("PutCallOIRatio%"), 0) or 0) / 100, 4), "volRatio": round((_num(r.get("PutCallVolumeRatio%"), 0) or 0) / 100, 4)})
+    return sorted(out, key=lambda x: x["date"])
+
+
+def _fetch_institutional(days: int = 12) -> dict:
+    """{date: {contract name: {身份別: net OI}}} for TX / MTX / TMF.
+
+    This download rejects an end date that is not a trading day (weekends,
+    holidays answer with an error page), so the end date steps back until the
+    exchange accepts it. All three contracts must load, or the TX-equivalent
+    sum would be wrong."""
+    out: dict = {}
+    for cid in INST_IDS:
+        rows, err = None, None
+        for back in range(7):
+            end = date.today() - timedelta(days=back)
+            try:
+                rows = _post_csv(INST_CSV_URL, {"queryType": "1", "queryStartDate": (end - timedelta(days=days)).strftime("%Y/%m/%d"),
+                                                "queryEndDate": end.strftime("%Y/%m/%d"), "commodityId": cid})
+                break
+            except ValueError as e:
+                err = e
+        if rows is None:
+            raise err or ValueError("institutional download failed")
+        for r in rows:
+            net = _num(r.get("多空未平倉口數淨額"))
+            if net is None:
+                continue
+            out.setdefault(r["日期"], {}).setdefault(r["商品名稱"], {})[r["身份別"]] = int(net)
+    return out
+
+
+def _fetch_large_traders(days: int = 12) -> dict:
+    """{date: {month: {traderType: {top5Buy, top5Sell, top10Buy, top10Sell, marketOi}}}} for TX."""
+    today = date.today()
+    rows = _post_csv(LARGE_CSV_URL, {"queryStartDate": (today - timedelta(days=days)).strftime("%Y/%m/%d"),
+                                     "queryEndDate": today.strftime("%Y/%m/%d"), "contractId": "TX"})
+    out: dict = {}
+    for r in rows:
+        if r.get("商品(契約)") != "TX":
+            continue
+        out.setdefault(r["日期"], {}).setdefault(r["到期月份(週別)"], {})[r["交易人類別"]] = {
+            "top5Buy": int(_num(r["前五大交易人買方"], 0)), "top5Sell": int(_num(r["前五大交易人賣方"], 0)),
+            "top10Buy": int(_num(r["前十大交易人買方"], 0)), "top10Sell": int(_num(r["前十大交易人賣方"], 0)),
+            "marketOi": int(_num(r["全市場未沖銷部位數"], 0)),
+        }
+    return out
+
+
+def _tx_equiv(by_contract: dict, who) -> float:
+    """Net position summed across TX / MTX / TMF in TX-equivalent contracts.
+    `who` picks the 身份別 (a prefix match: 外資 also matches 外資及陸資)."""
+    total = 0.0
+    for name, w in TX_EQUIV.items():
+        for item, net in (by_contract.get(name) or {}).items():
+            if item.startswith(who):
+                total += net * w
+    return total
+
+
+def _market_blocks(pc: list | None, inst: dict | None, large: dict | None) -> dict:
+    out: dict = {"source": "taifex"}
+    if pc:
+        cur, prev = pc[-1], (pc[-2] if len(pc) > 1 else None)
+        out["pcRatio"] = {**cur, "prevRatio": prev["ratio"] if prev else None,
+                          "chg": round(cur["ratio"] - prev["ratio"], 4) if prev else None,
+                          "series": [{"date": x["date"], "ratio": x["ratio"]} for x in pc]}
+    if inst:
+        days = sorted(inst)
+        cur, prev = days[-1], (days[-2] if len(days) > 1 else None)
+        net = _tx_equiv(inst[cur], FOREIGN)
+        pnet = _tx_equiv(inst[prev], FOREIGN) if prev else None
+        out["foreign"] = {
+            "date": cur, "prevDate": prev,
+            "net": round(net), "prevNet": round(pnet) if pnet is not None else None,
+            "chg": round(net - pnet) if pnet is not None else None,
+            "byContract": {name: next((v for k, v in (inst[cur].get(name) or {}).items() if k.startswith(FOREIGN)), None) for name in TX_EQUIV},
+            "dealerNet": round(_tx_equiv(inst[cur], "自營商")), "trustNet": round(_tx_equiv(inst[cur], "投信")),
+            "unit": "TX-equivalent contracts (TX + MTX/4 + TMF/20)",
+        }
+    if large:
+        days = sorted(large)
+
+        def front(day):
+            months = [m for m in large[day] if m.isdigit() and m not in ("999999", "666666")]
+            return min(months) if months else None
+
+        cur, prev = days[-1], (days[-2] if len(days) > 1 else None)
+        m = front(cur)
+        if m:
+            a = large[cur][m].get("0") or {}
+            sp = large[cur][m].get("1") or {}
+            net = a.get("top10Buy", 0) - a.get("top10Sell", 0)
+            pm = front(prev) if prev else None
+            pa = (large[prev][pm].get("0") or {}) if pm else None
+            pnet = (pa["top10Buy"] - pa["top10Sell"]) if pa else None
+            out["top10"] = {
+                "date": cur, "prevDate": prev, "month": m,
+                "net": net, "prevNet": pnet, "chg": (net - pnet) if pnet is not None else None,
+                "specificNet": (sp.get("top10Buy", 0) - sp.get("top10Sell", 0)) if sp else None,
+                "top5Net": a.get("top5Buy", 0) - a.get("top5Sell", 0),
+                "marketOi": a.get("marketOi"),
+            }
+    out["date"] = max(x for x in (out.get("pcRatio", {}).get("date"), out.get("foreign", {}).get("date"), out.get("top10", {}).get("date")) if x) if len(out) > 1 else None
+    return out
+
+
+async def market():
+    """Positioning block for the Levels strip. Each part is independent: a
+    failed source is simply absent. None only when nothing answered."""
+    hit = _cache.get("market")
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+
+    async def part(fn):
+        try:
+            return await asyncio.to_thread(fn)
+        except Exception:
+            return None
+
+    pc, inst, large = await asyncio.gather(part(_fetch_pc_ratio), part(_fetch_institutional), part(_fetch_large_traders))
+    if not (pc or inst or large):
+        return None
+    data = _market_blocks(pc, inst, large)
+    _cache["market"] = (time.monotonic() + CACHE_TTL_S, data)
+    return data
+
+
 # ── End-of-day snapshot ─────────────────────────────────────────────────────
 # Everything the frontend needs for the previous session, from TAIFEX alone:
 # index close (MIS quote list), per-strike close / best bid-ask / settlement /
@@ -285,6 +452,7 @@ async def build_snapshot(product_id: str = "txo", n_expiries: int = 5, strike_pc
         return None
     idx = await asyncio.to_thread(_fetch_index)
     bars = await asyncio.to_thread(_fetch_bars)
+    mkt = await market()
     spot = idx["price"]
     data_date = max(d for e in tbl.values() for d in e["dates"])          # yyyy/mm/dd
     asof = data_date.replace("/", "")
@@ -337,6 +505,7 @@ async def build_snapshot(product_id: str = "txo", n_expiries: int = 5, strike_pc
         "spot": {"price": spot, "ref": idx["ref"], "date": idx["date"], "time": idx["time"]},
         "futures": idx["futures"],
         "expiries": expiries, "chains": chains, "oi": oi, "bars": bars,
+        "market": mkt,
     }
 
 
@@ -353,7 +522,7 @@ def main(argv):
             "window.TAIFEX_EOD = " + json.dumps(snap, separators=(",", ":")) + ";\n")  # ASCII-safe: no charset dependence
     print(f"snapshot {snap['date']} (prev {snap['prevDate']}) spot {snap['spot']['price']} "
           f"expiries {[e['id'] for e in snap['expiries']]} chain rows {[len(c['rows']) for c in snap['chains'].values()]} "
-          f"bars {len(snap['bars'])} → {len(text) // 1024} KB")
+          f"bars {len(snap['bars'])} market {sorted((snap['market'] or {}).keys())} -> {len(text) // 1024} KB")
     if out:
         with open(out, "w", encoding="utf-8") as f:
             f.write(text)

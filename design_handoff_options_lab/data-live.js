@@ -82,6 +82,9 @@
     //   maxCallOi: { strike, oi, oiChg }, maxPutOi, totals } | null
     // 每檔未平倉（TAIFEX 每日行情，前一交易日的數字）— 只有 products.js 標了 oiSource 的商品有。
     oi: (pid, expiry) => get('/api/oi/' + encodeURIComponent(pid) + (expiry ? '?expiry=' + encodeURIComponent(expiry) : ''), 15000),
+    // { date, pcRatio: { ratio, chg, series: [{date, ratio}] }, foreign: { net, chg, ... },
+    //   top10: { net, chg, specificNet, month } } | null — 籌碼（TAIFEX 每日，前一交易日）。
+    market: (pid) => get('/api/market/' + encodeURIComponent(pid), 15000),
   };
   // health.source 'eod' + a label tells the top bar what it is showing; no proxy ⇒ never "STALE".
   const fallback = {};
@@ -110,6 +113,7 @@
     return { symbol: 'TX', month: s.asOf.slice(0, 6), bar: '1 day', bars: s.bars };
   };
   fallback.oi = async (pid, expiry) => { const s = eod(pid); return s ? eodOi(s, expiry) : null; };
+  fallback.market = async (pid) => { const s = eod(pid); return (s && s.market) || null; };
 
   // Proxy first; the snapshot only answers when the proxy could not.
   window.LiveData = {};
