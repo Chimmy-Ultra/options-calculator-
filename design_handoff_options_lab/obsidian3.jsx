@@ -32,11 +32,37 @@ const DENSITY = {
 
 // K 線週期。bar/duration 直接餵給 IB reqHistoricalData（server 白名單內）；
 // n/volScale 給 mock 用（沒接 IB 時的隨機漫步根數與波動縮放）。
+// K-line periods. All three read daily bars (the one series every source —
+// TAIFEX snapshot, Shioaji, IB — can serve); 週 / 月 are aggregated client-side
+// in the `bars` memo (`agg`). Intraday frequencies live in the 當日走勢 panel.
 const K_PERIODS = [
-  { id: 'D',  label: '日',  bar: '1 day',   duration: '3 M', n: 60, volScale: 1 },
-  { id: '4H', label: '4H',  bar: '4 hours', duration: '1 M', n: 60, volScale: 0.5 },
-  { id: '1H', label: '1H',  bar: '1 hour',  duration: '1 M', n: 90, volScale: 0.38 },
+  { id: 'D', label: '日', bar: '1 day', duration: '3 M', n: 60, volScale: 1, agg: null },
+  { id: 'W', label: '週', bar: '1 day', duration: '1 Y', n: 250, volScale: 1, agg: 'week' },
+  { id: 'M', label: '月', bar: '1 day', duration: '2 Y', n: 250, volScale: 1, agg: 'month' },
 ];
+// Daily bars → weekly (ISO week) or monthly OHLC. t = YYYYMMDD; other stamps pass through unaggregated.
+function aggBars(bars, unit) {
+  if (!unit || !bars || !bars.length) return bars;
+  const key = (t) => {
+    const st = String(t);
+    if (!/^\d{8}/.test(st)) return null;
+    if (unit === 'month') return st.slice(0, 6);
+    const d = new Date(Date.UTC(+st.slice(0, 4), +st.slice(4, 6) - 1, +st.slice(6, 8)));
+    const day = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - day); // Thursday of this ISO week
+    const y0 = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return `${d.getUTCFullYear()}W${String(Math.ceil(((d - y0) / 86400000 + 1) / 7)).padStart(2, '0')}`;
+  };
+  const out = [];
+  let cur = null, curKey = null;
+  for (const b of bars) {
+    const k = key(b.t);
+    if (k == null) return bars;
+    if (cur && k === curKey) { cur.h = Math.max(cur.h, b.h); cur.l = Math.min(cur.l, b.l); cur.c = b.c; cur.v += b.v || 0; }
+    else { cur = { t: b.t, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v || 0 }; curKey = k; out.push(cur); }
+  }
+  return out;
+}
 
 // TXO market state（其他商品的合約規格在 products.js 的 window.PRODUCTS）
 const TXO_SPOT = 21850;
@@ -718,9 +744,10 @@ function Obsidian3() {
   // K 線：live（IB 日K）優先，否則 mock 隨機漫步。
   // 刻意不依賴 spot — 拉 slider 屬於情境模擬，不該重繪歷史走勢。
   const bars = uM(() => {
-    if (liveBars && liveBars.length) return liveBars;
     const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
-    return window.genBars ? window.genBars({ spot, n: per.n, volScale: per.volScale, product: P }) : [];
+    if (liveBars && liveBars.length) return aggBars(liveBars, per.agg);
+    const mock = window.genBars ? window.genBars({ spot, n: per.n, volScale: per.volScale, product: P }) : [];
+    return aggBars(mock, per.agg);
   }, [liveBars, productId, barPeriodId]);
 
   // 20-day historical (realized) volatility, annualized %, from daily closes.
@@ -1614,12 +1641,31 @@ function LevelsLadder({ P, spot, L, G, costLine = null, light }) {
 // minute's net as bars. Data: Shioaji ticks (real tick_type) when a session
 // is connected, otherwise TAIFEX's daily tick file with the tick rule — the
 // header says which. 日盤 / 夜盤 toggle when the file carries both.
+// 1-minute rows → N-minute rows: OHLC, lots summed, cost = the period's last
+// running value, net summed, cum = the period's last running total.
+function aggMinutes(bars, freq) {
+  if (!freq || freq <= 1 || !bars || !bars.length) return bars;
+  const toMin = (hhmm) => (+hhmm.slice(0, 2)) * 60 + (+hhmm.slice(2));
+  const start = toMin(bars[0][0]);
+  const out = [];
+  let cur = null, curKey = null;
+  for (const b of bars) {
+    let m = toMin(b[0]) - start;
+    if (m < 0) m += 1440; // a night session crosses midnight
+    const k = Math.floor(m / freq);
+    if (cur && k === curKey) { cur[2] = Math.max(cur[2], b[2]); cur[3] = Math.min(cur[3], b[3]); cur[4] = b[4]; cur[5] += b[5]; cur[6] = b[6]; cur[7] += b[7]; cur[8] = b[8]; }
+    else { cur = [b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8]]; curKey = k; out.push(cur); }
+  }
+  return out;
+}
+const INTRADAY_FREQS = [1, 5, 15, 30, 60];
 function IntradayPanel({ I, P, light = false }) {
   const [sess, setSess] = React.useState('day');
+  const [freq, setFreq] = React.useState(1);
   const dim = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
   if (!I || !I.day || !I.day.bars || !I.day.bars.length) return <div className="mono" style={{ fontSize: 11, color: dim }}>沒有逐筆資料（期交所逐筆檔或永豐逐筆）。</div>;
   const S = (sess === 'night' && I.night && I.night.bars && I.night.bars.length) ? I.night : I.day;
-  const bars = S.bars;
+  const bars = aggMinutes(S.bars, freq);
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: 0 });
   const W = 760, H = 250, pTop = 10, pBot = 144, fTop = 174, fBot = 240, padR = 58, plotW = W - padR;
   const n = bars.length;
@@ -1641,7 +1687,7 @@ function IntradayPanel({ I, P, light = false }) {
   const cumPts = bars.map((b, i) => `${x(i).toFixed(1)},${fy(b[8]).toFixed(1)}`).join(' ');
   const txt = dim, grid = light ? 'rgba(20,30,50,0.12)' : 'rgba(255,255,255,0.10)';
   const ticks = [];
-  for (let i = 0; i < n; i++) if (bars[i][0].slice(2) === '00' || bars[i][0] === '0845') ticks.push(i);
+  for (let i = 0; i < n; i++) if (i === 0 || bars[i][0].slice(0, 2) !== bars[i - 1][0].slice(0, 2)) ticks.push(i);
   const tag = (Y, label, col) => (<g><rect x={plotW + 2} y={Y - 6.5} width={54} height={13} fill={col} /><text x={plotW + 29} y={Y + 3} fontSize="9" fontWeight="700" fill="#fff" textAnchor="middle">{label}</text></g>);
   return (
     <div>
@@ -1649,15 +1695,20 @@ function IntradayPanel({ I, P, light = false }) {
         <span>成交價 <b style={{ color: closeCol, fontSize: 14 }}>{fmtP(last[4])}</b> <Chg v={last[4] - open} fmt={fmtP} /> <span style={{ color: dim }}>對開盤</span></span>
         <span>成本價 <b style={{ color: LEVEL_COLORS.spot, fontSize: 14 }}>{fmtP(Math.floor(S.cost + 0.5))}</b> <span style={{ color: dim }}>高 {fmtP(S.high)} 低 {fmtP(S.low)}</span></span>
         <span>多空差額 <b style={{ color: cumCol, fontSize: 14 }}>{last[8] > 0 ? '+' : ''}{last[8].toLocaleString()}</b> <span style={{ color: dim }}>外 {S.buy.toLocaleString()} 內 {S.sell.toLocaleString()}</span></span>
-        <span style={{ color: dim }}>本分鐘淨量 <Chg v={last[7]} /></span>
-        {I.night && I.night.bars && I.night.bars.length > 0 && <span style={{ marginLeft: 'auto' }}><Seg items={[{ id: 'day', label: '日盤' }, { id: 'night', label: '夜盤' }]} value={sess} onChange={setSess} /></span>}
+        <span style={{ color: dim }}>{freq === 1 ? '本分鐘' : `本 ${freq} 分`}淨量 <Chg v={last[7]} /></span>
+        <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 8 }}>
+          <Seg items={INTRADAY_FREQS.map((f) => ({ id: f, label: `${f}分` }))} value={freq} onChange={setFreq} />
+          {I.night && I.night.bars && I.night.bars.length > 0 && <Seg items={[{ id: 'day', label: '日盤' }, { id: 'night', label: '夜盤' }]} value={sess} onChange={setSess} />}
+        </span>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: 'block', fontFamily: 'var(--font-mono)' }}>
         {[0.2, 0.5, 0.8].map((f, i) => { const p = pMin + f * (pMax - pMin); return <g key={i}><line x1="0" x2={plotW} y1={y(p)} y2={y(p)} stroke={grid} strokeDasharray="2 4" /><text x={plotW + 6} y={y(p) + 3} fontSize="9" fill={txt}>{fmtP(p)}</text></g>; })}
         {ticks.map((i) => <text key={i} x={x(i)} y={pBot + 10} fontSize="8.5" fill={txt} textAnchor="middle">{bars[i][0].slice(0, 2)}:{bars[i][0].slice(2)}</text>)}
         <line x1="0" x2={plotW} y1={y(open)} y2={y(open)} stroke={txt} strokeWidth="0.8" strokeDasharray="4 3" />
         <text x="3" y={y(open) - 3} fontSize="8.5" fill={txt}>開 {fmtP(open)}</text>
-        <polyline points={closePts} fill="none" stroke={closeCol} strokeWidth="1.3" strokeLinejoin="round" />
+        {freq === 1
+          ? <polyline points={closePts} fill="none" stroke={closeCol} strokeWidth="1.3" strokeLinejoin="round" />
+          : bars.map((b, i) => { const up = b[4] >= b[1], col = up ? LEVEL_COLORS.up : LEVEL_COLORS.down, bw = Math.max(1.5, (plotW / n) * 0.6); return <g key={i}><line x1={x(i)} x2={x(i)} y1={y(b[2])} y2={y(b[3])} stroke={col} strokeWidth="1" /><rect x={x(i) - bw / 2} y={y(Math.max(b[1], b[4]))} width={bw} height={Math.max(1, Math.abs(y(b[1]) - y(b[4])))} fill={col} /></g>; })}
         <path d={costPath} fill="none" stroke={LEVEL_COLORS.spot} strokeWidth="1.5" />
         {tag(y(last[4]), fmtP(last[4]), closeCol)}
         {Math.abs(y(S.cost) - y(last[4])) > 13 && tag(y(S.cost), `成${fmtP(Math.floor(S.cost + 0.5))}`, LEVEL_COLORS.spot)}
@@ -1815,9 +1866,9 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
       </>) },
     { i: 'range', title: '關卡價 · 振幅', hk: 'rangelevels', right: gridCap(`近${RANGE_LEVEL_N}日振幅`),
       body: <RangeLevelsPanel P={P} spot={spot} R={R} light={light} sourceLabel={rangeSource} /> },
-    { i: 'kline', title: <>台指期 {barSession === 'full' ? '全日盤' : '日盤'} 日K · 關卡價位<span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4 }}>· {barsLive ? liveLabel(live, P) : '模擬'}</span></>,
+    { i: 'kline', title: <>台指期 {barSession === 'full' ? '全日盤' : '日盤'} {per.label}K · 關卡價位<span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4 }}>· {barsLive ? liveLabel(live, P) : '模擬'}</span></>,
       right: <div style={{ display: 'flex', gap: 8 }}><KSessionToggle value={barSession} onChange={setBarSession} /><KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} /></div>,
-      body: <PriceChart bars={bars} theme={theme} code={P.code} periodLabel={per.label === '日' ? '日K' : per.label} levels={chartLevels}
+      body: <PriceChart bars={bars} theme={theme} code={P.code} periodLabel={`${per.label}K`} levels={chartLevels}
               cone={L.atmIv ? { ivPct: L.atmIv, days: expiry.dte, label: expiry.label } : null} /> },
     { i: 'oi', title: '各履約價未平倉 · 對前日增減', hk: 'oichg', right: gridCap(`${pcExpiry != null ? `本到期日 P/C ${pcExpiry.toFixed(2)} · ` : ''}${oiLabel}`),
       body: <OIProfile spot={spot} contract={expiry.type} rows={oiRows} theme={theme} maxRows={15} showChange walls={walls} /> },
@@ -1850,11 +1901,11 @@ function ChartWorkspace({ P, bars, barsLive, live, theme, light, barPeriodId, se
   const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
   const panels = [{
     i: 'kline',
-    title: <>K線 · {P.code}<span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4 }}>· {barsLive ? `近月 · ${liveLabel(live, P)}` : '模擬'}</span></>,
+    title: <>K線 · {P.code} · {per.label}K<span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4 }}>· {barsLive ? `近月 · ${liveLabel(live, P)}` : '模擬'}</span></>,
     right: <div style={{ display: 'flex', gap: 8 }}><KSessionToggle value={barSession} onChange={setBarSession} /><KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} /></div>,
     body: <PriceChart cone={cone}
           bars={bars} theme={theme} code={P.code}
-          periodLabel={(per.label === '日' ? '日K' : per.label) + (barSession === 'full' ? ' · 全日盤' : ' · 日盤')}
+          periodLabel={`${per.label}K` + (barSession === 'full' ? ' · 全日盤' : ' · 日盤')}
           sourceLabel={barsLive
             ? `● ${liveLabel(live, P)} — 近月期貨日K`
             : '○ 模擬 K 線 — 隨機漫步；接上本機代理（server/）才有真實行情'}
