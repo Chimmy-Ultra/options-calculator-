@@ -136,6 +136,8 @@ python3 -m http.server 8080
 | `GET /api/positions/{pid}` | 帳戶內該商品的選擇權部位 `{positions: [{side, type, strike, premium, qty, expiry, dte}]}` |
 | `GET /api/oi/txo?expiry=20260916` | 該到期日**全部履約價**的未平倉（期交所前一交易日）`{date, prevDate, rows: [{strike, call: {oi, oiChg, vol, settle}, put}], maxCallOi, maxPutOi, totals}`；只有 `PRODUCTS` 標了 `"oi": "taifex"` 的商品有，其他回 404 |
 | `GET /api/market/txo` | 籌碼（期交所前一交易日）`{pcRatio: {ratio, chg, series[23 日]}, foreign: {net, chg, byContract}, top10: {net, chg, specificNet, month}}`。外資淨未平倉是大台＋小台/4＋微台/20 的大台當量口數（期交所大額交易人表自己的換算） |
+| `GET /api/twse/txo` | 台股籌碼日報（證交所前一交易日）`{date, institutional: [{name, buy, sell, net}]（元）, margin: {項目: {prev, today}}}`：三大法人買賣超 + 融資融券餘額（`BFI82U` / `MI_MARGN`，證交所 307 限流會暫停重試） |
+| `GET /api/premarket/txo` | 盤前脈絡（走 IB）`{source, asOf, marketDataType, rows: [{key, symbol, localSymbol, exchange, last, prevClose, chg, chgPct, high, low, time, status}]}`：ES / NQ 近月、費半 SOX、VIX、台積電 ADR（TSM）與 2330、美元／台幣（SGX 期貨，報價為每美元台幣）。合約表在 `main.py` 的 `PREMARKET`；IB 沒連上回 503；每列 `status` = `ok` / `no-data`（有合約沒報價，通常是沒訂閱）/ `no-contract` |
 
 `/api/positions` 只回 secType == FOP 且 symbol / tradingClass 對得上的部位；premium 已換算成
 「點數」（averageCost ÷ multiplier），跟前端 legs 的 premium 慣例一致。**沒有任何下單端點。**
@@ -175,6 +177,8 @@ Shioaji 沒有 OI；期交所每天收盤後（日盤約 15:00）公布每檔履
 全日盤 = 期交所記在同一營業日下的盤後列 + 日盤列，一根 15:00 → 13:45）、籌碼三項）寫成一個
 純 ASCII 的 JS 檔；前端沒有 proxy 時就吃它（`data-live.js` 的 fallback），頂欄標 `● TAIFEX 09/11 EOD`。
 Vercel 上看到的就是這份；交易日 15:00 後重跑一次再 commit 就是新的。
+加 `--proxy http://127.0.0.1:8720`（本機跑著 `main.py` 且 IB 有連上）會順便把 `/api/premarket/txo`
+的盤前脈絡寫進快照的 `premarket`；沒加就是 `null`，前端那格會說沒資料。
 
 要先確認你的機器連得到期交所（含 OpenAPI 與 MIS 即時報價的 OI 欄位）：
 

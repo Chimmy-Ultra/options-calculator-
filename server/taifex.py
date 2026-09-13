@@ -35,6 +35,9 @@ MIS_URL = "https://mis.taifex.com.tw/futures/api/getQuoteList"
 # 權值股 TOP20: TAIFEX's monthly TAIEX constituent-weight table + TWSE's daily closing table.
 WEIGHTS_URL = "https://www.taifex.com.tw/cht/9/futuresQADetail"
 TWSE_MI_URL = "https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX"
+# 台股籌碼日報: TWSE's 三大法人買賣金額統計 and 信用交易統計 (margin balances).
+TWSE_INST_URL = "https://www.twse.com.tw/rwd/zh/fund/BFI82U"
+TWSE_MARGIN_URL = "https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN"
 # Every trade of one day, all products (TAIFEX keeps roughly the last two weeks).
 TICK_ZIP_URL = "https://www.taifex.com.tw/file/taifex/Dailydownload/DailydownloadCSV/Daily_{y}_{m}_{d}.zip"
 RISK_FREE_TW = float(os.environ.get("RISK_FREE_TW", "0.015"))
@@ -501,6 +504,77 @@ async def top20(n: int = 20):
     return data
 
 
+# ── 台股籌碼日報 (TWSE) ─────────────────────────────────────────────────────
+# Two after-close tables from the stock exchange, same idiom as the TAIFEX
+# positioning block: 三大法人 net buy / sell by category (NT$) and the margin
+# balances (融資 / 融券) with the change vs the previous session. TWSE answers
+# bursts with a 307 to a "too many requests" page, so every request retries
+# with a pause, and a non-trading date steps back.
+
+def _twse_json(url: str, params: dict, tries: int = 3):
+    q = url + "?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(q, headers={"User-Agent": "Mozilla/5.0"})
+    last_err = None
+    for attempt in range(tries):
+        try:
+            with urllib.request.urlopen(req, timeout=40) as r:
+                return json.loads(r.read().decode("utf-8", "replace"))
+        except Exception as e:  # 307 / network / JSON
+            last_err = e
+            time.sleep(3.0 * (attempt + 1))
+    raise last_err or ValueError("TWSE unavailable")
+
+
+def _fetch_twse_flows(days_back: int = 7) -> dict:
+    """{date, institutional: [{name, buy, sell, net}] (NT$), margin: {...}} for the latest trading day."""
+    for back in range(days_back):
+        d = date.today() - timedelta(days=back)
+        if d.weekday() >= 5:
+            continue
+        ds = d.strftime("%Y%m%d")
+        inst = _twse_json(TWSE_INST_URL, {"response": "json", "dayDate": ds, "type": "day"})
+        if inst.get("stat") != "OK":
+            time.sleep(1.5)
+            continue
+        rows = []
+        for r in inst.get("data") or []:
+            try:
+                rows.append({"name": str(r[0]).strip(), "buy": int(_num(str(r[1]).replace(",", ""), 0) or 0),
+                             "sell": int(_num(str(r[2]).replace(",", ""), 0) or 0), "net": int(_num(str(r[3]).replace(",", ""), 0) or 0)})
+            except (IndexError, ValueError):
+                continue
+        time.sleep(2.0)
+        margin = None
+        try:
+            mj = _twse_json(TWSE_MARGIN_URL, {"response": "json", "date": ds, "selectType": "MS"})
+            for t in mj.get("tables") or []:
+                f = t.get("fields") or []
+                if "項目" not in f or "今日餘額" not in f:
+                    continue
+                ix = {k: f.index(k) for k in f}
+                margin = {}
+                for r in t.get("data") or []:
+                    key = str(r[ix["項目"]]).strip()
+                    margin[key] = {"prev": int(_num(str(r[ix["前日餘額"]]).replace(",", ""), 0) or 0),
+                                   "today": int(_num(str(r[ix["今日餘額"]]).replace(",", ""), 0) or 0)}
+        except Exception:
+            margin = None
+        return {"source": "twse", "date": ds, "institutional": rows, "margin": margin}
+    raise ValueError("TWSE daily tables unavailable")
+
+
+async def twse_daily():
+    hit = _cache.get("twse")
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    try:
+        data = await asyncio.to_thread(_fetch_twse_flows)
+    except Exception:
+        return None
+    _cache["twse"] = (time.monotonic() + CACHE_TTL_S, data)
+    return data
+
+
 # ── Intraday: 成本線 + 多空差額 from the exchange's own tick file ────────────
 # 自由人's 成本線 is (session high + session low) / 2 — his FB post "主力成本線
 # 篇" states the formula, and it reproduces three dated screenshots to the
@@ -743,8 +817,16 @@ def _expiry_label(month: str, expiry: str) -> tuple:
     return month[6:], "weekly"
 
 
-async def build_snapshot(product_id: str = "txo", n_expiries: int = 5, strike_pct: float = 0.08):
-    """The previous session as the frontend consumes it. None if TAIFEX is down."""
+def _fetch_proxy_json(base: str, path: str):
+    """One GET against a running server/main.py — for the blocks only its IB session can fill."""
+    req = urllib.request.Request(base.rstrip("/") + path, headers={"Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+async def build_snapshot(product_id: str = "txo", n_expiries: int = 5, strike_pct: float = 0.08, proxy: str | None = None):
+    """The previous session as the frontend consumes it. None if TAIFEX is down.
+    `proxy` = a running server/main.py whose IB session supplies the 盤前脈絡 block."""
     import pricing  # shared with the live sources so IV is inverted identically
 
     tbl = await table()
@@ -754,6 +836,13 @@ async def build_snapshot(product_id: str = "txo", n_expiries: int = 5, strike_pc
     bars = await asyncio.to_thread(_fetch_bars, 400)  # ~a year of sessions: the 關鍵價位 hit rates need the history
     mkt = await market()
     t20 = await top20()
+    twse = await twse_daily()
+    premarket = None
+    if proxy:
+        try:
+            premarket = await asyncio.to_thread(_fetch_proxy_json, proxy, f"/api/premarket/{product_id}")
+        except Exception as e:
+            print(f"premarket from {proxy} unavailable: {e}", file=sys.stderr)
     intra = None
     try:
         intra = await intraday()
@@ -814,6 +903,8 @@ async def build_snapshot(product_id: str = "txo", n_expiries: int = 5, strike_pc
         "bars": bars["day"], "barsFull": bars["full"],
         "market": mkt,
         "top20": t20,
+        "twse": twse,
+        "premarket": premarket,
         "intraday": intra,
     }
 
@@ -822,7 +913,8 @@ def main(argv):
     out = None
     if "--write" in argv:
         out = argv[argv.index("--write") + 1]
-    snap = asyncio.run(build_snapshot())
+    proxy = argv[argv.index("--proxy") + 1] if "--proxy" in argv else None
+    snap = asyncio.run(build_snapshot(proxy=proxy))
     if snap is None:
         print("TAIFEX unreachable — nothing written", file=sys.stderr)
         return 1
@@ -832,7 +924,8 @@ def main(argv):
     print(f"snapshot {snap['date']} (prev {snap['prevDate']}) spot {snap['spot']['price']} "
           f"expiries {[e['id'] for e in snap['expiries']]} chain rows {[len(c['rows']) for c in snap['chains'].values()]} "
           f"bars {len(snap['bars'])} day / {len(snap['barsFull'])} full; market {sorted((snap['market'] or {}).keys())}; "
-          f"top20 {len((snap.get('top20') or {}).get('rows') or [])} rows; "
+          f"top20 {len((snap.get('top20') or {}).get('rows') or [])} rows; twse {(snap.get('twse') or {}).get('date')}; "
+          f"premarket {len((snap.get('premarket') or {}).get('rows') or [])} rows; "
           f"intraday {((snap.get('intraday') or {}).get('date'))} {len(((snap.get('intraday') or {}).get('day') or {}).get('bars') or [])} min -> {len(text) // 1024} KB")
     if out:
         with open(out, "w", encoding="utf-8") as f:

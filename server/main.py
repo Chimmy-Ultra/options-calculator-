@@ -15,6 +15,8 @@
   GET /api/market/{pid}      → 籌碼：P/C 比、外資淨未平倉、十大交易人（TAIFEX 每日，見 taifex.py）
   GET /api/top20/{pid}       → 權值股 TOP20：期交所成分股權重 + 證交所日收盤（見 taifex.py）
   GET /api/intraday/{pid}    → 1 分 K + 成本線 (高+低)/2 + 多空差額（永豐逐筆 tick_type，或期交所逐筆 tick rule 近似）
+  GET /api/twse/{pid}        → 台股籌碼日報：證交所三大法人買賣超 + 融資融券餘額（前一交易日，見 taifex.py）
+  GET /api/premarket/{pid}   → 盤前脈絡：ES / NQ 期指、費半、VIX、台積電 ADR 與 2330、美元／台幣（SGX 期貨），走 IB
 
 唯讀行情 + 部位代理：只讀行情與持倉，不下單、不改單（沒有任何下單端點）。
 沒訂閱 CME 即時行情時自動退到 15 分鐘延遲數據（IB_MARKET_DATA_TYPE=3）。
@@ -31,7 +33,7 @@ from datetime import date, datetime
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from ib_async import IB, Future, FuturesOption
+from ib_async import IB, Contract, Future, FuturesOption
 
 import pricing
 import sinopac
@@ -58,6 +60,23 @@ PRODUCTS = {
     "cl": {"source": "ib", "symbol": "CL", "exchange": "NYMEX", "tradingClass": "LO", "strikeStep": 1.0},
     "ng": {"source": "ib", "symbol": "NG", "exchange": "NYMEX", "tradingClass": "ON", "strikeStep": 0.1},
 }
+
+# 盤前脈絡 — the overseas read a Taiwan day trader takes before the 08:45 open,
+# through the same IB session that serves the futures options. Futures resolve
+# to the front month at request time; the rest are pinned by conId (looked up
+# with IBKR's contract search, 2026-09-13) so a symbol clash on another
+# exchange cannot swap the instrument. The SGX USD/TWD future quotes TWD per
+# USD (≈ 31.6), the same side as the spot rate. Read-only, like everything here.
+PREMARKET = [
+    {"key": "es", "symbol": "ES", "exchange": "CME", "kind": "future"},
+    {"key": "nq", "symbol": "NQ", "exchange": "CME", "kind": "future"},
+    {"key": "sox", "symbol": "SOX", "exchange": "PHLX", "kind": "index", "conId": 416898},
+    {"key": "vix", "symbol": "VIX", "exchange": "CBOE", "kind": "index", "conId": 13455763},
+    {"key": "tsm", "symbol": "TSM", "exchange": "SMART", "kind": "stock", "conId": 6223250},
+    {"key": "2330", "symbol": "2330", "exchange": "TWSE", "kind": "stock", "conId": 37928709},
+    {"key": "usdtwd", "symbol": "TWD", "exchange": "SGX", "currency": "USD", "kind": "future"},
+]
+PREMARKET_CACHE_TTL_S = 30.0
 
 IB_HOST = os.environ.get("IB_HOST", "127.0.0.1")
 # TWS paper / TWS live / Gateway paper / Gateway live — 依序試
@@ -133,7 +152,7 @@ async def _futures(spec: dict) -> list:
     if hit:
         return hit
     cds = await ib.reqContractDetailsAsync(
-        Future(spec["symbol"], exchange=spec["exchange"], currency="USD")
+        Future(spec["symbol"], exchange=spec["exchange"], currency=spec.get("currency", "USD"))
     )
     today = date.today().strftime("%Y%m%d")
     futs = sorted(
@@ -492,6 +511,87 @@ async def top20(pid: str):
     data = await taifex.top20()
     if data is None:
         raise HTTPException(503, "TAIFEX weights / TWSE daily table unavailable")
+    return data
+
+
+@app.get("/api/twse/{pid}")
+async def twse(pid: str):
+    """台股籌碼日報 from TWSE: 三大法人 net buy / sell by category (NT$) and the
+    margin balances (融資 / 融券) against the previous session. Public data,
+    previous session's numbers; None → 503."""
+    spec = _product(pid)
+    if spec.get("oi") != "taifex":
+        raise HTTPException(404, f"no TWSE source for {pid!r}")
+    data = await taifex.twse_daily()
+    if data is None:
+        raise HTTPException(503, "TWSE daily tables unavailable")
+    return data
+
+
+async def _premarket_contracts() -> list:
+    """[(item, Contract | None)] for PREMARKET, resolved once per hour. None
+    when IB has no such contract — the row is reported as `no-contract`."""
+    key = ("premarket-contracts",)
+    hit = _cache_get(key)
+    if hit:
+        return hit
+    out = []
+    for item in PREMARKET:
+        c = None
+        try:
+            if item["kind"] == "future":
+                c = (await _futures(item))[0][1]
+            else:
+                q = await ib.qualifyContractsAsync(Contract(conId=item["conId"]))
+                c = q[0] if q and q[0].conId else None
+        except Exception:
+            c = None
+        out.append((item, c))
+    _cache_put(key, out, 3600)
+    return out
+
+
+@app.get("/api/premarket/{pid}")
+async def premarket(pid: str):
+    """盤前脈絡: the overseas quotes read before the Taiwan open — ES / NQ front
+    month, SOX, VIX, TSM ADR against 2330, the SGX USD/TWD future — from IB.
+    `chg` is against IB's prior close. Every row carries `status`: ok /
+    no-data (IB has the contract but no quote, e.g. no subscription) /
+    no-contract. Cached 30 s; IB not connected → 503."""
+    spec = _product(pid)
+    if spec.get("oi") != "taifex":
+        raise HTTPException(404, f"no premarket read for {pid!r}")
+    hit = _cache_get(("premarket",))
+    if hit is not None:
+        return hit
+    async with _ib_lock:
+        if not await _ensure_connected():
+            raise HTTPException(503, "IB not connected")
+        pairs = await _premarket_contracts()
+        contracts = [c for _, c in pairs if c is not None]
+        tickers = await ib.reqTickersAsync(*contracts) if contracts else []
+    by_conid = {t.contract.conId: t for t in tickers if t.contract}
+    rows = []
+    for item, c in pairs:
+        t = by_conid.get(c.conId) if c is not None else None
+        last = _f(t.last) if t else None
+        close = _f(t.close) if t else None
+        px = last or close
+        chg = round(px - close, 4) if (px is not None and close) else None
+        rows.append({
+            "key": item["key"], "symbol": item["symbol"],
+            "exchange": c.exchange if c else item["exchange"],
+            "localSymbol": (c.localSymbol or None) if c else None,
+            "currency": c.currency if c else item.get("currency"),
+            "last": px, "prevClose": close, "chg": chg,
+            "chgPct": round(chg / close * 100, 2) if chg is not None else None,
+            "high": _f(t.high) if t else None, "low": _f(t.low) if t else None,
+            "time": t.time.isoformat(timespec="seconds") if (t and t.time) else None,
+            "status": "ok" if px else ("no-contract" if c is None else "no-data"),
+        })
+    data = {"source": "ib", "asOf": datetime.now().isoformat(timespec="seconds"),
+            "marketDataType": MARKET_DATA_TYPE, "rows": rows}
+    _cache_put(("premarket",), data, PREMARKET_CACHE_TTL_S)
     return data
 
 
