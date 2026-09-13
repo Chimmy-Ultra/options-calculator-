@@ -9,6 +9,12 @@ const BROKER = { ib: 'IB', sinopac: 'SinoPac' };
 function liveLabel(live, P) {
   return (live && live.health && live.health.label) || BROKER[P.live] || 'live';
 }
+// The same badge in the terminal chrome's words: 期交所 09/11 收盤 / 永豐 即時 / IB 即時.
+function liveLabelZh(live, P) {
+  if (!live) return '模擬';
+  if (live.health && live.health.source === 'eod') return `期交所 ${(live.health.asOf || '').slice(5)} 收盤`;
+  return `${P.live === 'sinopac' ? '永豐' : P.live === 'ib' ? 'IB' : '即時'} 即時`;
+}
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "scheme": "diverging",
@@ -101,34 +107,20 @@ function initialProductId() {
   return (s && s.productId && window.PRODUCTS.some((p) => p.id === s.productId)) ? s.productId : 'txo';
 }
 
-function Glass2({ tone = 'panel', radius = 18, padding = 18, style, children, ...rest }) {
-  const styles = {
-    panel: {
-      background: 'linear-gradient(155deg, rgba(60,68,88,0.42) 0%, rgba(28,34,48,0.32) 60%, rgba(18,22,32,0.28) 100%)',
-      border: '1px solid rgba(255,255,255,0.08)',
-      boxShadow: '0 1px 0 rgba(255,255,255,0.10) inset, 0 -1px 0 rgba(0,0,0,0.30) inset, 0 20px 40px -20px rgba(0,0,0,0.55), 0 1px 2px rgba(0,0,0,0.30)',
-    },
-    chip: {
-      background: 'linear-gradient(150deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.04) 100%)',
-      border: '1px solid rgba(255,255,255,0.10)',
-      boxShadow: '0 1px 0 rgba(255,255,255,0.10) inset, 0 4px 12px -6px rgba(0,0,0,0.40)',
-    },
-    raised: {
-      background: 'linear-gradient(155deg, rgba(80,90,115,0.50) 0%, rgba(36,42,58,0.42) 100%)',
-      border: '1px solid rgba(255,255,255,0.14)',
-      boxShadow: '0 1px 0 rgba(255,255,255,0.18) inset, 0 -1px 0 rgba(0,0,0,0.30) inset, 0 28px 56px -24px rgba(0,0,0,0.7)',
-    },
-  };
+function Glass2({ tone = 'panel', radius = 0, padding = 12, style, children, ...rest }) {
+  // Flat terminal panel: solid ground, 1px border, square corners. `tone`
+  // picks the ground (panel / chip / raised share the second shade). The
+  // padding is exported as CSS variables so an Eyebrow inside can bleed to
+  // the edges as the panel's header bar.
+  const pad = typeof padding === 'number' ? `${padding}px` : String(padding);
+  const parts = pad.trim().split(/\s+/);
+  const ppy = parts[0], ppx = parts.length > 1 ? parts[1] : parts[0];
   return (
     <div className={`g2 g2-${tone}`} style={{
-      borderRadius: radius, padding, position: 'relative', overflow: 'hidden',
-      backdropFilter: 'blur(36px) saturate(160%)', WebkitBackdropFilter: 'blur(36px) saturate(160%)',
-      color: '#e8eaef', ...styles[tone], ...style,
+      padding, position: 'relative', overflow: 'hidden', color: 'var(--text)',
+      background: tone === 'panel' ? 'var(--panel)' : 'var(--panel2)', border: '1px solid var(--border)',
+      '--ppx': ppx, '--ppy': ppy, ...style,
     }} {...rest}>
-      <div aria-hidden style={{
-        position: 'absolute', inset: 0, borderRadius: 'inherit', pointerEvents: 'none',
-        background: 'linear-gradient(155deg, rgba(255,255,255,0.06) 0%, transparent 30%, transparent 70%, rgba(255,255,255,0.03) 100%)',
-      }} />
       {children}
     </div>
   );
@@ -137,83 +129,72 @@ function Glass2({ tone = 'panel', radius = 18, padding = 18, style, children, ..
 function Eyebrow({ children, right, hk }) {
   const HT = window.HelpTip; // desktop-only hover help (⑧a); pass hk to enable
   const label = (hk && HT) ? <HT k={hk}>{children}</HT> : children;
+  // The panel's header bar: bleeds to the panel edges (see Glass2's --ppx/--ppy).
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-      <span style={{ fontSize: 10, letterSpacing: 0.8, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600 }}>{label}</span>
-      {right}
+    <div className="pg-handle" style={{
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, minHeight: 30, padding: '0 12px',
+      margin: 'calc(-1 * var(--ppy, 12px)) calc(-1 * var(--ppx, 12px)) 10px', background: 'var(--panel2)', borderBottom: '1px solid var(--border)',
+    }}>
+      <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.5, whiteSpace: 'nowrap', textTransform: 'none' }}>{label}</span>
+      <span className="mono tnum" style={{ fontSize: 10.5, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, whiteSpace: 'nowrap' }}>{right}</span>
     </div>
   );
 }
 
 // Workspace tabs
-function WorkspaceTabs({ value, onChange, accent, light }) {
-  // Desktop tabs (design): Compare is shelved and Pricer is folded into
-  // Calculator, so the top bar shows four workspaces.
+function WorkspaceTabs({ value, onChange }) {
+  // Desktop tabs, in the terminal's words; the active one carries a gold underline.
   const items = [
-    { id: 'levels', label: 'Levels',     icon: '☰' },
-    { id: 'chain',  label: 'Chain',      icon: '☷' },
-    { id: 'chart',  label: 'Chart',      icon: '☵' },
-    { id: 'calc',   label: 'Calculator', icon: '◈' },
-    { id: 'lab',    label: 'Lab',        icon: '◬' },
+    { id: 'levels', label: '關卡' },
+    { id: 'chain',  label: '報價表' },
+    { id: 'chart',  label: 'K線' },
+    { id: 'calc',   label: '策略' },
+    { id: 'lab',    label: '實驗室' },
   ];
   return (
-    <Glass2 tone="chip" radius={999} padding={4} style={{ display: 'flex', gap: 2 }}>
+    <div style={{ display: 'flex', alignItems: 'stretch', alignSelf: 'stretch' }}>
       {items.map((it) => {
         const active = value === it.id;
         return (
           <button key={it.id} onClick={() => onChange(it.id)} style={{
-            display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
-            fontSize: 12, fontWeight: 600, padding: '7px 14px', borderRadius: 999,
-            border: 'none', cursor: 'pointer', transition: 'all .18s',
-            background: active ? `linear-gradient(150deg, ${accent} 0%, oklch(0.55 0.18 240) 100%)` : 'transparent',
-            color: active ? '#fff' : (light ? 'rgba(20,30,50,0.6)' : 'rgba(255,255,255,0.65)'),
-            boxShadow: active ? '0 1px 0 rgba(255,255,255,0.18) inset, 0 4px 10px -4px rgba(0,0,0,0.5)' : 'none',
-            fontFamily: 'inherit',
-          }}>
-            <span style={{ opacity: 0.85, fontSize: 11 }}>{it.icon}</span>
-            {it.label}
-          </button>
+            padding: '0 14px', display: 'flex', alignItems: 'center', fontSize: 13, whiteSpace: 'nowrap',
+            fontWeight: active ? 700 : 500, color: active ? 'var(--text)' : 'var(--text2)',
+            background: 'transparent', border: 'none', borderBottom: `2px solid ${active ? 'var(--gold)' : 'transparent'}`,
+            cursor: 'pointer', fontFamily: 'inherit',
+          }}>{it.label}</button>
         );
       })}
-    </Glass2>
+    </div>
   );
 }
 
 // Product dropdown (design ⑥) — replaces the native select with a custom menu
 // listing each product's name + reference spot. Shows live IB / mock badge.
-function ProductDropdown({ productId, P, spot, live, open, setOpen, onPick, light }) {
+function ProductDropdown({ productId, P, spot, chg, live, open, setOpen, onPick }) {
   const fmtSpot = (v) => v.toLocaleString(undefined, { maximumFractionDigits: v < 10 ? 2 : v < 1000 ? 2 : 0 });
+  const col = chg == null ? 'var(--text)' : chg >= 0 ? '#ef5350' : '#26a69a';
   return (
     <div style={{ position: 'relative', flexShrink: 0 }}>
       {open && <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 25 }} />}
-      <Glass2 tone="chip" radius={999} padding="8px 12px"
-        onClick={() => setOpen(!open)}
-        style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap', cursor: 'pointer', border: '1px solid oklch(0.66 0.16 250 / 0.55)' }}>
-        <span className="lt-prodsel" style={{ fontSize: 10, fontWeight: 700, padding: '2px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)' }}>{P.code} ▾</span>
-        <span className="tnum" style={{ fontSize: 13, fontWeight: 600 }}>{spot.toLocaleString()}</span>
-        {P.live ? (
-          <span className={`mono ${live ? '' : 'lt-mock'}`} title={live ? (live.health && live.health.source === 'eod' ? `previous session from TAIFEX (${live.health.asOf}) — no live feed` : `${BROKER[P.live]} connected (delayed/realtime per subscription)`) : `no local data proxy — mock data`} style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.5, color: live ? '#4dd0c8' : 'rgba(255,255,255,0.45)' }}>{live ? `● ${liveLabel(live, P)}` : '○ MOCK'}</span>
-        ) : (
-          <span className="tnum" style={{ fontSize: 11, color: 'oklch(0.78 0.14 145)' }}>+0.84%</span>
-        )}
-      </Glass2>
+      <div onClick={() => setOpen(!open)} title="切換商品" style={{ display: 'flex', alignItems: 'baseline', gap: 8, whiteSpace: 'nowrap', cursor: 'pointer' }}>
+        <span style={{ fontSize: 12, color: 'var(--text2)' }}>{P.nameZh || P.name} {P.code} ▾</span>
+        <span className="mono tnum" style={{ fontSize: 18, fontWeight: 700, color: col }}>{fmtSpot(spot)}</span>
+        {chg != null && <span className="mono tnum" style={{ fontSize: 12, color: col, fontWeight: 600 }}>{chg >= 0 ? '▲' : '▼'}{fmtSpot(Math.abs(chg))}{chg.pct != null ? '' : ''}</span>}
+      </div>
       {open && (
         <div style={{
-          position: 'absolute', top: 'calc(100% + 8px)', left: 0, zIndex: 30, width: 250, padding: 6, borderRadius: 14,
-          backdropFilter: 'blur(36px) saturate(160%)', WebkitBackdropFilter: 'blur(36px) saturate(160%)',
-          background: light ? 'rgba(255,255,255,0.97)' : 'linear-gradient(155deg, rgba(80,90,115,0.92), rgba(36,42,58,0.95))',
-          border: `1px solid ${light ? 'rgba(25,40,70,0.16)' : 'rgba(255,255,255,0.14)'}`,
-          boxShadow: '0 28px 56px -24px rgba(0,0,0,0.7)', color: light ? '#1c2433' : '#e8eaef',
+          position: 'absolute', top: 'calc(100% + 10px)', left: 0, zIndex: 30, width: 250, padding: 4,
+          background: 'var(--panel2)', border: '1px solid var(--border)', boxShadow: '0 12px 28px rgba(0,0,0,0.45)', color: 'var(--text)',
           display: 'flex', flexDirection: 'column', gap: 2,
         }}>
           {window.PRODUCTS.map((p) => (
             <button key={p.id} onClick={() => onPick(p.id)} style={{
-              display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 9, border: 'none', textAlign: 'left', cursor: 'pointer',
-              background: p.id === productId ? (light ? 'rgba(20,40,80,0.08)' : 'rgba(255,255,255,0.10)') : 'transparent', color: 'inherit',
+              display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', border: 'none', textAlign: 'left', cursor: 'pointer',
+              background: p.id === productId ? 'var(--seg-on)' : 'transparent', color: 'inherit', fontFamily: 'inherit',
             }}>
-              <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 5px', borderRadius: 4, background: light ? 'rgba(20,40,80,0.08)' : 'rgba(255,255,255,0.08)', minWidth: 26, textAlign: 'center' }}>{p.code}</span>
-              <span style={{ fontSize: 11, opacity: 0.85, flex: 1 }}>{p.name}</span>
-              <span className="tnum" style={{ fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-mono)', opacity: 0.8 }}>{fmtSpot(p.defaultSpot)}</span>
+              <span className="mono" style={{ fontSize: 10, fontWeight: 700, padding: '2px 5px', background: 'var(--seg-on)', minWidth: 30, textAlign: 'center' }}>{p.code}</span>
+              <span style={{ fontSize: 11, flex: 1 }}>{p.nameZh || p.name}<span style={{ color: 'var(--muted)', marginLeft: 6 }}>{p.name}</span></span>
+              <span className="tnum" style={{ fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-mono)', color: 'var(--text2)' }}>{fmtSpot(p.defaultSpot)}</span>
             </button>
           ))}
         </div>
@@ -224,25 +205,22 @@ function ProductDropdown({ productId, P, spot, live, open, setOpen, onPick, ligh
 
 // Expiry strip — overflow scroll on narrow desktop windows, plain flex when
 // there's room. expiries 由商品決定（TXO 週/月選、穀物月份、或 IB 真實到期日）。
-function ExpiryStrip({ value, onChange, expiries = TXO_EXPIRIES, light }) {
+function ExpiryStrip({ value, onChange, expiries = TXO_EXPIRIES }) {
   return (
-    <div style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
+    <div style={{ display: 'flex', gap: 6, alignItems: 'center', overflowX: 'auto', scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
+      <span style={{ fontSize: 11, color: 'var(--muted)', marginRight: 4, whiteSpace: 'nowrap' }}>到期日</span>
       {expiries.map((e) => {
         const active = e.id === value;
         const isMonthly = e.type === 'monthly';
         return (
           <button key={e.id} onClick={() => onChange(e.id)} style={{
-            padding: '6px 11px', borderRadius: 8, border: '1px solid',
-            borderColor: active ? (isMonthly ? '#f0c068' : (light ? 'rgba(20,40,80,0.3)' : 'rgba(255,255,255,0.18)')) : (light ? 'rgba(25,40,70,0.14)' : 'rgba(255,255,255,0.08)'),
-            background: active ? (isMonthly ? 'rgba(240,192,104,0.16)' : (light ? 'rgba(20,40,80,0.10)' : 'rgba(255,255,255,0.10)')) : (light ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.02)'),
-            color: active ? (isMonthly ? (light ? '#8a6410' : '#f7d394') : (light ? '#1c2433' : '#fff')) : (light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)'),
-            fontFamily: 'inherit', fontSize: 11, fontWeight: 600, cursor: 'pointer',
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, lineHeight: 1.1,
-            position: 'relative', minWidth: 52, flexShrink: 0,
+            display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', height: 26, flexShrink: 0,
+            border: `1px solid ${active ? 'var(--gold)' : 'var(--border)'}`, background: active ? 'rgba(240,192,104,0.12)' : 'transparent',
+            color: active ? 'var(--text)' : 'var(--text2)', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit',
           }}>
-            <span style={{ fontSize: 11 }}>{e.label}</span>
-            <span style={{ fontSize: 9, opacity: 0.75, fontFamily: 'var(--font-mono)' }}>{e.date}</span>
-            {isMonthly && <span style={{ position: 'absolute', top: -3, right: -3, width: 6, height: 6, borderRadius: 3, background: '#f0c068', boxShadow: '0 0 6px rgba(240,192,104,0.8)' }} />}
+            <span className="mono tnum" style={{ fontWeight: 600 }}>{e.date}</span>
+            <span>{isMonthly ? '月選' : e.label}</span>
+            {e.dte != null && <span className="mono tnum" style={{ color: 'var(--muted)' }}>{e.dte}天</span>}
           </button>
         );
       })}
@@ -251,45 +229,25 @@ function ExpiryStrip({ value, onChange, expiries = TXO_EXPIRIES, light }) {
 }
 
 // K-line period toggle (Daily / 4H / 1H) — small segmented control.
-function KPeriodToggle({ value, onChange, light = false }) {
+function Seg({ items, value, onChange }) {
   return (
-    <div style={{ display: 'flex', gap: 2 }}>
-      {K_PERIODS.map((p) => {
-        const active = p.id === value;
-        return (
-          <button key={p.id} onClick={() => onChange(p.id)} style={{
-            fontSize: 9, fontWeight: 700, padding: '3px 8px', borderRadius: 6, minWidth: 26,
-            border: '1px solid ' + (active ? (light ? 'rgba(20,40,80,0.3)' : 'rgba(255,255,255,0.22)') : (light ? 'rgba(25,40,70,0.14)' : 'rgba(255,255,255,0.08)')),
-            background: active ? (light ? 'rgba(20,40,80,0.10)' : 'rgba(255,255,255,0.10)') : 'transparent',
-            color: active ? 'inherit' : (light ? 'rgba(20,30,50,0.5)' : 'rgba(255,255,255,0.5)'),
-            cursor: 'pointer', fontFamily: 'inherit',
-          }}>{p.label}</button>
-        );
-      })}
+    <div className="seg">
+      {items.map((it) => (
+        <button key={it.id} className={it.id === value ? 'on' : ''} onClick={() => onChange(it.id)}>{it.label}</button>
+      ))}
     </div>
   );
+}
+// K-line period toggle (日 / 4H / 1H).
+function KPeriodToggle({ value, onChange }) {
+  return <Seg items={K_PERIODS} value={value} onChange={onChange} />;
 }
 
 // 日盤 / 全日盤 toggle for the K-line. 全日盤 folds the night session into the
 // trading day it belongs to (TAIFEX books the after-hours session under the
 // next business day), so one bar = 15:00 → 13:45.
-function KSessionToggle({ value, onChange, light = false }) {
-  return (
-    <div style={{ display: 'flex', gap: 2 }}>
-      {[{ id: 'day', label: '日盤' }, { id: 'full', label: '全日盤' }].map((p) => {
-        const active = p.id === value;
-        return (
-          <button key={p.id} onClick={() => onChange(p.id)} style={{
-            fontSize: 9, fontWeight: 700, padding: '3px 8px', borderRadius: 6, minWidth: 26,
-            border: '1px solid ' + (active ? (light ? 'rgba(20,40,80,0.3)' : 'rgba(255,255,255,0.22)') : (light ? 'rgba(25,40,70,0.14)' : 'rgba(255,255,255,0.08)')),
-            background: active ? (light ? 'rgba(20,40,80,0.10)' : 'rgba(255,255,255,0.10)') : 'transparent',
-            color: active ? 'inherit' : (light ? 'rgba(20,30,50,0.5)' : 'rgba(255,255,255,0.5)'),
-            cursor: 'pointer', fontFamily: 'inherit',
-          }}>{p.label}</button>
-        );
-      })}
-    </div>
-  );
+function KSessionToggle({ value, onChange }) {
+  return <Seg items={[{ id: 'day', label: '日盤' }, { id: 'full', label: '全日盤' }]} value={value} onChange={onChange} />;
 }
 
 // Collapsible global What-if rail (design ⑦, owner-revised to be tucked away).
@@ -297,21 +255,21 @@ function KSessionToggle({ value, onChange, light = false }) {
 function WhatIfRail({ P, spot, setSpot, spotMin, spotMax, iv, setIv, open, setOpen, theme, light }) {
   if (!open) {
     return (
-      <Glass2 tone="chip" radius={999} padding="8px 14px" onClick={() => setOpen(true)}
-        style={{ position: 'fixed', bottom: 20, right: 24, zIndex: 15, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-        <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.3 }}>⇅ What-if</span>
-        <span className="tnum" style={{ fontSize: 11, opacity: 0.7, fontFamily: 'var(--font-mono)' }}>{P.code} {spot.toLocaleString()} · IV {iv}%</span>
+      <Glass2 tone="chip" padding="7px 12px" onClick={() => setOpen(true)}
+        style={{ position: 'fixed', bottom: 12, right: 12, zIndex: 15, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: 11, fontWeight: 700 }}>模擬情境</span>
+        <span className="tnum" style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'var(--font-mono)' }}>{P.code} {spot.toLocaleString()} · IV {iv}%</span>
       </Glass2>
     );
   }
   return (
-    <Glass2 tone="raised" radius={14} padding="10px 16px"
-      style={{ position: 'fixed', bottom: 20, right: 24, zIndex: 15, width: 520, maxWidth: 'calc(100vw - 48px)', display: 'grid', gridTemplateColumns: 'auto 1fr 1fr', gap: 18, alignItems: 'center' }}>
+    <Glass2 tone="raised" padding="10px 16px"
+      style={{ position: 'fixed', bottom: 12, right: 12, zIndex: 15, width: 520, maxWidth: 'calc(100vw - 24px)', display: 'grid', gridTemplateColumns: 'auto 1fr 1fr', gap: 18, alignItems: 'center', boxShadow: '0 12px 28px rgba(0,0,0,0.45)' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
-        <span style={{ fontSize: 9, letterSpacing: 0.7, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600 }}>What-if</span>
-        <button onClick={() => setOpen(false)} title="collapse" style={{ fontSize: 13, lineHeight: 1, padding: '2px 7px', borderRadius: 6, border: '1px solid rgba(128,140,170,0.3)', background: 'rgba(128,140,170,0.12)', color: 'inherit', cursor: 'pointer', fontFamily: 'inherit' }}>×</button>
+        <span style={{ fontSize: 11, fontWeight: 700 }}>模擬情境</span>
+        <button onClick={() => setOpen(false)} title="收合" style={{ fontSize: 13, lineHeight: 1, padding: '2px 7px', border: '1px solid var(--border)', background: 'transparent', color: 'inherit', cursor: 'pointer', fontFamily: 'inherit' }}>×</button>
       </div>
-      <Slider label={`Spot · ${P.code}`} value={spot} min={spotMin} max={spotMax} step={P.spotStep} onChange={setSpot} format={(v) => v.toLocaleString()} theme={theme} />
+      <Slider label={`現價 · ${P.code}`} value={spot} min={spotMin} max={spotMax} step={P.spotStep} onChange={setSpot} format={(v) => v.toLocaleString()} theme={theme} />
       <Slider label="IV" value={iv} min={P.ivMin} max={P.ivMax} step={0.5} suffix="%" onChange={setIv} theme={theme} />
     </Glass2>
   );
@@ -321,17 +279,13 @@ function WhatIfRail({ P, spot, setSpot, spotMin, spotMax, iv, setIv, open, setOp
 function SettlementCountdown({ dte, note = '13:30' }) {
   const isSettleDay = dte <= 0;
   return (
-    <Glass2 tone="chip" radius={10} padding="6px 12px" style={{
-      display: 'inline-flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap', flexShrink: 0,
-      border: isSettleDay ? '1px solid #ef4444' : '1px solid rgba(255,255,255,0.10)',
-      background: isSettleDay ? 'linear-gradient(150deg, rgba(239,68,68,0.20), rgba(239,68,68,0.10))' : undefined,
-    }}>
-      <span style={{ width: 6, height: 6, borderRadius: 3, background: isSettleDay ? '#ef4444' : '#f0c068', boxShadow: `0 0 8px ${isSettleDay ? '#ef4444' : '#f0c068'}` }} />
-      <span style={{ fontSize: 10, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.6, fontWeight: 600 }}>Settle</span>
-      <span className="mono" style={{ fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
-        {dte}d · {note}
-      </span>
-    </Glass2>
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', whiteSpace: 'nowrap', flexShrink: 0, fontSize: 11, color: 'var(--text2)',
+      border: `1px solid ${isSettleDay ? '#ef5350' : 'var(--border)'}`, background: isSettleDay ? 'rgba(239,83,80,0.12)' : 'transparent' }}>
+      <span style={{ width: 6, height: 6, borderRadius: 3, background: isSettleDay ? '#ef5350' : 'var(--gold)' }} />
+      <span>距結算</span>
+      <span className="mono tnum" style={{ fontSize: 12, fontWeight: 700, color: isSettleDay ? '#ef5350' : 'var(--text)' }}>{dte} 天</span>
+      <span>· {note}</span>
+    </div>
   );
 }
 
@@ -354,7 +308,7 @@ function FreshnessChip({ lastLiveAt }) {
       color: stale ? '#f0c068' : 'inherit', opacity: stale ? 0.8 : 0.5,
       display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap', flexShrink: 0,
     }}>
-      {stale && <span style={{ fontWeight: 800 }}>STALE</span>}{hhmmss}
+      {stale && <span style={{ fontWeight: 800 }}>延遲</span>}{hhmmss}
     </span>
   );
 }
@@ -705,83 +659,62 @@ function Obsidian3() {
     );
   }
 
+  const qNow = quoteNow || (live && live.quote);
+  const spotChgTop = (qNow && qNow.last > 0 && qNow.close > 0) ? qNow.last - qNow.close : null;
   return (
     <div style={{
       width: '100%', minHeight: '100vh', position: 'relative', overflow: 'hidden',
-      fontFamily: 'var(--font-display)', color: light ? '#1c2433' : '#e8eaef',
-      background: light ? `
-        radial-gradient(ellipse 60% 70% at 18% 30%, ${t.showAuroraBlobs ? `oklch(0.90 0.045 ${t.accentHue}) 0%` : 'transparent 0%'}, transparent 60%),
-        radial-gradient(ellipse 50% 50% at 82% 70%, ${t.showAuroraBlobs ? 'oklch(0.93 0.035 60) 0%' : 'transparent 0%'}, transparent 60%),
-        linear-gradient(180deg, #eef1f6 0%, #e4e9f2 100%)
-      ` : `
-        radial-gradient(ellipse 60% 70% at 18% 30%, ${t.showAuroraBlobs ? `oklch(0.34 0.10 ${t.accentHue}) 0%` : 'transparent 0%'}, transparent 60%),
-        radial-gradient(ellipse 50% 50% at 82% 70%, ${t.showAuroraBlobs ? 'oklch(0.30 0.08 30) 0%' : 'transparent 0%'}, transparent 60%),
-        radial-gradient(ellipse 80% 60% at 50% 100%, ${t.showAuroraBlobs ? `oklch(0.26 0.06 ${(t.accentHue + 60) % 360}) 0%` : 'transparent 0%'}, transparent 65%),
-        linear-gradient(180deg, #0a0d14 0%, #11151f 100%)
-      `,
+      fontFamily: 'var(--font-display)', color: 'var(--text)', background: 'var(--bg)', fontSize: 12,
     }}>
-      {/* texture grid */}
-      <div aria-hidden style={{
-        position: 'absolute', inset: 0, opacity: 0.35, pointerEvents: 'none',
-        backgroundImage: `radial-gradient(circle, ${light ? 'rgba(20,40,80,0.05)' : 'rgba(255,255,255,0.04)'} 1px, transparent 1px)`,
-        backgroundSize: '32px 32px',
-      }} />
-
-      {/* Top bar. Sits above the expiry strip: both rows are positioned siblings and
-          the bar creates a stacking context, so the bar's own z-index — not the
-          dropdown's — decides whether the product menu nested inside it is clickable.
-          At equal z-index the later strip won and covered the menu's first rows. */}
-      <div style={{ position: 'absolute', top: 18, left: 24, right: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 20, gap: 12 }}>
-        <Glass2 tone="chip" radius={999} padding="8px 14px" style={{ display: 'flex', alignItems: 'center', gap: 10, whiteSpace: 'nowrap', flexShrink: 0 }}>
-          <div style={{ width: 22, height: 22, borderRadius: 6, background: `linear-gradient(135deg, oklch(0.78 0.14 75), ${accent})`, boxShadow: `0 0 12px -2px ${accent}` }} />
-          <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: -0.2 }}>Options Lab</span>
-        </Glass2>
-
-        <WorkspaceTabs value={workspace} onChange={setWorkspace} accent={accent} light={light} />
-
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
-          <DataQualityPill quality={quality} />
-          {live && P.live && !(live.health && live.health.source === 'eod') && <FreshnessChip lastLiveAt={lastLiveAt} />}
+      {/* Top bar: brand · tabs · (right) product + price, data source, settlement, theme, help.
+          Sits above the expiry row: the product menu inside must win the stacking order. */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 44, display: 'flex', alignItems: 'stretch', gap: 12, padding: '0 12px', background: 'var(--panel2)', borderBottom: '1px solid var(--border)', zIndex: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingRight: 12, borderRight: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+          <div style={{ width: 10, height: 10, background: 'var(--gold)' }} />
+          <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: 0.5 }}>Options Lab</span>
+        </div>
+        <WorkspaceTabs value={workspace} onChange={setWorkspace} />
+        <div style={{ flex: 1 }} />
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexShrink: 0 }}>
           <ProductDropdown
-            productId={productId} P={P} spot={spot} live={live}
+            productId={productId} P={P} spot={spot} chg={spotChgTop} live={live}
             open={prodMenuOpen} setOpen={setProdMenuOpen}
             onPick={(id) => { switchProduct(id); setProdMenuOpen(false); }}
-            light={light}
           />
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', border: '1px solid var(--border)', fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap' }}
+            title={live ? (live.health && live.health.source === 'eod' ? `期交所前一交易日資料（${live.health.asOf}），沒有即時報價` : `${BROKER[P.live]} 已連線`) : '沒有本機資料代理 — 模擬資料'}>
+            <span style={{ width: 6, height: 6, borderRadius: 3, background: live ? '#26a69a' : 'var(--muted)' }} />
+            {P.live ? liveLabelZh(live, P) : '模擬'}
+            {live && P.live && !(live.health && live.health.source === 'eod') && <FreshnessChip lastLiveAt={lastLiveAt} />}
+          </div>
+          <DataQualityPill quality={quality} />
           <SettlementCountdown dte={dte} note={P.settleNote} />
-          <Glass2 tone="chip" radius={999} padding="8px 13px" style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
-            onClick={() => setTheme(light ? 'dark' : 'light')} title="切換 亮色 / 深色">
-            <span style={{ fontSize: 13 }}>{light ? '☀' : '☾'}</span>
-            <span style={{ fontSize: 12, fontWeight: 600 }}>{light ? 'Light' : 'Dark'}</span>
-          </Glass2>
+          <button onClick={() => setTheme(light ? 'dark' : 'light')} title="切換 亮色 / 深色" style={{ padding: '4px 8px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text2)', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+            {light ? '☀ 亮色' : '☾ 深色'}
+          </button>
           <div style={{ position: 'relative', flexShrink: 0 }}>
-            <Glass2 tone="chip" radius={999} padding="8px 12px" style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', border: helpOpen ? '1px solid oklch(0.66 0.16 250 / 0.6)' : undefined }}
-              onClick={() => { setHelpOpen((v) => !v); dismissHelpHint(); }} title="Help — how to read this">
-              <span style={{ fontSize: 13, fontWeight: 700 }}>?</span>
-            </Glass2>
+            <button onClick={() => { setHelpOpen((v) => !v); dismissHelpHint(); }} title="說明 — 這些數字怎麼讀" style={{ padding: '4px 9px', border: `1px solid ${helpOpen ? 'var(--gold)' : 'var(--border)'}`, background: 'transparent', color: 'var(--text)', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>?</button>
             {!helpHintSeen && (
               <div style={{
                 position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 20, whiteSpace: 'nowrap',
-                display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 999,
+                display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
                 background: 'rgba(240,192,104,0.16)', border: '1px solid rgba(240,192,104,0.4)',
                 fontSize: 10, fontWeight: 600, color: light ? '#8a6410' : '#f7d394',
               }}>
-                New here? Click <b>?</b> for a guide
-                <button onClick={(e) => { e.stopPropagation(); dismissHelpHint(); }} title="dismiss" style={{ border: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 12, lineHeight: 1, padding: 0, fontFamily: 'inherit' }}>×</button>
+                第一次用？按 <b>?</b> 看說明
+                <button onClick={(e) => { e.stopPropagation(); dismissHelpHint(); }} title="關閉" style={{ border: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 12, lineHeight: 1, padding: 0, fontFamily: 'inherit' }}>×</button>
               </div>
             )}
           </div>
         </div>
       </div>
 
-      {/* Expiry strip — second row */}
-      <div style={{ position: 'absolute', top: 64, left: 24, right: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 10, gap: 12 }}>
-        <ExpiryStrip value={expiryId} onChange={setExpiryId} expiries={expiries} light={light} />
+      {/* Expiry row — second row; tab-specific controls on the right */}
+      <div style={{ position: 'absolute', top: 44, left: 0, right: 0, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '0 12px', borderBottom: '1px solid var(--border)', zIndex: 10 }}>
+        <ExpiryStrip value={expiryId} onChange={setExpiryId} expiries={expiries} />
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {workspace === 'lab' && <LabToggle value={labView} onChange={setLabView} light={light} />}
-          <Glass2 tone="chip" radius={8} padding="5px 10px" style={{ fontSize: 10, opacity: 0.7, fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
-            {P.unitLabel}
-          </Glass2>
+          {workspace === 'lab' && <LabToggle value={labView} onChange={setLabView} />}
+          <span className="mono tnum" style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{P.unitLabel}</span>
         </div>
       </div>
 
@@ -912,7 +845,7 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
     <>
       {/* Centre: the payoff chart at full size, with the time slice (the 3D
           surface that used to sit here lives in the Lab tab). */}
-      <div style={{ position: 'absolute', top: 110, left: 24 + 320 + D.gap, right: 24 + 340 + D.gap, zIndex: 5, maxHeight: 'calc(100vh - 200px)', overflow: 'auto' }}>
+      <div style={{ position: 'absolute', top: 90, left: 12 + 320 + D.gap, right: 12 + 340 + D.gap, zIndex: 5, maxHeight: 'calc(100vh - 102px)', overflow: 'auto' }}>
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow hk="payoff" right={
             <span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>
@@ -941,9 +874,9 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
 
       {/* Left column */}
       <div className="calc-col" style={{
-        position: 'absolute', top: 110, left: 24, width: 320, zIndex: 5,
+        position: 'absolute', top: 90, left: 12, width: 320, zIndex: 5,
         display: 'flex', flexDirection: 'column', gap: D.gap,
-        maxHeight: 'calc(100vh - 200px)', overflow: 'auto', paddingBottom: 4,
+        maxHeight: 'calc(100vh - 102px)', overflow: 'auto', paddingBottom: 4,
       }}>
         <Glass2 tone="panel" padding={D.panelPad}>
           <Eyebrow right={
@@ -967,9 +900,9 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
 
       {/* Right column */}
       <div className="calc-col" style={{
-        position: 'absolute', top: 110, right: 24, width: 340, zIndex: 5,
+        position: 'absolute', top: 90, right: 12, width: 340, zIndex: 5,
         display: 'flex', flexDirection: 'column', gap: D.gap,
-        maxHeight: 'calc(100vh - 200px)', overflow: 'auto', paddingBottom: 4,
+        maxHeight: 'calc(100vh - 102px)', overflow: 'auto', paddingBottom: 4,
       }}>
         <Glass2 tone="raised" padding={D.panelPad}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -1078,21 +1011,8 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
 // 3D P&L surface that used to be the Calculator's backdrop, and the IV
 // surface that used to be its own tab. The sub-view toggle sits in the
 // expiry row so neither view has to make room for it.
-function LabToggle({ value, onChange, light = false }) {
-  return (
-    <Glass2 tone="chip" radius={999} padding={3} style={{ display: 'flex', gap: 2 }}>
-      {[{ id: '3d', label: '3D P&L' }, { id: 'iv', label: 'IV Surface' }].map((v) => {
-        const active = v.id === value;
-        return (
-          <button key={v.id} onClick={() => onChange(v.id)} style={{
-            fontSize: 10, fontWeight: 700, padding: '4px 10px', borderRadius: 999, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-            background: active ? (light ? 'rgba(20,40,80,0.12)' : 'rgba(255,255,255,0.14)') : 'transparent',
-            color: active ? 'inherit' : (light ? 'rgba(20,30,50,0.5)' : 'rgba(255,255,255,0.55)'),
-          }}>{v.label}</button>
-        );
-      })}
-    </Glass2>
-  );
+function LabToggle({ value, onChange }) {
+  return <Seg items={[{ id: '3d', label: '3D 損益曲面' }, { id: 'iv', label: 'IV 曲面' }]} value={value} onChange={onChange} />;
 }
 
 // The 3D surface is still the stylised OptionsSurface (it does not read the
@@ -1196,28 +1116,12 @@ function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, fees = 0,
 
 // Chain-tab layout switcher (design ③): SIDE / WIDE / SPLIT.
 const CHAIN_LAYOUTS = {
-  a: { label: 'SIDE',  cols: 'minmax(460px,1fr) minmax(340px,392px)', areas: "'chain pnl' 'chain payoff' 'chain greeks' 'chain legs'" },
-  b: { label: 'WIDE',  cols: '1fr 1fr',            areas: "'chain chain' 'pnl payoff' 'greeks legs'" },
-  c: { label: 'SPLIT', cols: '1.1fr 1fr 1fr',      areas: "'chain chain chain' 'payoff pnl legs' 'greeks greeks greeks'" },
+  a: { label: '側欄', cols: 'minmax(460px,1fr) minmax(340px,392px)', areas: "'chain pnl' 'chain payoff' 'chain greeks' 'chain legs'" },
+  b: { label: '全寬', cols: '1fr 1fr',            areas: "'chain chain' 'pnl payoff' 'greeks legs'" },
+  c: { label: '分割', cols: '1.1fr 1fr 1fr',      areas: "'chain chain chain' 'payoff pnl legs' 'greeks greeks greeks'" },
 };
-function LayoutToggle({ value, onChange, light }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <span style={{ fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.45, fontWeight: 600 }}>Layout</span>
-      {Object.keys(CHAIN_LAYOUTS).map((k) => {
-        const active = k === value;
-        return (
-          <button key={k} onClick={() => onChange(k)} style={{
-            fontSize: 9, fontWeight: 700, letterSpacing: 0.5, padding: '3px 10px', borderRadius: 999,
-            border: '1px solid ' + (light ? 'rgba(25,40,70,0.14)' : 'rgba(255,255,255,0.14)'),
-            background: active ? 'linear-gradient(150deg,oklch(0.66 0.16 250),oklch(0.55 0.18 240))' : 'transparent',
-            color: active ? '#fff' : (light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)'),
-            cursor: 'pointer', fontFamily: 'inherit',
-          }}>{CHAIN_LAYOUTS[k].label}</button>
-        );
-      })}
-    </div>
-  );
+function LayoutToggle({ value, onChange }) {
+  return <Seg items={Object.keys(CHAIN_LAYOUTS).map((k) => ({ id: k, label: CHAIN_LAYOUTS[k].label }))} value={value} onChange={onChange} />;
 }
 
 function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiries, onAddLeg, legs, setLegs,
@@ -1230,7 +1134,7 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiri
     <Glass2 tone="panel" padding={pad} style={{ gridArea: area, minWidth: 0 }}>{children}</Glass2>
   );
   return (
-    <div style={{ position: 'absolute', top: 110, left: 24, right: 24, bottom: 24, zIndex: 5, overflowY: 'auto', paddingBottom: 4 }}>
+    <div style={{ position: 'absolute', top: 90, left: 12, right: 12, bottom: 12, zIndex: 5, overflowY: 'auto', paddingBottom: 4 }}>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
         <LayoutToggle value={layout} onChange={setLayout} light={light} />
       </div>
@@ -1729,7 +1633,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
   const pc = M && M.pcRatio, fx = M && M.foreign, t10 = M && M.top10;
   const noMkt = isLive ? '期交所資料未載入' : '模擬模式沒有籌碼資料';
   return (
-    <div style={{ position: 'absolute', top: 110, left: 24, right: 24, bottom: 24, zIndex: 5, overflowY: 'auto', paddingBottom: 4 }}>
+    <div style={{ position: 'absolute', top: 90, left: 12, right: 12, bottom: 12, zIndex: 5, overflowY: 'auto', paddingBottom: 4 }}>
       {/* the strip: 關卡 on the left, 籌碼 on the right — one row of big numbers */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(172px, 1fr))', gap: D.gap, marginBottom: D.gap }}>
         <LevelTile label={`現價 ${P.code}`} value={fmtP(spot)} color={spotChg == null ? LEVEL_COLORS.spot : spotChg >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down}
@@ -1816,7 +1720,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
 function ChartWorkspace({ P, bars, barsLive, live, theme, light, barPeriodId, setBarPeriodId, barSession, setBarSession, cone = null, D }) {
   const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
   return (
-    <div style={{ position: 'absolute', top: 110, left: 24, right: 24, bottom: 24, zIndex: 5, overflowY: 'auto' }}>
+    <div style={{ position: 'absolute', top: 90, left: 12, right: 12, bottom: 12, zIndex: 5, overflowY: 'auto' }}>
       <Glass2 tone="panel" padding={D.panelPad}>
         <Eyebrow right={<div style={{ display: 'flex', gap: 8 }}><KSessionToggle value={barSession} onChange={setBarSession} light={light} /><KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} light={light} /></div>}>
           Chart · {P.code}
@@ -1946,7 +1850,7 @@ function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv
   const cellBorder = light ? 'rgba(25,40,70,0.08)' : 'rgba(255,255,255,0.06)';
 
   return (
-    <div style={{ position: 'absolute', top: 110, left: 24, right: 24, bottom: 24, zIndex: 5, display: 'flex', gap: D.gap }}>
+    <div style={{ position: 'absolute', top: 90, left: 12, right: 12, bottom: 12, zIndex: 5, display: 'flex', gap: D.gap }}>
       <Glass2 tone="panel" padding={D.panelPad} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <Eyebrow right={<span style={{ display: 'inline-flex', gap: 4 }}>{viewChip('3d', '3D')}{viewChip('heat', 'HEATMAP')}</span>}>IV Surface · {P.code}</Eyebrow>
         {ivView === '3d' ? (
@@ -2100,7 +2004,7 @@ function CompareWorkspace({ D, P, spot, iv, dte, theme = 'dark' }) {
   const biasColor = { bullish: '#ef5350', bearish: '#26a69a', neutral: '#a78bfa', volatile: '#f0c068' };
 
   return (
-    <div style={{ position: 'absolute', top: 110, left: 24, right: 24, bottom: 24, zIndex: 5, display: 'flex', flexDirection: 'column', gap: D.gap }}>
+    <div style={{ position: 'absolute', top: 90, left: 12, right: 12, bottom: 12, zIndex: 5, display: 'flex', flexDirection: 'column', gap: D.gap }}>
       {/* Strategy picker bar */}
       <Glass2 tone="panel" padding="12px 16px">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>

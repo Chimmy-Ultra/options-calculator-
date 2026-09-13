@@ -381,11 +381,11 @@ function DataQualityPill({ quality }) {
   const ringBg   = quality.level === 'good' ? 'rgba(77,208,200,0.10)' : quality.level === 'warn' ? 'rgba(240,192,104,0.10)' : 'rgba(239,83,80,0.10)';
   const border   = quality.level === 'good' ? 'rgba(77,208,200,0.30)' : quality.level === 'warn' ? 'rgba(240,192,104,0.35)' : 'rgba(239,83,80,0.35)';
   const fmtLabel = quality.total === 0 ? '—' :
-    `${quality.total - quality.bad - quality.warn}/${quality.total} liquid${quality.bad ? ` · ${quality.bad} bad` : ''}${quality.warn ? ` · ${quality.warn} thin` : ''}`;
+    `${quality.total - quality.bad - quality.warn}/${quality.total} 有量${quality.bad ? ` · ${quality.bad} 無量` : ''}${quality.warn ? ` · ${quality.warn} 量少` : ''}`;
   return (
     <div style={{
       display: 'inline-flex', alignItems: 'center', gap: 6,
-      padding: '4px 9px', borderRadius: 999,
+      padding: '4px 8px', borderRadius: 0,
       background: ringBg, border: `1px solid ${border}`,
       fontSize: 10, fontFamily: 'var(--font-mono)',
     }} title={quality.label}>

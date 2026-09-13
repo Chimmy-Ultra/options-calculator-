@@ -5,7 +5,7 @@
 (function () {
   const PRODUCTS = [
     {
-      id: 'txo', code: 'TXO', name: 'TAIEX Options',
+      id: 'txo', code: 'TXO', nameZh: '台指選', name: 'TAIEX Options',
       cur: 'NT$', mult: 50, unitLabel: '×50 NTD/pt',
       strikeStep: 50,
       model: 'bs', r: 1.5, skew: 'put',
@@ -30,7 +30,7 @@
       mockExpiries: null, // null → 用 obsidian3.jsx 的 TXO_EXPIRIES
     },
     {
-      id: 'zc', code: 'ZC', name: 'Corn',
+      id: 'zc', code: 'ZC', nameZh: '玉米', name: 'Corn',
       cur: 'US$', mult: 50, unitLabel: '×$50/¢ · 5,000 bu',
       strikeStep: 10, eighth: true,
       model: 'b76', r: 4.0, skew: 'call',
@@ -51,7 +51,7 @@
       ],
     },
     {
-      id: 'zs', code: 'ZS', name: 'Soybeans',
+      id: 'zs', code: 'ZS', nameZh: '黃豆', name: 'Soybeans',
       cur: 'US$', mult: 50, unitLabel: '×$50/¢ · 5,000 bu',
       strikeStep: 20, eighth: true,
       model: 'b76', r: 4.0, skew: 'call',
@@ -71,7 +71,7 @@
       ],
     },
     {
-      id: 'zw', code: 'ZW', name: 'Wheat',
+      id: 'zw', code: 'ZW', nameZh: '小麥', name: 'Wheat',
       cur: 'US$', mult: 50, unitLabel: '×$50/¢ · 5,000 bu',
       strikeStep: 10, eighth: true,
       model: 'b76', r: 4.0, skew: 'call',
@@ -92,7 +92,7 @@
     // ── Financial / metal / energy futures options (specs from the design mockup).
     // Same Black-76 + FOP path as grains; just registry entries.
     {
-      id: 'es', code: 'ES', name: 'S&P 500 E-mini',
+      id: 'es', code: 'ES', nameZh: '小S&P', name: 'S&P 500 E-mini',
       cur: 'US$', mult: 50, unitLabel: '×US$50 / pt',
       strikeStep: 25,
       model: 'b76', r: 4.0, skew: 'put',
@@ -112,7 +112,7 @@
       ],
     },
     {
-      id: 'gc', code: 'GC', name: 'Gold',
+      id: 'gc', code: 'GC', nameZh: '黃金', name: 'Gold',
       cur: 'US$', mult: 100, unitLabel: '×US$100 / oz',
       strikeStep: 25,
       model: 'b76', r: 4.0, skew: 'call',
@@ -131,7 +131,7 @@
       ],
     },
     {
-      id: 'cl', code: 'CL', name: 'WTI Crude',
+      id: 'cl', code: 'CL', nameZh: '原油', name: 'WTI Crude',
       cur: 'US$', mult: 1000, unitLabel: '×US$1,000 / bbl',
       strikeStep: 1,
       model: 'b76', r: 4.0, skew: 'call',
@@ -150,7 +150,7 @@
       ],
     },
     {
-      id: 'ng', code: 'NG', name: 'Natural Gas',
+      id: 'ng', code: 'NG', nameZh: '天然氣', name: 'Natural Gas',
       cur: 'US$', mult: 10000, unitLabel: '×US$10,000 / pt',
       strikeStep: 0.1,
       model: 'b76', r: 4.0, skew: 'call',
