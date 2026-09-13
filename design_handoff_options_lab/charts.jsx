@@ -979,4 +979,118 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
   );
 }
 
-Object.assign(window, { ThetaDecay, IVSmile, POPGauge, ScenarioTimeline, GreeksProfile, PnLDistribution, OIProfile, DataQualityPill, PnLAttribution, MaxPain, OptionPricer, genBars, KBarChart, PriceChart });
+// P&L heatmap — OptionStrat's table: rows = underlying prices around spot,
+// columns = dates from today to the front expiry, cell = the position's P&L
+// (currency, gross of fees) from the same Black-Scholes / Black-76 valuation
+// as the payoff chart, at the workspace IV held constant.
+function PnLHeatmap({ legs, spot, iv, dte, P, theme = 'dark', cols = 8, rowsN = 15 }) {
+  const dark = theme === 'dark';
+  if (!legs || !legs.length || !(spot > 0)) return null;
+  const T0 = window.frontDte(legs, dte);
+  const cost = window.portfolioCostPts(legs);
+  const r = P.r / 100, model = P.model, mult = P.mult;
+  const step = Math.max(P.strikeStep, Math.round((spot * 0.01) / P.strikeStep) * P.strikeStep);
+  const centre = Math.round(spot / P.strikeStep) * P.strikeStep;
+  const half = Math.floor(rowsN / 2);
+  const prices = []; for (let i = half; i >= -half; i--) prices.push(centre + i * step);
+  const days = []; for (let k = 0; k < cols; k++) days.push((T0 * k) / (cols - 1));
+  const today = new Date();
+  const dateLab = (d, k) => {
+    if (k === 0) return '今天';
+    if (k === cols - 1) return '到期';
+    const dt = new Date(today.getTime() + Math.round(d) * 86400000);
+    return `${dt.getMonth() + 1}/${dt.getDate()}`;
+  };
+  const grid = prices.map((S) => days.map((d) => (window.portfolioValuePts(legs, S, iv, d, dte, r, model) - cost) * mult));
+  const maxAbs = Math.max(...grid.flat().map((v) => Math.abs(v)), 1);
+  const fmtK = (v) => { const a = Math.abs(v); const s = v < 0 ? '−' : '+'; return a >= 1e5 ? `${s}${(a / 1e3).toFixed(0)}k` : a >= 1e3 ? `${s}${(a / 1e3).toFixed(1)}k` : `${s}${a.toFixed(0)}`; };
+  const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
+  const txt = dark ? 'rgba(255,255,255,0.55)' : 'rgba(20,30,50,0.55)';
+  const up = '#ef5350', down = '#26a69a';
+  const isSpotRow = (S) => Math.abs(S - spot) <= step / 2;
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table className="tnum" style={{ borderCollapse: 'separate', borderSpacing: 2, width: '100%', fontFamily: 'var(--font-mono)', fontSize: 10.5 }}>
+        <thead>
+          <tr>
+            <th style={{ textAlign: 'right', fontWeight: 600, color: txt, fontSize: 9.5, padding: '2px 6px' }}>{P.code}</th>
+            {days.map((d, k) => <th key={k} style={{ fontWeight: 600, color: txt, fontSize: 9.5, padding: '2px 0', whiteSpace: 'nowrap' }}>{dateLab(d, k)}<div style={{ fontWeight: 500, opacity: 0.7 }}>{Math.round(T0 - d)}d</div></th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {prices.map((S, i) => (
+            <tr key={S}>
+              <td style={{ textAlign: 'right', padding: '0 6px', fontWeight: isSpotRow(S) ? 700 : 500, color: isSpotRow(S) ? '#f0c068' : txt, whiteSpace: 'nowrap' }}>{fmtP(S)}</td>
+              {grid[i].map((v, k) => {
+                const a = 0.10 + 0.6 * Math.abs(v) / maxAbs;
+                const bg = v > 0 ? `rgba(239,83,80,${a.toFixed(2)})` : v < 0 ? `rgba(38,166,154,${a.toFixed(2)})` : 'transparent';
+                return <td key={k} title={`${fmtP(S)} · ${dateLab(days[k], k)} · ${P.cur}${Math.round(v).toLocaleString()}`}
+                  style={{ textAlign: 'center', padding: '3px 2px', borderRadius: 3, background: bg, color: dark ? '#fff' : '#1c2433', fontWeight: isSpotRow(S) ? 700 : 500, outline: isSpotRow(S) ? '1px solid rgba(240,192,104,0.5)' : 'none' }}>{fmtK(v)}</td>;
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Volatility cone (IVolatility / Amberdata idiom): for several windows, the
+// distribution of realized volatility — min / p25 / median / p75 / max over
+// every window of that length in the daily history — against today's value
+// and the ATM implied volatility. HV = stdev of log returns × √252.
+function hvSeries(closes, w) {
+  const out = [];
+  for (let end = w; end < closes.length; end++) {
+    const rets = [];
+    for (let i = end - w + 1; i <= end; i++) rets.push(Math.log(closes[i] / closes[i - 1]));
+    const m = rets.reduce((a, b) => a + b, 0) / rets.length;
+    const v = rets.reduce((a, b) => a + (b - m) * (b - m), 0) / (rets.length - 1);
+    out.push(Math.sqrt(v * 252) * 100);
+  }
+  return out;
+}
+function VolCone({ bars, ivPct, theme = 'dark', windows = [5, 10, 20, 60], width = 304, height = 150 }) {
+  const dark = theme === 'dark';
+  const closes = (bars || []).map((b) => b.c).filter((c) => c > 0);
+  const stats = windows.map((w) => {
+    const s = hvSeries(closes, w);
+    if (s.length < 5) return null;
+    const so = [...s].sort((a, b) => a - b);
+    const q = (p) => so[Math.min(so.length - 1, Math.floor(p * (so.length - 1)))];
+    return { w, n: s.length, min: so[0], p25: q(0.25), med: q(0.5), p75: q(0.75), max: so[so.length - 1], now: s[s.length - 1] };
+  }).filter(Boolean);
+  if (!stats.length) return <div style={{ fontSize: 11, opacity: 0.5 }}>需要更多日K才能畫波動率錐。</div>;
+  const padL = 30, padR = 8, padT = 10, padB = 20;
+  const lo = Math.min(...stats.map((x) => x.min), ivPct > 0 ? ivPct : Infinity) * 0.9;
+  const hi = Math.max(...stats.map((x) => x.max), ivPct > 0 ? ivPct : 0) * 1.08;
+  const x = (i) => padL + (i / (stats.length - 1)) * (width - padL - padR);
+  const y = (v) => padT + ((hi - v) / (hi - lo)) * (height - padT - padB);
+  const path = (key) => stats.map((st, i) => `${x(i).toFixed(1)},${y(st[key]).toFixed(1)}`);
+  const txt = dark ? 'rgba(255,255,255,0.55)' : 'rgba(20,30,50,0.55)';
+  const grid = dark ? 'rgba(255,255,255,0.10)' : 'rgba(20,30,50,0.12)';
+  const ticks = [lo, (lo + hi) / 2, hi].map((v) => Math.round(v));
+  return (
+    <div>
+      <svg viewBox={`0 0 ${width} ${height}`} width="100%" style={{ display: 'block', fontFamily: 'var(--font-mono)' }}>
+        {ticks.map((v, i) => <g key={i}><line x1={padL} x2={width - padR} y1={y(v)} y2={y(v)} stroke={grid} strokeDasharray="2 4" /><text x={padL - 4} y={y(v) + 3} fontSize="8.5" fill={txt} textAnchor="end">{v}%</text></g>)}
+        <polygon points={[...path('p75'), ...path('p25').reverse()].join(' ')} fill="#5fa3d4" fillOpacity="0.22" />
+        <polyline points={path('max').join(' ')} fill="none" stroke="#5fa3d4" strokeWidth="1" strokeDasharray="3 3" strokeOpacity="0.8" />
+        <polyline points={path('min').join(' ')} fill="none" stroke="#5fa3d4" strokeWidth="1" strokeDasharray="3 3" strokeOpacity="0.8" />
+        <polyline points={path('med').join(' ')} fill="none" stroke="#5fa3d4" strokeWidth="1.4" />
+        <polyline points={path('now').join(' ')} fill="none" stroke="#f0c068" strokeWidth="1.6" />
+        {stats.map((st, i) => <circle key={i} cx={x(i)} cy={y(st.now)} r="2.6" fill="#f0c068" />)}
+        {ivPct > 0 && <g><line x1={padL} x2={width - padR} y1={y(ivPct)} y2={y(ivPct)} stroke="#a78bfa" strokeWidth="1.2" strokeDasharray="5 3" /><text x={width - padR} y={y(ivPct) - 3} fontSize="8.5" fontWeight="700" fill="#a78bfa" textAnchor="end">IV {ivPct.toFixed(1)}%</text></g>}
+        {stats.map((st, i) => <text key={i} x={x(i)} y={height - 6} fontSize="9" fill={txt} textAnchor="middle">{st.w}日</text>)}
+      </svg>
+      <div className="tnum" style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', fontSize: 9.5, color: txt, fontFamily: 'var(--font-mono)', marginTop: 4 }}>
+        <span><i style={{ display: 'inline-block', width: 10, height: 2, background: '#f0c068', verticalAlign: 'middle', marginRight: 4 }} />目前 HV</span>
+        <span><i style={{ display: 'inline-block', width: 10, height: 2, background: '#5fa3d4', verticalAlign: 'middle', marginRight: 4 }} />歷史中位數</span>
+        <span><i style={{ display: 'inline-block', width: 10, height: 6, background: 'rgba(95,163,212,0.3)', verticalAlign: 'middle', marginRight: 4 }} />25–75 分位</span>
+        <span>虛線 最小／最大 · 樣本 {stats.map((st) => `${st.w}日 n=${st.n}`).join('、')}</span>
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { ThetaDecay, IVSmile, POPGauge, ScenarioTimeline, GreeksProfile, PnLDistribution, OIProfile, DataQualityPill, PnLAttribution, MaxPain, OptionPricer, genBars, KBarChart, PriceChart, PnLHeatmap, VolCone });

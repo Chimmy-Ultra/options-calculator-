@@ -660,10 +660,9 @@ function Obsidian3() {
   // Live daily bars when available; otherwise a mock walk at the product's
   // default vol (so mock mode reads roughly "fairly priced"). Compared against
   // ATM IV in the IV workspace — the classic premium rich / cheap gauge.
-  const hvLive = !!(liveBars && liveBars.length && barPeriodId === 'D');
+  const hvLive = !!(liveDayBars && liveDayBars.length);
   const hv20 = uM(() => {
-    const daily = hvLive ? liveBars
-      : (window.genBars ? window.genBars({ spot: P.defaultSpot, n: 40, volScale: 1, product: P }) : []);
+    const daily = dayBars || [];
     const closes = daily.map((b) => b.c).filter((c) => c > 0);
     if (closes.length < 21) return null;
     const rets = [];
@@ -671,7 +670,7 @@ function Obsidian3() {
     const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
     const varr = rets.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (rets.length - 1);
     return Math.sqrt(varr * 252) * 100;
-  }, [liveBars, hvLive, productId]);
+  }, [dayBars]);
 
   // Add leg from chain
   function addLegFromChain(leg) {
@@ -816,7 +815,7 @@ function Obsidian3() {
         <LabSurface P={P} theme={theme} light={light} t={t} spot={spot} dte={dte} legs={legs} hover={hover} setHover={setHover} D={D} />
       )}
       {workspace === 'lab' && labView === 'iv' && (
-        <IVWorkspace D={D} P={P} spot={spot} iv={iv} expiry={expiry} expiries={expiries} rows={chainRows} hv20={hv20} hvLive={hvLive} live={live} light={light} theme={theme} />
+        <IVWorkspace D={D} P={P} spot={spot} iv={iv} expiry={expiry} expiries={expiries} rows={chainRows} hv20={hv20} hvLive={hvLive} dayBars={dayBars} live={live} light={light} theme={theme} />
       )}
       {workspace === 'chain' && (
         <ChainWorkspace
@@ -930,6 +929,14 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
               style={{ width: '100%', accentColor: accent }} />
           </div>
         </Glass2>
+
+        {/* P&L by price × date (the OptionStrat table), gross of fees */}
+        {legs.length > 0 && (
+          <Glass2 tone="panel" padding={D.panelPad} style={{ marginTop: D.gap }}>
+            <Eyebrow hk="pnlheat" right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>IV {iv.toFixed(1)}% 固定 · {P.cur} · 毛損益</span>}>損益表 · 價格 × 日期</Eyebrow>
+            <window.PnLHeatmap legs={legs} spot={spot} iv={iv} dte={dte} P={P} theme={theme} />
+          </Glass2>
+        )}
       </div>
 
       {/* Left column */}
@@ -1879,7 +1886,7 @@ function ivAnalytics({ rows, expiry, expiries, spot, P }) {
   return { grid: { strikes, exps, base }, term, skew };
 }
 
-function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv20, hvLive, live = null, light = false, theme = 'dark' }) {
+function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv20, hvLive, dayBars = null, live = null, light = false, theme = 'dark' }) {
   const ref = uR(null);
   const instRef = uR(null);
   const [ivView, setIvView] = uS('3d'); // '3d' | 'heat'
@@ -1987,6 +1994,10 @@ function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv
               {iv / hv20 > 1.15 ? 'IV above realized — premium rich, favors sellers'
                 : iv / hv20 < 0.85 ? 'IV below realized — premium cheap, favors buyers'
                 : 'IV ≈ realized — options fairly priced'}
+            </div>
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid ' + (light ? 'rgba(25,40,70,0.12)' : 'rgba(255,255,255,0.08)') }}>
+              <Eyebrow hk="volcone">波動率錐 · HV 5/10/20/60 日</Eyebrow>
+              <window.VolCone bars={dayBars} ivPct={iv} theme={theme} />
             </div>
           </Glass2>
         )}
