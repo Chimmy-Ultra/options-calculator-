@@ -73,6 +73,7 @@
       const q = [];
       if (opts.bar) q.push('bar=' + encodeURIComponent(opts.bar));
       if (opts.duration) q.push('duration=' + encodeURIComponent(opts.duration));
+      if (opts.session) q.push('session=' + encodeURIComponent(opts.session)); // 'day' | 'full' — honored by sources with a night session
       return get('/api/bars/' + encodeURIComponent(pid) + (q.length ? '?' + q.join('&') : ''), 15000);
     },
     // { positions: [{ side, type, strike, premium(點數), qty, expiry, dte }] } | null
@@ -110,7 +111,9 @@
   fallback.bars = async (pid, opts) => {
     const s = eod(pid);
     if (!s || !s.bars || !s.bars.length || ((opts || {}).bar || '1 day') !== '1 day') return null;
-    return { symbol: 'TX', month: s.asOf.slice(0, 6), bar: '1 day', bars: s.bars };
+    // 全日盤 = the night session that belongs to the same trading day + the day session.
+    const full = (opts || {}).session === 'full' && s.barsFull && s.barsFull.length;
+    return { symbol: 'TX', month: s.asOf.slice(0, 6), bar: '1 day', session: full ? 'full' : 'day', bars: full ? s.barsFull : s.bars };
   };
   fallback.oi = async (pid, expiry) => { const s = eod(pid); return s ? eodOi(s, expiry) : null; };
   fallback.market = async (pid) => { const s = eod(pid); return (s && s.market) || null; };

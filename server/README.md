@@ -170,7 +170,8 @@ Shioaji 沒有 OI；期交所每天收盤後（日盤約 15:00）公布每檔履
   大額交易人 CSV（`largeTraderFutDown`）的近月前十大淨部位與特定法人子集。
 
 **收盤快照**：`python3 taifex.py --write ../design_handoff_options_lab/taifex-eod.js` 把上面所有東西
-（加權指數收盤、五個到期日的每檔收盤/最佳買賣/結算/OI、60 根真實台指期日 K、籌碼三項）寫成一個
+（加權指數收盤、五個到期日的每檔收盤/最佳買賣/結算/OI、約 100 根真實台指期日 K（日盤與全日盤兩組，
+全日盤 = 期交所記在同一營業日下的盤後列 + 日盤列，一根 15:00 → 13:45）、籌碼三項）寫成一個
 純 ASCII 的 JS 檔；前端沒有 proxy 時就吃它（`data-live.js` 的 fallback），頂欄標 `● TAIFEX 09/11 EOD`。
 Vercel 上看到的就是這份；交易日 15:00 後重跑一次再 commit 就是新的。
 

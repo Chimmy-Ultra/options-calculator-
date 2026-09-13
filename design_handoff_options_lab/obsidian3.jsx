@@ -270,6 +270,28 @@ function KPeriodToggle({ value, onChange, light = false }) {
   );
 }
 
+// 日盤 / 全日盤 toggle for the K-line. 全日盤 folds the night session into the
+// trading day it belongs to (TAIFEX books the after-hours session under the
+// next business day), so one bar = 15:00 → 13:45.
+function KSessionToggle({ value, onChange, light = false }) {
+  return (
+    <div style={{ display: 'flex', gap: 2 }}>
+      {[{ id: 'day', label: '日盤' }, { id: 'full', label: '全日盤' }].map((p) => {
+        const active = p.id === value;
+        return (
+          <button key={p.id} onClick={() => onChange(p.id)} style={{
+            fontSize: 9, fontWeight: 700, padding: '3px 8px', borderRadius: 6, minWidth: 26,
+            border: '1px solid ' + (active ? (light ? 'rgba(20,40,80,0.3)' : 'rgba(255,255,255,0.22)') : (light ? 'rgba(25,40,70,0.14)' : 'rgba(255,255,255,0.08)')),
+            background: active ? (light ? 'rgba(20,40,80,0.10)' : 'rgba(255,255,255,0.10)') : 'transparent',
+            color: active ? 'inherit' : (light ? 'rgba(20,30,50,0.5)' : 'rgba(255,255,255,0.5)'),
+            cursor: 'pointer', fontFamily: 'inherit',
+          }}>{p.label}</button>
+        );
+      })}
+    </div>
+  );
+}
+
 // Collapsible global What-if rail (design ⑦, owner-revised to be tucked away).
 // Collapsed = a small pill with a spot/IV readout; expanded = Spot + IV sliders.
 function WhatIfRail({ P, spot, setSpot, spotMin, spotMax, iv, setIv, open, setOpen, theme, light }) {
@@ -352,6 +374,7 @@ function Obsidian3() {
   const [lastLiveAt, setLastLiveAt] = uS(null); // ② timestamp of last successful live fetch
   const [liveBars, setLiveBars] = uS(null); // 近月期貨的 IB 歷史 K
   const [barPeriodId, setBarPeriodId] = uS('D'); // K 線週期：D / 4H / 1H
+  const [barSession, setBarSession] = uS('day'); // 'day' 日盤 | 'full' 全日盤（含夜盤）— sources with a night session only
   const [theme, setTheme] = uS(() => {
     const s = readSaved();
     return (s && (s.theme === 'light' || s.theme === 'dark')) ? s.theme : 'dark';
@@ -528,12 +551,12 @@ function Obsidian3() {
     if (!live || !P.live || !window.LiveData) return undefined;
     const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
     (async () => {
-      const hist = await window.LiveData.bars(P.id, { bar: per.bar, duration: per.duration });
+      const hist = await window.LiveData.bars(P.id, { bar: per.bar, duration: per.duration, session: barSession });
       if (dead || !hist || !hist.bars || !hist.bars.length) return;
       setLiveBars(hist.bars);
     })();
     return () => { dead = true; };
-  }, [live, barPeriodId]);
+  }, [live, barPeriodId, barSession]);
 
   // live 報價可能落在預設 slider 範圍外 → 動態放寬邊界。
   const spotMin = Math.min(P.spotMin, Math.floor(spot * 0.9));
@@ -731,6 +754,7 @@ function Obsidian3() {
         <LevelsWorkspace
           P={P} theme={theme} light={light} spot={spot} expiry={expiry} levels={levels} live={live} market={marketData}
           bars={bars} barsLive={!!liveBars} barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
+          barSession={barSession} setBarSession={setBarSession}
           D={D}
         />
       )}
@@ -768,6 +792,7 @@ function Obsidian3() {
         <ChartWorkspace
           P={P} bars={bars} barsLive={!!liveBars} live={live} theme={theme} light={light}
           barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
+          barSession={barSession} setBarSession={setBarSession}
           D={D}
         />
       )}
@@ -1346,7 +1371,7 @@ function LevelsLadder({ P, spot, L, light }) {
   );
 }
 
-function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, levels: L, live, market: M, bars, barsLive, barPeriodId, setBarPeriodId, D }) {
+function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, levels: L, live, market: M, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D }) {
   const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
   const chg = (v) => (v == null ? '' : `（${v > 0 ? '+' : ''}${v.toLocaleString()}）`);
@@ -1419,8 +1444,8 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
         <div style={{ display: 'flex', flexDirection: 'column', gap: D.gap, minWidth: 0 }}>
           {/* K-line with the levels drawn on it */}
           <Glass2 tone="panel" padding={D.panelPad}>
-            <Eyebrow right={<KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} light={light} />}>
-              台指期 日K · 關卡疊圖
+            <Eyebrow right={<div style={{ display: 'flex', gap: 8 }}><KSessionToggle value={barSession} onChange={setBarSession} light={light} /><KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} light={light} /></div>}>
+              台指期 {barSession === 'full' ? '全日盤' : '日盤'} 日K · 關卡疊圖
               <span style={{ color: dim, fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>· {barsLive ? liveLabel(live, P) : '模擬'}</span>
             </Eyebrow>
             <PriceChart bars={bars} theme={theme} code={P.code} periodLabel={per.label === '日' ? 'Daily' : per.label} levels={chartLevels} />
@@ -1440,12 +1465,12 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
 // ───────────────────────────────────────────────── CHART WORKSPACE
 // Top-level Chart tab (from the design): full-width candles + MA + RSI.
 // Desktop only — mobile keeps the K線 sub-tab inside Calc.
-function ChartWorkspace({ P, bars, barsLive, live, theme, light, barPeriodId, setBarPeriodId, D }) {
+function ChartWorkspace({ P, bars, barsLive, live, theme, light, barPeriodId, setBarPeriodId, barSession, setBarSession, D }) {
   const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
   return (
     <div style={{ position: 'absolute', top: 110, left: 24, right: 24, bottom: 24, zIndex: 5, overflowY: 'auto' }}>
       <Glass2 tone="panel" padding={D.panelPad}>
-        <Eyebrow right={<KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} light={light} />}>
+        <Eyebrow right={<div style={{ display: 'flex', gap: 8 }}><KSessionToggle value={barSession} onChange={setBarSession} light={light} /><KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} light={light} /></div>}>
           Chart · {P.code}
           <span style={{ color: light ? 'rgba(20,30,50,0.5)' : 'rgba(255,255,255,0.5)', fontWeight: 500, marginLeft: 4, textTransform: 'none' }}>
             · {barsLive ? `front-month · ${liveLabel(live, P)}` : 'mock'}
@@ -1453,7 +1478,7 @@ function ChartWorkspace({ P, bars, barsLive, live, theme, light, barPeriodId, se
         </Eyebrow>
         <PriceChart
           bars={bars} theme={theme} code={P.code}
-          periodLabel={per.label === '日' ? 'Daily' : per.label}
+          periodLabel={(per.label === '日' ? 'Daily' : per.label) + (barSession === 'full' ? ' · 全日盤' : ' · 日盤')}
           sourceLabel={barsLive
             ? `● ${liveLabel(live, P)} — front-month futures daily bars`
             : '○ MOCK OHLC — random walk; connect the proxy (server/) for real bars'}

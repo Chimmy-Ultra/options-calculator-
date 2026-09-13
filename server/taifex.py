@@ -402,37 +402,50 @@ def _fetch_index() -> dict:
 
 
 def _parse_bars(text: str) -> dict:
-    """Futures CSV → {YYYYMMDD: bar} for the front month (the day-session row
-    with the most volume on each date)."""
+    """Futures CSV → {YYYYMMDD: {"day": bar, "night": bar}} for the front month
+    (the row with the most volume on each date and session). The 盤後 row
+    dated D is the night session TAIFEX books under business day D — it runs
+    from 15:00 the previous day to 05:00 on D (its open sits on D−1's close)."""
     rows = list(csv.reader(io.StringIO(text)))
     if len(rows) < 2:
         return {}
     col = {h.strip(): i for i, h in enumerate(rows[0])}
     out: dict = {}
     for r in rows[1:]:
-        if len(r) < len(col) - 1 or r[col["契約"]].strip() != FUT_COMMODITY or r[col["交易時段"]].strip() != "一般":
+        if len(r) < len(col) - 1 or r[col["契約"]].strip() != FUT_COMMODITY:
             continue
+        sess = {"一般": "day", "盤後": "night"}.get(r[col["交易時段"]].strip())
         o, h, l, c = (_num(r[col[k]]) for k in ("開盤價", "最高價", "最低價", "收盤價"))
         v = int(_num(r[col["成交量"]], 0) or 0)
-        if None in (o, h, l, c):
+        if sess is None or None in (o, h, l, c):
             continue
         t = r[col["交易日期"]].strip().replace("/", "")
-        if t not in out or v > out[t]["v"]:
-            out[t] = {"t": t, "o": o, "h": h, "l": l, "c": c, "v": v}
+        slot = out.setdefault(t, {})
+        if sess not in slot or v > slot[sess]["v"]:
+            slot[sess] = {"t": t, "o": o, "h": h, "l": l, "c": c, "v": v}
     return out
 
 
-def _fetch_bars(days: int = 90) -> list:
+def _fetch_bars(days: int = 150) -> dict:
     """Real TX daily bars for the last `days` calendar days (30-day windows —
-    the download's limit per request), oldest first."""
+    the download's limit per request), oldest first, as two series:
+    "day" = the day session only (日盤), "full" = night + day session of the
+    same trading day (全日盤: 15:00 → 13:45)."""
     today = date.today()
-    bars: dict = {}
+    sessions: dict = {}
     end = today
     while (today - end).days < days:
         start = end - timedelta(days=29)
-        bars.update(_parse_bars(_fetch_csv(start, end, url=FUT_CSV_URL, commodity=FUT_COMMODITY)))
+        sessions.update(_parse_bars(_fetch_csv(start, end, url=FUT_CSV_URL, commodity=FUT_COMMODITY)))
         end = start - timedelta(days=1)
-    return [bars[t] for t in sorted(bars)]
+    day, full = [], []
+    for t in sorted(sessions):
+        d, n = sessions[t].get("day"), sessions[t].get("night")
+        if not d:
+            continue
+        day.append(d)
+        full.append({"t": t, "o": n["o"], "h": max(n["h"], d["h"]), "l": min(n["l"], d["l"]), "c": d["c"], "v": n["v"] + d["v"]} if n else dict(d))
+    return {"day": day, "full": full}
 
 
 def _expiry_label(month: str, expiry: str) -> tuple:
@@ -504,7 +517,8 @@ async def build_snapshot(product_id: str = "txo", n_expiries: int = 5, strike_pc
         "asOf": asof, "builtAt": datetime.now().isoformat(timespec="seconds"),
         "spot": {"price": spot, "ref": idx["ref"], "date": idx["date"], "time": idx["time"]},
         "futures": idx["futures"],
-        "expiries": expiries, "chains": chains, "oi": oi, "bars": bars,
+        "expiries": expiries, "chains": chains, "oi": oi,
+        "bars": bars["day"], "barsFull": bars["full"],
         "market": mkt,
     }
 
@@ -522,7 +536,7 @@ def main(argv):
             "window.TAIFEX_EOD = " + json.dumps(snap, separators=(",", ":")) + ";\n")  # ASCII-safe: no charset dependence
     print(f"snapshot {snap['date']} (prev {snap['prevDate']}) spot {snap['spot']['price']} "
           f"expiries {[e['id'] for e in snap['expiries']]} chain rows {[len(c['rows']) for c in snap['chains'].values()]} "
-          f"bars {len(snap['bars'])} market {sorted((snap['market'] or {}).keys())} -> {len(text) // 1024} KB")
+          f"bars {len(snap['bars'])} day / {len(snap['barsFull'])} full; market {sorted((snap['market'] or {}).keys())} -> {len(text) // 1024} KB")
     if out:
         with open(out, "w", encoding="utf-8") as f:
             f.write(text)

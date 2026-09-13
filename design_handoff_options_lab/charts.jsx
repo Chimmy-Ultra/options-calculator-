@@ -799,8 +799,18 @@ function KBarChart({ bars, theme = 'dark', height = 160, width = 304 }) {
 // the right axis (the 開 / 昨 / 成本 tag style of Taiwanese day-trading charts).
 // A level within 60% of the bar range beyond the bars stretches the scale to
 // include it; anything further gets a pinned marker at the chart edge instead.
+// Moving averages drawn on the price pane: the Taiwanese daily set (5 / 10 /
+// 20 / 60). Click a legend entry to hide / show that line.
+const PRICE_MAS = [
+  { k: 5,  color: '#f0c068' },
+  { k: 10, color: '#e26dd0' },
+  { k: 20, color: '#5fa3d4' },
+  { k: 60, color: '#fb923c' },
+];
+
 function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceLabel = '', levels = [] }) {
   const dark = theme === 'dark';
+  const [hiddenMa, setHiddenMa] = React.useState({});
   if (!bars || bars.length < 2) return null;
   const W = 768, H = 282, plotW = 720, pTop = 12, pBot = 196, vTop = 210, vBot = 274;
   const n = bars.length;
@@ -874,8 +884,16 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
           <span><span style={{ opacity: 0.5 }}>C</span> <b style={{ color: lastUp ? up : down }}>{fmt(last.c)}</b></span>
         </span>
         <span style={{ display: 'inline-flex', gap: 10, fontSize: 10, fontFamily: 'var(--font-mono)', opacity: 0.8 }}>
-          <span><i style={{ display: 'inline-block', width: 14, height: 2, background: '#f0c068', verticalAlign: 'middle', marginRight: 4 }} />MA5</span>
-          <span><i style={{ display: 'inline-block', width: 14, height: 2, background: '#5fa3d4', verticalAlign: 'middle', marginRight: 4 }} />MA20</span>
+          {PRICE_MAS.map((m) => {
+            const off = !!hiddenMa[m.k] || n < m.k;
+            return (
+              <span key={m.k} onClick={() => { if (n >= m.k) setHiddenMa((h) => ({ ...h, [m.k]: !h[m.k] })); }}
+                title={n < m.k ? `needs ${m.k} bars` : (off ? 'show' : 'hide')}
+                style={{ cursor: n >= m.k ? 'pointer' : 'default', opacity: off ? 0.4 : 1, textDecoration: hiddenMa[m.k] ? 'line-through' : 'none', userSelect: 'none' }}>
+                <i style={{ display: 'inline-block', width: 14, height: 2, background: m.color, verticalAlign: 'middle', marginRight: 4 }} />MA{m.k}
+              </span>
+            );
+          })}
           <span><i style={{ display: 'inline-block', width: 14, height: 2, background: '#a78bfa', verticalAlign: 'middle', marginRight: 4 }} />RSI 14</span>
         </span>
       </div>
@@ -901,8 +919,9 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
             </g>
           );
         })}
-        <polyline points={maPts(5)} fill="none" stroke="#f0c068" strokeWidth="1.4" strokeLinejoin="round" />
-        <polyline points={maPts(20)} fill="none" stroke="#5fa3d4" strokeWidth="1.4" strokeLinejoin="round" />
+        {PRICE_MAS.map((m) => (!hiddenMa[m.k] && n >= m.k) && (
+          <polyline key={m.k} points={maPts(m.k)} fill="none" stroke={m.color} strokeWidth={m.k >= 60 ? 1.6 : 1.4} strokeLinejoin="round" />
+        ))}
         {/* Level overlays: dashed line + label at the left, price tag on the right axis */}
         {levelTags.map((l, i) => (
           <g key={i}>
