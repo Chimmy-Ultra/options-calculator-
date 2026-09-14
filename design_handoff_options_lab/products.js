@@ -89,6 +89,25 @@
         { id: 'mar', label: 'MAR', dte: 225, type: 'std', date: '2/19'  },
       ],
     },
+    {
+      id: 'le', code: 'LE', nameZh: '活牛', name: 'Live Cattle',
+      cur: 'US$', mult: 400, unitLabel: '×US$400/¢ · 40,000 lb',
+      strikeStep: 2, pxDecimals: 3,
+      model: 'b76', r: 4.0, skew: 'call',
+      defaultSpot: 219.7, defaultIv: 17,
+      spotMin: 180, spotMax: 260, spotStep: 0.025,
+      ivMin: 8, ivMax: 60,
+      settleNote: '13:05 CT',
+      ivBase: { std: 17 },
+      fees: { perSide: 2.5, taxRate: 0 },
+      live: 'ib', livePositions: true,
+      ib: { symbol: 'LE', exchange: 'CME', tradingClass: 'LE' },
+      mockExpiries: [
+        { id: 'm1', label: 'OCT', dte: 18, type: 'std', date: '10/02' },
+        { id: 'm2', label: 'NOV', dte: 53, type: 'std', date: '11/06' },
+        { id: 'm3', label: 'DEC', dte: 81, type: 'std', date: '12/04' },
+      ],
+    },
     // ── Financial / metal / energy futures options (specs from the design mockup).
     // Same Black-76 + FOP path as grains; just registry entries.
     {
