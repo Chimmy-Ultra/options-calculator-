@@ -129,6 +129,25 @@
         { id: 'm3', label: 'DEC', dte: 81, type: 'std', date: '12/04' },
       ],
     },
+    {
+      id: 'he', code: 'HE', nameZh: '瘦肉豬', name: 'Lean Hogs',
+      cur: 'US$', mult: 400, unitLabel: '×US$400/¢ · 40,000 lb',
+      strikeStep: 2, pxDecimals: 3,
+      model: 'b76', r: 4.0, skew: 'call',
+      defaultSpot: 81.5, defaultIv: 28,
+      spotMin: 60, spotMax: 110, spotStep: 0.025,
+      ivMin: 12, ivMax: 80,
+      settleNote: '13:05 CT',
+      ivBase: { std: 28 },
+      fees: { perSide: 2.5, taxRate: 0 },
+      live: 'ib', livePositions: true,
+      ib: { symbol: 'HE', exchange: 'CME', tradingClass: 'HE' },
+      mockExpiries: [
+        { id: 'm1', label: 'SEP', dte: 1,  type: 'std', date: '9/15'  },
+        { id: 'm2', label: 'OCT', dte: 30, type: 'std', date: '10/14' },
+        { id: 'm3', label: 'DEC', dte: 89, type: 'std', date: '12/11' },
+      ],
+    },
     // ── Financial / metal / energy futures options (specs from the design mockup).
     // Same Black-76 + FOP path as grains; just registry entries.
     {
