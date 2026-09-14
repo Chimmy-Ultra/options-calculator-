@@ -848,7 +848,19 @@ async def build_snapshot(product_id: str = "txo", n_expiries: int = 5, strike_pc
         intra = await intraday()
     except Exception:
         intra = None
-    spot = idx["price"]
+    # TXO is priced off the TX future, not the index. Put-call parity on the
+    # 2026/09/14 chain implies a forward of 45,780.6 against a futures
+    # settlement of 45,780.0 and an index of 45,862.5 — the options quote the
+    # future to within a point. Inverting IV against the index made the same
+    # strike read 22.14% on the call and 28.07% on the put; against the future
+    # both read 25.1%, as put-call parity requires. The 82-point gap is the
+    # dividend basis, which a flat 1.5% Black-Scholes carry cannot represent.
+    fut = idx.get("futures") or {}
+    day_bars = bars["day"] or []
+    spot = _num(fut.get("price")) or _num(fut.get("settle")) or (day_bars[-1]["c"] if day_bars else idx["price"])
+    # Reference = the future's previous close, so the headline change is the
+    # future's own move rather than the index's.
+    spot_ref = day_bars[-2]["c"] if len(day_bars) >= 2 else None
     data_date = max(d for e in tbl.values() for d in e["dates"])          # yyyy/mm/dd
     asof = data_date.replace("/", "")
     asof_d = datetime.strptime(asof, "%Y%m%d").date()
@@ -882,8 +894,8 @@ async def build_snapshot(product_id: str = "txo", n_expiries: int = 5, strike_pc
                 # it traded, and inverting it made the smile 15x smoother
                 # (mean |2nd difference| 7.57 -> 0.52 over the ATM +/- 500 band).
                 mark = raw.get("settle") if raw.get("settle") is not None else last
-                iv = pricing.implied_vol(right, spot, k, mark, t_years, RISK_FREE_TW, "bs") or 0.0
-                delta = pricing.delta(right, spot, k, max(iv, 1e-4), t_years, RISK_FREE_TW, "bs")
+                iv = pricing.implied_vol(right, spot, k, mark, t_years, RISK_FREE_TW, "b76") or 0.0
+                delta = pricing.delta(right, spot, k, max(iv, 1e-4), t_years, RISK_FREE_TW, "b76")
                 row[side] = {"bid": bid or 0.0, "ask": ask or 0.0, "last": last,
                              "iv": round(iv * 100, 2), "oi": r[side]["oi"], "oiChg": r[side]["oiChg"],
                              "vol": r[side]["vol"], "delta": round(delta, 4)}
@@ -905,7 +917,10 @@ async def build_snapshot(product_id: str = "txo", n_expiries: int = 5, strike_pc
         "product": product_id, "source": "taifex-eod",
         "date": data_date, "prevDate": next(iter(oi.values()))["prevDate"] if oi else None,
         "asOf": asof, "builtAt": datetime.now().isoformat(timespec="seconds"),
-        "spot": {"price": spot, "ref": idx["ref"], "date": idx["date"], "time": idx["time"]},
+        # `spot` is what everything prices against — the front TX future.
+        # The index it settles on is kept alongside as context.
+        "spot": {"price": spot, "ref": spot_ref, "date": idx["date"], "time": idx["time"], "base": "futures"},
+        "index": {"price": idx["price"], "ref": idx["ref"]},
         "futures": idx["futures"],
         "expiries": expiries, "chains": chains, "oi": oi,
         "bars": bars["day"], "barsFull": bars["full"],

@@ -131,15 +131,23 @@ def _option_contracts(spec: dict):
 
 
 def _underlying_contract(spec: dict):
-    """The index the options settle on (TAIEX), matching the frontend's spot
-    model — TXO is priced Black-Scholes on the index, not on the future."""
+    """The front TX future — what TXO is actually priced against (Black-76).
+    Put-call parity on the exchange's own settlement prices recovers the
+    futures price to within a point, while the index sits ~80 points above it
+    on the dividend basis. Falls back to the index only if the futures chain
+    is unavailable."""
+    fut = spec.get("underlyingFuture", "TXF")
+    try:
+        group = getattr(_api.Contracts.Futures, fut, None)
+        if group:
+            return group[0]
+    except Exception:
+        pass
     idx = spec.get("index", ("TSE", "001"))
     try:
         return _api.Contracts.Indexs[idx[0]][idx[1]]
     except Exception:
-        fut = spec.get("underlyingFuture", "TXF")
-        group = getattr(_api.Contracts.Futures, fut, None)
-        return group[0] if group else None
+        return None
 
 
 def _snapshot_map(contracts):

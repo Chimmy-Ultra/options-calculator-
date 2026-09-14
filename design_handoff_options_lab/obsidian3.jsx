@@ -1584,7 +1584,7 @@ function KeyLevelsPanel({ K, P, spot, light = false }) {
   const dim = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
   if (!K) return <div className="mono" style={{ fontSize: 11, color: dim }}>日K不足，無法計算。</div>;
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
-  const rows = [...K.levels, { key: 'SPOT', name: `現價 ${P.code}`, price: spot, hit: null, group: 'spot' }].sort((a, b) => b.price - a.price);
+  const rows = [...K.levels, { key: 'SPOT', name: P.underlyingLabel || `現價 ${P.code}`, price: spot, hit: null, group: 'spot' }].sort((a, b) => b.price - a.price);
   const col = (r) => r.group === 'spot' ? LEVEL_COLORS.spot : r.group === 'profile' ? LEVEL_COLORS.band : r.price > spot ? LEVEL_COLORS.up : r.price < spot ? LEVEL_COLORS.down : 'var(--text)';
   return (
     <div>
@@ -1727,7 +1727,7 @@ function LevelsLadder({ P, spot, L, G, costLine = null, light }) {
     rows.push({ price: L.atm.strike + L.straddle, label: '價平＋價平和', detail: `${fmtP(L.atm.strike)} + ${window.fmtPx(L.straddle, P)}`, color: LEVEL_COLORS.band });
     rows.push({ price: L.atm.strike - L.straddle, label: '價平－價平和', detail: `${fmtP(L.atm.strike)} − ${window.fmtPx(L.straddle, P)}`, color: LEVEL_COLORS.band });
   }
-  rows.push({ price: spot, label: `現價 ${P.code}`, detail: L.straddle != null ? `價平和 ${window.fmtPx(L.straddle, P)} · 價平 ${fmtP(L.atm.strike)}` : '沒有價平權利金', color: LEVEL_COLORS.spot, isSpot: true });
+  rows.push({ price: spot, label: P.underlyingLabel || `現價 ${P.code}`, detail: L.straddle != null ? `價平和 ${window.fmtPx(L.straddle, P)} · 價平 ${fmtP(L.atm.strike)}` : '沒有價平權利金', color: LEVEL_COLORS.spot, isSpot: true });
   if (L.support) rows.push({ price: L.support.strike, label: '支撐', detail: `Put OI 最大 ${L.support.oi.toLocaleString()}${chg(L.support.oiChg)}`, color: LEVEL_COLORS.down });
   if (L.maxPain) rows.push({ price: L.maxPain.strike, label: '最大痛苦點', detail: '買方到期損失最大的結算價', color: LEVEL_COLORS.gex });
   if (costLine != null) rows.push({ price: costLine.price, label: '成本線', detail: `（${costLine.running ? '今' : '前'}高 + 低）÷ 2 · 上多下空`, color: LEVEL_COLORS.spot });
@@ -2048,7 +2048,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
   const pc = M && M.pcRatio, fx = M && M.foreign, t10 = M && M.top10;
   const noMkt = isLive ? '期交所資料未載入' : '模擬模式沒有籌碼資料';
   const tiles = (<>
-        <LevelTile label={`現價 ${P.code}`} value={fmtP(spot)} color={spotChg == null ? LEVEL_COLORS.spot : spotChg >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down}
+        <LevelTile label={P.underlyingLabel || `現價 ${P.code}`} value={fmtP(spot)} color={spotChg == null ? LEVEL_COLORS.spot : spotChg >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down}
           sub={spotChg != null ? <><Chg v={spotChg} fmt={(x) => fmtP(x)} /> {q.chgPct != null ? `（${q.chgPct >= 0 ? '+' : ''}${q.chgPct}%）` : ''}</> : (isLive ? liveLabel(live, P) : '模擬')} light={light} />
         <LevelTile label="價平和" hk="straddle" color={LEVEL_COLORS.band}
           value={L.straddle != null ? window.fmtPx(L.straddle, P) : '—'}
