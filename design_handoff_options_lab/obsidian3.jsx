@@ -2016,19 +2016,16 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
   const q = live && live.quote;
   const spotChg = (q && q.last > 0 && q.close > 0) ? q.last - q.close : null;
   // K-line overlays: the four option-derived levels (spot has its own tag).
+  // Only the walls and 成本線 are drawn (plus the gold last price, which
+  // PriceChart adds itself). Owner's call, 2026-09-14: eight lines buried the
+  // candles and six of them sat within a few hundred points of spot. 價平±和
+  // came off because the probability cone already draws that band and reads
+  // better; 零Gamma because it rests on the dealer-inventory assumption rather
+  // than on exchange data; 一壘 because the 關卡價 panel lists all of them.
+  // Every one of these still has its own row in the ladder and its own panel.
   const chartLevels = [];
   if (L.resistance) chartLevels.push({ price: L.resistance.strike, label: '壓力 Call OI最大', color: LEVEL_COLORS.up });
-  if (L.straddle != null) {
-    chartLevels.push({ price: L.atm.strike + L.straddle, label: '價平＋和', color: LEVEL_COLORS.band });
-    chartLevels.push({ price: L.atm.strike - L.straddle, label: '價平－和', color: LEVEL_COLORS.band });
-  }
   if (L.support) chartLevels.push({ price: L.support.strike, label: '支撐 Put OI最大', color: LEVEL_COLORS.down });
-  if (G && G.flip != null) chartLevels.push({ price: G.flip, label: '零Gamma', color: LEVEL_COLORS.gex });
-  // 關卡價: only the two 一壘 lines go on the chart — ten would bury the candles.
-  if (R) {
-    chartLevels.push({ price: R.up[0].price, label: '一壘↑', color: LEVEL_COLORS.range });
-    chartLevels.push({ price: R.down[0].price, label: '一壘↓', color: LEVEL_COLORS.range });
-  }
   // The nearer unreached 一壘 for the strip tile — his header's 「距一壘 … 差 N 點」.
   const near1B = (() => {
     if (!R) return null;
