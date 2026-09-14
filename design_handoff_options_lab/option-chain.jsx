@@ -50,6 +50,7 @@ function genChain({ spot, contract, dte = 17, product }) {
 // sub-1 strike steps (NG).
 function fmtPx(v, P) {
   if (P && P.eighth) return (Math.round(v * 8) / 8).toFixed(3);
+  if (P && P.pxDecimals != null) return v.toFixed(P.pxDecimals); // products whose tick is finer than the strike step implies (VIX 0.05, NQ 0.25)
   if (P && P.strikeStep && P.strikeStep < 1) return v.toFixed(2);
   return v.toFixed(1);
 }

@@ -180,6 +180,12 @@ Vercel 上看到的就是這份；交易日 15:00 後重跑一次再 commit 就�
 加 `--proxy http://127.0.0.1:8720`（本機跑著 `main.py` 且 IB 有連上）會順便把 `/api/premarket/txo`
 的盤前脈絡寫進快照的 `premarket`；沒加就是 `null`，前端那格會說沒資料。
 
+**IB 商品快照**：`python3 ibsnap.py <capture-dir> --write ../design_handoff_options_lab/ib-eod.js` 把每個商品一份的
+capture JSON（IB 逐口報價：近月、次月、最近三個週五週選各價平 ±8 檔，每個到期日自己的標的期貨，一年日 K）整理成
+`window.IB_EOD[pid]`，形狀跟 `TAIFEX_EOD` 一樣，前端沒 proxy 時直接吃。IB 盤後給的 midpoint IV 是 `isValid:false`，
+所以 `iv` 是用 `pricing.implied_vol` 從買賣中價反推（Black-76 on 該到期日的期貨）；穀物日 K 會從 $/bu 乘 100 到美分
+（只允許 10 的次方）。capture 的格式與規則見 `ibsnap.py` 開頭；這個分支裡的 capture 是透過 IBKR connector 抓的。
+
 要先確認你的機器連得到期交所（含 OpenAPI 與 MIS 即時報價的 OI 欄位）：
 
 ```bash

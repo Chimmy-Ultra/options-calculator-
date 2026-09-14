@@ -64,11 +64,35 @@ def _bar_date(t) -> str | None:
     return None
 
 
+def _field(raw: dict, key: str, right: str, *names):
+    """A quote field the worker may have stored raw (IB's own object) instead
+    of flat: pick the named sub-key, else the side's own (call / put) entry,
+    else the first numeric value. Never a guess beyond IB's object."""
+    v = raw.get(key)
+    if not isinstance(v, dict):
+        return v
+    side = "call" if right == "C" else "put"
+    for n in names:
+        if n in v:
+            return v[n]
+    for n, x in v.items():
+        if side in n.lower():
+            return x
+    for x in v.values():
+        if isinstance(x, (int, float)):
+            return x
+    return None
+
+
 def _side(raw: dict, right: str, f: float, k: float, t: float) -> dict:
     """One side of a chain row from the raw contract quote."""
-    bid, ask, last = _num(raw.get("bid")), _num(raw.get("ask")), _num(raw.get("last"))
+    bid, ask = _num(_field(raw, "bid", right, "bid")), _num(_field(raw, "ask", right, "ask"))
+    last = _num(_field(raw, "last", right, "price", "last"))
     mid = (bid + ask) / 2 if (bid and ask) else None
-    iv = _num(raw.get("iv"))
+    ivf = _field(raw, "iv", right, "annualIv", "iv")
+    if isinstance(raw.get("iv"), dict) and raw["iv"].get("isValid") is False:
+        ivf = None  # the connector itself flags the midpoint IV invalid
+    iv = _num(ivf)
     if iv is not None:
         iv = iv * 100 if iv < 3 else iv  # IB reports a fraction (0.15); guard a % feed
     else:
@@ -77,8 +101,8 @@ def _side(raw: dict, right: str, f: float, k: float, t: float) -> dict:
         iv = inv * 100 if inv else 0.0
     delta = pricing.delta(right, f, k, max(iv / 100, 1e-4), t, RISK_FREE, "b76") if iv > 0 else (1.0 if (right == "C" and k < f) else -1.0 if (right == "P" and k > f) else 0.0)
     return {"bid": bid or 0.0, "ask": ask or 0.0, "last": last or (mid or 0.0),
-            "iv": round(iv, 2), "oi": int(raw.get("oi") or 0), "oiChg": 0,
-            "vol": int(raw.get("vol") or 0), "delta": round(delta, 4)}
+            "iv": round(iv, 2), "oi": int(_num(_field(raw, "oi", right, "openInterest", "oi")) or 0), "oiChg": 0,
+            "vol": int(_num(_field(raw, "vol", right, "volume", "vol")) or 0), "delta": round(delta, 4)}
 
 
 def build_product(cap: dict) -> dict | None:
@@ -91,13 +115,31 @@ def build_product(cap: dict) -> dict | None:
         bars.append({"t": d, "o": b.get("o"), "h": b.get("h"), "l": b.get("l"), "c": b.get("c"), "v": int(b.get("v") or 0)})
     bars.sort(key=lambda b: b["t"])
     front = cap.get("front") or {}
+    notes = list(cap.get("notes") or [])
     spot = _num(front.get("last")) or _num(front.get("priorClose")) or (bars[-1]["c"] if bars else None)
     if cap.get("secType") == "OPT" and bars:
         spot = bars[-1]["c"]  # VIX: the index level; the chains price off each expiry's VX future
     if spot is None:
         return None
-    asof = bars[-1]["t"] if bars else datetime.fromisoformat(cap["capturedAt"].replace("Z", "+00:00")).strftime("%Y%m%d")
-    asof_d = datetime.strptime(asof, "%Y%m%d").date()
+    # IB's history endpoint quotes CBOT grains in $/bu while the snapshots and
+    # strikes are in cents: bring the bars to the quote unit by the power of
+    # ten that matches the front price (1 / 10 / 100 / 1000), never a free factor.
+    if bars and cap.get("secType") != "OPT":
+        ratio = spot / bars[-1]["c"]
+        scale = min((1, 10, 100, 1000), key=lambda x: abs(ratio / x - 1))
+        if scale != 1 and abs(ratio / scale - 1) < 0.25:
+            for b in bars:
+                for k in ("o", "h", "l", "c"):
+                    b[k] = round(b[k] * scale, 6) if _num(b[k]) is not None else b[k]
+            notes.append(f"bars scaled x{scale} to the quote unit (front {spot} vs last close {bars[-1]['c'] / scale})")
+    ref = _num(front.get("priorClose"))
+    if ref is None and _num(front.get("last")) and front.get("chg") is not None:
+        ref = round(front["last"] - front["chg"], 6)  # IB gave the change but not the prior close
+    # The quotes are as of the capture (a Sunday-night Globex session counts),
+    # so time-to-expiry and the badge follow capturedAt, not the last daily bar.
+    cap_dt = datetime.fromisoformat(cap["capturedAt"].replace("Z", "+00:00"))
+    asof = cap_dt.strftime("%Y%m%d")
+    asof_d = cap_dt.date()
 
     expiries, chains = [], {}
     for e in sorted(cap.get("expiries") or [], key=lambda x: x["date"]):
@@ -116,7 +158,8 @@ def build_product(cap: dict) -> dict | None:
             rows.append({"strike": k, "atm": False, "itmCall": k < f, "itmPut": k > f,
                          "call": _side(r.get("call") or {}, "C", f, k, t),
                          "put": _side(r.get("put") or {}, "P", f, k, t)})
-        if not rows:
+        if not rows or not any(x[s]["last"] > 0 or x[s]["bid"] > 0 or x[s]["ask"] > 0 for x in rows for s in ("call", "put")):
+            notes.append(f"{eid} {e.get('tradingClass')}: no quotes on any contract, dropped")
             continue
         min(rows, key=lambda x: abs(x["strike"] - f))["atm"] = True
         monthly = e.get("kind") == "monthly"
@@ -128,16 +171,16 @@ def build_product(cap: dict) -> dict | None:
         return None
     return {
         "product": pid, "source": "ib-eod", "symbol": cap.get("symbol"),
-        "label": f"IB {asof[4:6]}/{asof[6:]} EOD",
+        "label": f"IB {asof[4:6]}/{asof[6:]} {cap_dt.strftime('%H:%M')}Z",
         "date": f"{asof[:4]}/{asof[4:6]}/{asof[6:]}", "prevDate": None, "asOf": asof,
         "capturedAt": cap.get("capturedAt"), "builtAt": datetime.now().isoformat(timespec="seconds"),
-        "spot": {"price": spot, "ref": _num(front.get("priorClose")) if cap.get("secType") != "OPT" else (bars[-2]["c"] if len(bars) > 1 else None),
+        "spot": {"price": spot, "ref": ref if cap.get("secType") != "OPT" else (bars[-2]["c"] if len(bars) > 1 else None),
                  "date": asof, "time": None},
         "front": {"month": front.get("contractMonth"), "lastTradingDate": front.get("lastTradingDate"), "price": _num(front.get("last")),
                   "prevClose": _num(front.get("priorClose"))},
         "expiries": expiries, "chains": chains,
         "bars": bars, "barsFull": bars,
-        "notes": cap.get("notes") or [],
+        "notes": notes,
         "sampleDescription": cap.get("sampleDescription"),
     }
 

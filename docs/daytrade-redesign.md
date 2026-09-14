@@ -470,3 +470,17 @@ Two more reads on the 關卡 tab, after the owner asked whether "other fundament
 - TWSE answers bursts with a 307 to a rate-limit page; every request retries with a pause and a non-trading date steps back. Both tables were confirmed for 2026/09/11 in the sandbox.
 
 **Left out on purpose**: news feeds, single-stock fundamentals, an economic calendar. A user-maintained event list (FOMC, TSMC earnings, TAIFEX settlement) would be cheap to add if wanted; nothing here should quote a number this site cannot fetch.
+
+## 11. 指數 + 大宗商品 — real IB option chains and 理論價 (2026-09-14)
+
+Owner's direction: the site should analyse indices and commodities too, with theoretical prices — VIX, NQ, S&P 500, 農產品, 農副產品 (黃豆粉 / 黃豆油 / 活牛 / 瘦肉豬) and energy (+ Brent).
+
+**Data.** The site already priced ZC / ZS / ZW / ES / GC / CL / NG through the proxy when a local IB Gateway is up; the deployed site had mock numbers for them. This branch adds an IB end-of-day snapshot (`ib-eod.js`, built by `server/ibsnap.py` from per-product capture files) so the deployed site shows real chains: for each product the front monthly, the next monthly and the nearest three Friday weeklies (VIX: the VIXW Tuesdays), ±8 strikes around the expiry's own underlying future, per contract IB's last / bid / ask / open interest / volume, plus a year of daily bars. The captures were taken through IBKR's connector on 2026-09-13/14 (Sunday-night Globex, delayed / frozen statuses), and the badge shows the capture time.
+
+**What IB did not give.** `option-midpoint-iv` came back `isValid:false` on every contract outside CBOE / CME options hours, so IV is the bid/ask mid inverted with the same Black-76 the proxy uses, on that expiry's future. Volume was 0 (weekend). No previous-session OI, so `oiChg` is 0 and the OI table's change column stays empty for these products. Freshly listed weeklies with no quotes on any contract are dropped and named in the snapshot's `notes`. `get_option_data` returns grain strikes in $/bu while quotes are in cents; the workers keyed rows in cents and the daily bars are scaled ×100 (a power of ten only, checked against the front price).
+
+**VIX.** Index options, not futures options: the proxy has no path, the site reads the snapshot only. Each expiry is matched to the VX future that settles with it and priced off that future; the headline spot is the index level. Options with no listed 9 strike give 16-row chains.
+
+**理論價.** Every strike shows the model price at one reference vol for the whole chain next to the market mid, with the difference: at the ATM IV the difference is the skew premium; at the 20-day realized vol it is what the market charges over realized. The toggle sits in the chain legend. Nothing is estimated — where a side has no quote the cell prints —.
+
+**Not verified.** The proxy's live path for NQ / ZM / ZL / LE / HE / BZ (trading-class guesses in `main.py` degrade gracefully). Multipliers were taken from IB's option descriptions where the capture reported them (ES 50, NQ 20, ZC/ZS 5000 — i.e. ×US$50 per cent).

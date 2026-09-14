@@ -112,6 +112,48 @@
       ],
     },
     {
+      id: 'nq', code: 'NQ', nameZh: '小那斯達克', name: 'Nasdaq-100 E-mini',
+      cur: 'US$', mult: 20, unitLabel: '×US$20 / pt',
+      strikeStep: 100, pxDecimals: 2,
+      model: 'b76', r: 4.0, skew: 'put',
+      defaultSpot: 29060, defaultIv: 20,
+      spotMin: 25000, spotMax: 33000, spotStep: 0.25,
+      ivMin: 8, ivMax: 80,
+      settleNote: '15:00 CT',
+      ivBase: { std: 20 },
+      fees: { perSide: 2.5, taxRate: 0 },
+      live: 'ib', livePositions: true,
+      ib: { symbol: 'NQ', exchange: 'CME', tradingClass: 'NQ' },
+      mockExpiries: [
+        { id: 'm1', label: 'SEP', dte: 5,  type: 'std', date: '9/18'  },
+        { id: 'm2', label: 'OCT', dte: 47, type: 'std', date: '10/30' },
+        { id: 'm3', label: 'DEC', dte: 96, type: 'std', date: '12/18' },
+      ],
+    },
+    {
+      // VIX options are CBOE index options (OPT), not futures options: the
+      // proxy has no path for them, so real data is the IB snapshot only.
+      // Each expiry prices off the VX future that settles with it — Black-76
+      // on that future, never on the spot index.
+      id: 'vix', code: 'VIX', nameZh: 'VIX', name: 'CBOE Volatility Index',
+      cur: 'US$', mult: 100, unitLabel: '×US$100 / pt',
+      strikeStep: 1, pxDecimals: 2,
+      model: 'b76', r: 4.0, skew: 'call',
+      defaultSpot: 15.84, defaultIv: 90,
+      spotMin: 10, spotMax: 40, spotStep: 0.05,
+      ivMin: 40, ivMax: 200,
+      settleNote: '週三 SOQ',
+      ivBase: { std: 90 },
+      fees: { perSide: 2.5, taxRate: 0 },
+      live: 'ib', livePositions: false,
+      ib: null,
+      mockExpiries: [
+        { id: 'm1', label: 'SEP', dte: 2,  type: 'std', date: '9/15'  },
+        { id: 'm2', label: 'OCT', dte: 37, type: 'std', date: '10/20' },
+        { id: 'm3', label: 'NOV', dte: 65, type: 'std', date: '11/17' },
+      ],
+    },
+    {
       id: 'gc', code: 'GC', nameZh: '黃金', name: 'Gold',
       cur: 'US$', mult: 100, unitLabel: '×US$100 / oz',
       strikeStep: 25,

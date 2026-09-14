@@ -12,7 +12,10 @@ function liveLabel(live, P) {
 // The same badge in the terminal chrome's words: 期交所 09/11 收盤 / 永豐 即時 / IB 即時.
 function liveLabelZh(live, P) {
   if (!live) return '模擬';
-  if (live.health && live.health.source === 'eod') return `期交所 ${(live.health.asOf || '').slice(5)} 收盤`;
+  if (live.health && live.health.source === 'eod') {
+    // TAIFEX snapshot → 期交所 09/11 收盤; IB snapshot → its own label with the capture time (IB 09/13 23:40Z 快照).
+    return P.live === 'ib' ? `${live.health.label || 'IB'} 快照` : `期交所 ${(live.health.asOf || '').slice(5)} 收盤`;
+  }
   return `${P.live === 'sinopac' ? '永豐' : P.live === 'ib' ? 'IB' : '即時'} 即時`;
 }
 
@@ -849,7 +852,7 @@ function Obsidian3() {
             onPick={(id) => { switchProduct(id); setProdMenuOpen(false); }}
           />
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', border: '1px solid var(--border)', fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap' }}
-            title={live ? (live.health && live.health.source === 'eod' ? `期交所前一交易日資料（${live.health.asOf}），沒有即時報價` : `${BROKER[P.live]} 已連線`) : '沒有本機資料代理 — 模擬資料'}>
+            title={live ? (live.health && live.health.source === 'eod' ? `${P.live === 'ib' ? 'IB 快照' : '期交所前一交易日'}資料（${live.health.asOf}），沒有即時報價` : `${BROKER[P.live]} 已連線`) : '沒有本機資料代理 — 模擬資料'}>
             <span style={{ width: 6, height: 6, borderRadius: 3, background: live ? '#26a69a' : 'var(--muted)' }} />
             {P.live ? liveLabelZh(live, P) : '模擬'}
             {live && P.live && !(live.health && live.health.source === 'eod') && <FreshnessChip lastLiveAt={lastLiveAt} />}
