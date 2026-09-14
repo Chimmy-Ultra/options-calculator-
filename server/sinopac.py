@@ -279,10 +279,15 @@ async def chain(spec: dict, expiry: str):
                 mid = (bid + ask) / 2 if bid and ask else None
                 last = _last_of(s) or 0.0
                 right = "C" if str(getattr(c.option_right, "value", c.option_right)) in ("C", "Call") else "P"
-                # Shioaji snapshots carry no greeks → invert IV from the premium
-                # with the same Black-Scholes the frontend prices TXO with.
-                iv = pricing.implied_vol(right, und_px, float(c.strike_price), mid or last, t_years, RISK_FREE, "bs") or 0.0
-                d = pricing.delta(right, und_px, float(c.strike_price), max(iv, 1e-4), t_years, RISK_FREE, "bs")
+                # Shioaji snapshots carry no greeks -> invert IV from the
+                # premium. `und_px` is the front TX future, so the model is
+                # Black-76, matching products.js and the EOD snapshot; pricing
+                # a futures quote with Black-Scholes would add the carry twice.
+                # One forward for the whole board: unlike the snapshot this
+                # path cannot take a per-expiry parity forward from settlement
+                # prices, so a far expiry is off by its dividend basis.
+                iv = pricing.implied_vol(right, und_px, float(c.strike_price), mid or last, t_years, RISK_FREE, "b76") or 0.0
+                d = pricing.delta(right, und_px, float(c.strike_price), max(iv, 1e-4), t_years, RISK_FREE, "b76")
                 return {
                     "bid": bid or 0.0, "ask": ask or 0.0, "last": last,
                     "iv": round(iv * 100, 2),
