@@ -483,4 +483,8 @@ Owner's direction: the site should analyse indices and commodities too, with the
 
 **理論價.** Every strike shows the model price at one reference vol for the whole chain next to the market mid, with the difference: at the ATM IV the difference is the skew premium; at the 20-day realized vol it is what the market charges over realized. The toggle sits in the chain legend. Nothing is estimated — where a side has no quote the cell prints —.
 
-**Not verified.** The proxy's live path for NQ / ZM / ZL / LE / HE / BZ (trading-class guesses in `main.py` degrade gracefully). Multipliers were taken from IB's option descriptions where the capture reported them (ES 50, NQ 20, ZC/ZS 5000 — i.e. ×US$50 per cent).
+**What landed.** Thirteen products, ~1,900 contracts, 680 KB: ES, NQ, VIX, ZC, ZS, ZW, ZM, ZL, LE, HE, CL, NG, BZ. Multipliers are IB's own, from the option descriptions (ES 50, NQ 20, grains 5,000 bu, ZL 60,000 lb, livestock 40,000 lb, CL / BZ 1,000 bbl, NG 10,000 MMBtu); ZM's descriptions carry no multiplier, so its ×100 is the exchange spec and is marked as such. Where IB reported a valid midpoint IV it is used verbatim — the ATM numbers on screen (CL 73.9%, ZW 43.0%, NG 50.4%, ZM 22.8%, ZL 27.0%) are IB's, not ours. Livestock and Brent list no weeklies, so those snapshots hold two monthlies.
+
+**Thin data is shown as thin.** BZ returned no bid or ask on any contract, so its chain prints 0.00/0.00 and the 理論價 difference falls back to the last trade — which is why its two sides disagree (36.5% call vs 74.9% put at the ATM). VIX's front expiry was one day out with frozen weekend quotes, so its put wing reads above 200%. Both are the market data being wide, not a pricing bug; nothing is smoothed or filled in.
+
+**Not verified.** The proxy's live path for NQ / ZM / ZL / LE / HE / BZ (trading-class guesses in `main.py` degrade gracefully through `_sec_def`'s most-expirations fallback).
