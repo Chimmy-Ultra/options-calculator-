@@ -104,8 +104,10 @@ function OptionChain({ spot, contract = 'monthly', dte, product, rows: rowsProp,
   const border = dark ? 'rgba(255,255,255,0.06)' : 'rgba(25,40,70,0.08)';
   const rowAlt = dark ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.5)';
 
-  // Position badges: match legs to strike + type.
-  const legAt = (strike, type) => (legs || []).find((l) => l.strike === strike && l.type === type) || null;
+  // Position badges: a leg belongs to this row only when strike, call / put and
+  // expiry all match — legs without their own dte follow the workspace dte.
+  const legAt = (strike, type) => (legs || []).find((l) => l.strike === strike && l.type === type
+    && (l.dte == null ? dte : l.dte) === dte) || null;
 
   // Spot line vertical position within the grid (data area starts below the 28px header).
   const spotFrac = rows.length
@@ -271,28 +273,50 @@ function OptionChain({ spot, contract = 'monthly', dte, product, rows: rowsProp,
         </div>
       </div>
 
-      {/* BUY / SELL chooser popover (desktop). Click-outside overlay + Esc close. */}
-      {popover && (
-        <>
-          <div onClick={() => setPopover(null)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
-          <div style={{
-            position: 'fixed',
-            left: Math.min(popover.x, window.innerWidth - 184),
-            top: Math.min(popover.y + 6, window.innerHeight - 96),
-            zIndex: 41, width: 168, padding: 10, borderRadius: 0,
-            background: 'var(--panel2)', border: '1px solid var(--border)',
-            boxShadow: '0 12px 28px rgba(0,0,0,0.45)', color: 'var(--text)',
-          }}>
-            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', opacity: 0.75, marginBottom: 8, textAlign: 'center' }}>
-              {fmtStrike(popover.strike, step)} <span style={{ color: popover.type === 'call' ? '#ef5350' : '#26a69a', fontWeight: 700 }}>{popover.type === 'call' ? '買權' : '賣權'}</span> @ {fmtPx(popover.opt.last, P)}
+      {/* BUY / SELL chooser popover (desktop). 取消 button + click-outside overlay + Esc. */}
+      {popover && (() => {
+        const held = legAt(popover.strike, popover.type);
+        // Clicking the side already held adds a lot; the opposite side takes one
+        // off and closes the position when the last lot goes.
+        const sideNote = (legSide) => {
+          if (!held) return null;
+          if (held.side === legSide) return `\u2192 ${held.side === 'long' ? '買 +' : '賣 −'}${held.qty + 1}`;
+          return held.qty === 1 ? '平倉' : `\u2192 ${held.side === 'long' ? '買 +' : '賣 −'}${held.qty - 1}`;
+        };
+        const btn = (legSide, label, bg) => (
+          <button onClick={() => commitLeg(legSide)} style={{ flex: 1, padding: '7px 0', border: 'none', borderRadius: 0, cursor: 'pointer', background: bg, color: '#0a0d14', fontWeight: 800, fontSize: 11, fontFamily: 'inherit', lineHeight: 1.25 }}>
+            {label}
+            {sideNote(legSide) && <div className="tnum" style={{ fontSize: 8.5, fontWeight: 700, opacity: 0.7, fontFamily: 'var(--font-mono)' }}>{sideNote(legSide)}</div>}
+          </button>
+        );
+        return (
+          <>
+            <div onClick={() => setPopover(null)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
+            <div style={{
+              position: 'fixed',
+              left: Math.min(popover.x, window.innerWidth - 184),
+              top: Math.min(popover.y + 6, window.innerHeight - (held ? 172 : 140)),
+              zIndex: 41, width: 168, padding: 10, borderRadius: 0,
+              background: 'var(--panel2)', border: '1px solid var(--border)',
+              boxShadow: '0 12px 28px rgba(0,0,0,0.45)', color: 'var(--text)',
+            }}>
+              <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', opacity: 0.75, marginBottom: held ? 5 : 8, textAlign: 'center' }}>
+                {fmtStrike(popover.strike, step)} <span style={{ color: popover.type === 'call' ? '#ef5350' : '#26a69a', fontWeight: 700 }}>{popover.type === 'call' ? '買權' : '賣權'}</span> @ {fmtPx(popover.opt.last, P)}
+              </div>
+              {held && (
+                <div className="tnum" style={{ fontSize: 9.5, fontFamily: 'var(--font-mono)', textAlign: 'center', marginBottom: 7, padding: '3px 0', background: 'var(--panel)', border: '1px solid var(--border)' }}>
+                  目前 <b style={{ color: held.side === 'long' ? '#f0c068' : '#5fa3d4' }}>{held.side === 'long' ? '買 +' : '賣 −'}{held.qty}</b>
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 6 }}>
+                {btn('long', '買進', '#f0c068')}
+                {btn('short', '賣出', '#5fa3d4')}
+              </div>
+              <button onClick={() => setPopover(null)} style={{ width: '100%', marginTop: 6, padding: '6px 0', borderRadius: 0, cursor: 'pointer', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text2)', fontWeight: 600, fontSize: 10.5, fontFamily: 'inherit' }}>取消</button>
             </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button onClick={() => commitLeg('long')} style={{ flex: 1, padding: '8px 0', border: 'none', borderRadius: 0, cursor: 'pointer', background: '#f0c068', color: '#0a0d14', fontWeight: 800, fontSize: 11, fontFamily: 'inherit' }}>買進</button>
-              <button onClick={() => commitLeg('short')} style={{ flex: 1, padding: '8px 0', border: 'none', borderRadius: 0, cursor: 'pointer', background: '#5fa3d4', color: '#0a0d14', fontWeight: 800, fontSize: 11, fontFamily: 'inherit' }}>賣出</button>
-            </div>
-          </div>
-        </>
-      )}
+          </>
+        );
+      })()}
     </div>
   );
 }
