@@ -872,7 +872,9 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
     return () => el.removeEventListener('wheel', onWheel);
   }, [zoomAt]);
   if (!bars || bars.length < 2) return null;
-  const W = 768, H = 296, plotW = 720, pTop = 12, pBot = 196, vTop = 210, vBot = 274, dateY = 288;
+  // The right gutter carries two columns: the price tags (as before) and the
+  // percent axis beyond them, so neither has to give up its slot.
+  const W = 812, H = 296, plotW = 720, pTop = 12, pBot = 196, vTop = 210, vBot = 274, dateY = 288;
   const n = bars.length;                       // MA / RSI still run over the whole series
   const defSpan = Math.min(n, DEFAULT_VIEW_BARS);
   const span = view ? Math.max(MIN_VIEW_BARS, Math.min(n, view.to - view.from)) : defSpan;
@@ -905,6 +907,37 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
   const grid = dark ? 'rgba(255,255,255,0.10)' : 'rgba(20,30,50,0.12)';
   const dec = pMax >= 5000 ? 0 : pMax >= 100 ? 1 : 2;
   const fmt = (p) => p.toFixed(dec);
+  // Right-hand percent axis, against the previous session's close so the last
+  // bar reads the same number as the headline. (moomoo scales its percent axis
+  // to the first visible bar, which re-bases on every zoom; this keeps the
+  // chart and the top bar telling one story.)
+  const pctBase = n >= 2 ? bars[n - 2].c : bars[n - 1].c;
+  const fmtPct = (p) => {
+    const v = pctBase > 0 ? (p / pctBase - 1) * 100 : 0;
+    return { text: `${v >= 0 ? '+' : '\u2212'}${Math.abs(v).toFixed(2)}%`, col: v >= 0 ? up : down };
+  };
+  // The visible window's extremes, annotated moomoo-style further down.
+  const hiBar = vis.reduce((a, b) => (b.h > a.h ? b : a), vis[0]);
+  const loBar = vis.reduce((a, b) => (b.l < a.l ? b : a), vis[0]);
+  const extremes = [
+    { i: from + vis.indexOf(hiBar), price: hiBar.h, dy: -9 },
+    { i: from + vis.indexOf(loBar), price: loBar.l, dy: 10 },
+  ];
+  // Range presets, the row moomoo puts under the chart tabs. One that needs
+  // more bars than the series holds is dropped rather than clamped, so no two
+  // buttons land on the same window.
+  const ytdBars = (() => {
+    const yr = String(bars[n - 1].t || '').slice(0, 4);
+    let k = 0;
+    for (let i = n - 1; i >= 0 && String(bars[i].t || '').slice(0, 4) === yr; i--) k++;
+    return k;
+  })();
+  const seenSpan = new Set();
+  const presets = [
+    { label: '1\u6708', bars: 22 }, { label: '3\u6708', bars: 63 }, { label: '\u534a\u5e74', bars: 126 },
+    { label: '\u4eca\u5e74', bars: ytdBars }, { label: '1\u5e74', bars: 252 },
+  ].filter((x) => x.bars >= MIN_VIEW_BARS && x.bars < n && !seenSpan.has(x.bars) && seenSpan.add(x.bars))
+    .concat([{ label: '\u5168\u90e8', bars: n }]);
 
   // simple moving average polyline (starts at bar k-1)
   const maPts = (k) => {
@@ -948,7 +981,7 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
   const gridLines = [0.12, 0.37, 0.62, 0.87].map((f) => {
     const p = pMin + f * (pMax - pMin);
     const gy = y(p);
-    return { y: gy, lab: fmt(p), hideLabel: axisTags.some((l) => Math.abs(gy - l.ty) < 11) };
+    return { y: gy, price: p, lab: fmt(p), hideLabel: axisTags.some((l) => Math.abs(gy - l.ty) < 11) };
   });
 
   return (
@@ -983,6 +1016,22 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
         </span>
       </div>
 
+      {/* Range presets — click a period instead of scrolling the wheel back. */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
+        {presets.map((r) => {
+          const on = span === r.bars && to === n;
+          return (
+            <button key={r.label} onClick={() => setView({ from: n - r.bars, to: n })} style={{
+              padding: '3px 9px', borderRadius: 2, border: '1px solid var(--border)',
+              background: on ? 'rgba(240,192,104,0.16)' : 'transparent',
+              borderColor: on ? '#f0c068' : 'var(--border)',
+              color: on ? '#f0c068' : 'var(--text2)',
+              fontFamily: 'inherit', fontSize: 10, fontWeight: 600, cursor: 'pointer', lineHeight: 1.4,
+            }}>{r.label}</button>
+          );
+        })}
+      </div>
+
       <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width="100%"
            style={{ display: 'block', fontFamily: 'var(--font-mono)', cursor: view ? 'grab' : 'default', touchAction: 'none' }}
            onPointerDown={(e) => {
@@ -1004,12 +1053,17 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
         <defs>
           <clipPath id="pc-plot"><rect x="0" y="0" width={plotW} height={vBot} /></clipPath>
         </defs>
-        {gridLines.map((g, i) => (
-          <g key={i}>
-            <line x1="0" x2={plotW} y1={g.y} y2={g.y} stroke={grid} strokeDasharray="2 4" />
-            {!g.hideLabel && <text x={plotW + 6} y={g.y + 3} fontSize="9" fill={txt}>{g.lab}</text>}
-          </g>
-        ))}
+        <text x={W - 4} y="8" fontSize="8" fill={txt} fillOpacity="0.8" textAnchor="end">vs 昨收</text>
+        {gridLines.map((g, i) => {
+          const pc = fmtPct(g.price);
+          return (
+            <g key={i}>
+              <line x1="0" x2={plotW} y1={g.y} y2={g.y} stroke={grid} strokeDasharray="2 4" />
+              {!g.hideLabel && <text x={plotW + 6} y={g.y + 3} fontSize="9" fill={txt}>{g.lab}</text>}
+              <text x={W - 4} y={g.y + 3} fontSize="8.5" fill={pc.col} fillOpacity="0.9" textAnchor="end">{pc.text}</text>
+            </g>
+          );
+        })}
         {vis.map((b, k) => {
           const i = from + k;
           const isUp = b.c >= b.o;
@@ -1081,6 +1135,32 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
           );
         })()}
         {lastOnScale && <line x1="0" x2={plotW} y1={lastY} y2={lastY} stroke="#f0c068" strokeWidth="0.8" strokeDasharray="4 3" strokeOpacity="0.7" />}
+        {/* Window high / low, marked the way moomoo does: a thin leader out of
+            the wick tip into empty space, the price as plain text with no chip,
+            pointing right unless the bar sits near the right edge. Drawn last
+            so a level chip cannot bury it. */}
+        {extremes.map((m, k) => {
+          const x0 = cx(m.i), y0 = y(m.price);
+          const dir = x0 < plotW * 0.72 ? 1 : -1;
+          const x1 = Math.max(4, Math.min(plotW - 4, x0 + dir * 30));
+          // Keep the label inside the price pane: a low sitting on the floor
+          // would otherwise drop its text into the volume row.
+          const y1 = Math.max(pTop + 10, Math.min(pBot - 8, y0 + m.dy));
+          const above = y1 <= y0;
+          return (
+            <g key={'ex' + k}>
+              <line x1={x0} x2={x1} y1={y0} y2={y1} stroke={txt} strokeWidth="0.8" strokeOpacity="0.8" />
+              <text x={x1 + dir * 3} y={above ? y1 - 1 : y1 + 7} fontSize="8.5" fontWeight="600"
+                    fill={txt} textAnchor={dir > 0 ? 'start' : 'end'}>{fmt(m.price)}</text>
+            </g>
+          );
+        })}
+        <g>
+          <rect x="3" y={vTop - 13} width="82" height="12" rx="2" fill={dark ? 'rgba(11,14,19,0.74)' : 'rgba(255,255,255,0.8)'} />
+          <text x="6" y={vTop - 4} fontSize="8.5" fontWeight="600" fill={txt} fillOpacity="0.9">
+            成交量 {(vis[nv - 1].v || 0).toLocaleString()}
+          </text>
+        </g>
         {(() => {
           // Label real bars, never interpolated dates: pick evenly spaced
           // indices in the window, then drop any whose text would touch its
