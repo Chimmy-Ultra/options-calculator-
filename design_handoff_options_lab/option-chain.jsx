@@ -20,7 +20,11 @@ function genChain({ spot, contract, dte = 17, product }) {
     // Mock IV smile
     const ivBase = (P.ivBase && (P.ivBase[contract] != null ? P.ivBase[contract] : P.ivBase.std))
       || (contract === 'weekly' ? 22 : 24);
-    const iv = ivBase + Math.pow(m * 6, 1.6) * 8 + (i * skewUp > 0 ? 1.2 : -0.4);
+    // Smooth mock term structure: ATM IV rises gently with dte (calm-market
+    // upward slope, ±0.9 pts over ~3 months) so the IV-surface term axis and
+    // the term-structure card carry real gradients instead of flat steps.
+    const termAdj = 1.8 * (1 - Math.exp(-dte / 60)) - 0.9;
+    const iv = ivBase + termAdj + Math.pow(m * 6, 1.6) * 8 + (i * skewUp > 0 ? 1.2 : -0.4);
     const callPx = window.bsPrice('call', spot, strike, iv, dte, r, model);
     const putPx = window.bsPrice('put', spot, strike, iv, dte, r, model);
     const half = Math.max(strikeStep * 0.02, callPx * 0.02, putPx * 0.02); // bid-ask 半寬

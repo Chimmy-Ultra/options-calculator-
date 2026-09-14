@@ -1,21 +1,81 @@
-# IB Proxy — 農產品期貨選擇權（ZC / ZS / ZW）
+# 行情代理 — 期貨選擇權 + 台指選擇權（唯讀）
 
-把你本機 **TWS 或 IB Gateway** 的 CBOT 穀物期貨選擇權行情餵給 Options Lab 前端。
-前端偵測到這個 proxy 活著就自動切到真實數據（頂欄顯示 `● IB`），偵測不到就留在 mock（`○ MOCK`）。
+把兩個券商的期權行情餵給 Options Lab 前端。前端偵測到這個 proxy 活著就自動切到真實
+數據（頂欄顯示 `● IB` 或 `● SinoPac`），偵測不到就留在 mock（`○ MOCK`）。
+
+| 資料源 | 商品 | 需要 |
+|---|---|---|
+| **IB**（Interactive Brokers）| ZC / ZS / ZW（CBOT 穀物）、ES（CME 小標普）、GC（COMEX 黃金）、CL / NG（NYMEX 原油/天然氣）| 本機開著 TWS 或 IB Gateway |
+| **SinoPac**（永豐金 Shioaji）| **TXO 台指選擇權** | API key + secret key（不用憑證）|
+
+每個商品在 `main.py` 的 `PRODUCTS` 用 `source` 欄位指定走哪一邊，前端則看 `products.js`
+的 `live` 欄位。各商品合約規格見 `../docs/products.md`。
 
 ```
-瀏覽器 ──HTTP──▶ 這個 proxy (FastAPI, :8720) ──TWS API──▶ TWS / IB Gateway ──▶ IB
+                       ┌─ TWS API ─▶ TWS / IB Gateway ─▶ IB
+瀏覽器 ─HTTP─▶ proxy ──┤
+              (:8720)  └─ Shioaji ──▶ 永豐金
 ```
 
-## 1. TWS / IB Gateway 設定（一次性）
+## 只做研究、不下單 — 這樣接就對了
+
+這個 proxy **只讀行情與持倉，永遠不送任何委託單**（沒有下單端點）。純研究的話：
+
+1. **勾 Read-Only API 最安全**。TWS → Global Configuration → API → Settings 把
+   **Read-Only API 打勾**，這樣連理論上都不可能下單，proxy 照樣能讀行情跟部位。
+2. **不用付即時行情訂閱也能用**。沒訂閱交易所即時數據時，IB 會給**延遲 15 分鐘**的資料；
+   proxy 預設就是走這個（`IB_MARKET_DATA_TYPE=3`）。要即時報價才需要各交易所的月費訂閱。
+3. **紙上帳戶（paper）就夠**做純研究、拿延遲資料，不碰真錢。
+   ⚠️ 但**部位匯入（⟳ IB）只有帳戶真的持有那些選擇權才會有東西**；paper 沒部位就回空陣列。
+4. **線上 Vercel 版打不到你本機 proxy**（瀏覽器擋 public 頁面呼叫 localhost）。
+   要用真實資料，前端也要在本機跑（見下面第 3 步）。
+
+會踩到的實際上限：串流報價「行數」IB 預設約 100 條（鏈一次抓 ~34 個合約收完就取消，不會爆）；
+歷史 K 棒有 pacing 限制（proxy 快取 5 分鐘）。
+
+## 1a. 永豐 Shioaji 設定（TXO，一次性）
+
+純研究只要 **API key + secret key**，**不需要電子憑證**（憑證只有下單和查帳務才要）。
+
+1. 到永豐 [Shioaji 憑證與金鑰頁](https://sinotrade.github.io/zh_TW/tutor/prepare/token/) 產生
+   API key / secret key。行情權限即可，不必開「交易」權限。
+2. 裝套件並設環境變數後啟動 proxy：
+
+```bash
+pip install shioaji                      # 只有要用 TXO 才需要
+export SINOPAC_API_KEY=你的_api_key
+export SINOPAC_SECRET_KEY=你的_secret_key
+export SINOPAC_SIMULATION=1              # 1=模擬(預設，不碰真錢) 0=正式行情
+uvicorn main:app --host 127.0.0.1 --port 8720
+```
+
+**接不上時先跑自我檢查**（逐步檢查套件 → 金鑰 → 登入 → 合約 → 報價）：
+
+```bash
+python3 check_sinopac.py
+```
+
+它會告訴你確切卡在哪一步，並針對常見原因給建議（金鑰帶到引號、沒開行情權限、
+模擬環境沒申請、連不到伺服器…）。**輸出只顯示金鑰長度、不含金鑰內容**，可以安全貼給別人求助。
+
+proxy 起來後也能查：`curl "http://127.0.0.1:8720/api/health?pid=txo"` → `"connected": true`。
+回傳的 `sinopac` 區塊會分別告訴你 `installed`（套件裝了沒）和 `configured`（金鑰設了沒）。
+
+**這條路徑的已知限制**
+- Shioaji 快照**不含未平倉量（OI）**，所以 TXO live 模式下 OI Profile / Max Pain 沒有資料
+  （前端偵測到整條鏈都沒 OI 時，流動性評分會自動改用買賣價差判斷，不會誤標成「乾涸」）。
+- 快照也不含希臘值 → IV 由權利金反推（Black-Scholes on 加權指數，跟前端 TXO 定價同一套）。
+- **不提供部位匯入**：帳務要憑證，唯讀研究刻意不設，所以 TXO 沒有 `⟳` 匯入鈕。
+
+## 1b. TWS / IB Gateway 設定（期貨選擇權，一次性）
 
 1. 登入 TWS（或 IB Gateway）。
 2. **File → Global Configuration → API → Settings**：
    - 勾選 **Enable ActiveX and Socket Clients**
-   - 取消勾選 **Read-Only API**（本 proxy 只讀行情，勾著其實也行）
+   - 純研究建議勾 **Read-Only API**（proxy 只讀，勾了更保險）
    - Socket port 記下來：TWS 紙上 `7497`、TWS 實盤 `7496`、Gateway 紙上 `4002`、Gateway 實盤 `4001`（proxy 會依序自動試這四個）
    - Trusted IPs 加 `127.0.0.1`
-3. 沒訂閱 CME 即時行情也沒關係——proxy 預設 `IB_MARKET_DATA_TYPE=3`，自動用 **15 分鐘延遲數據**。
+3. 沒訂閱即時行情也沒關係——proxy 預設 `IB_MARKET_DATA_TYPE=3`，自動用 **15 分鐘延遲數據**。
 
 ## 2. 啟動 proxy
 
@@ -28,42 +88,73 @@ uvicorn main:app --host 127.0.0.1 --port 8720
 
 檢查：`curl http://127.0.0.1:8720/api/health` → `"connected": true` 就通了。
 
-## 3. 開前端
+## 3. 開前端（本機）
 
 ```bash
 cd design_handoff_options_lab
 python3 -m http.server 8080
 ```
 
-瀏覽器開 `http://localhost:8080`，頂欄商品切到 **ZC / ZS / ZW**：
+瀏覽器開 `http://localhost:8080`，切商品：**TXO** 走永豐、其餘走 IB。
 
 - 到期日列會換成 IB 的真實月選到期日
-- Chain 頁是真實報價（bid/ask/last/IV/OI）
+- Chain 頁是真實報價（bid/ask/last/IV/OI/Δ）
 - spot 會跟著該到期日對應的期貨月份價格
-
-> Vercel 上的線上版打不到你本機的 proxy（瀏覽器擋 private network），要用真實數據請照上面在本機開前端。
+- 連線後：報價每 10 秒、鏈每 30 秒自動刷新；頂欄時間戳超過 45 秒會變 `STALE`
+- Calculator 的 Legs 面板出現 **⟳ IB**：一鍵把你的真實部位載入 legs（真實成本 + 各腿到期日）
 
 ## 環境變數
 
 | 變數 | 預設 | 說明 |
 |---|---|---|
+| `SINOPAC_API_KEY` | — | 永豐 API key（TXO 必需）|
+| `SINOPAC_SECRET_KEY` | — | 永豐 secret key |
+| `SINOPAC_SIMULATION` | `1` | 1=模擬 0=正式行情 |
+| `SINOPAC_TXO_CATEGORIES` | `TXO,TX1,TX2,TX4,TX5` | 要收的選擇權類別（月選 + 週選）|
+| `RISK_FREE_TW` | `0.015` | TXO 反推 IV 用的無風險利率 |
 | `IB_HOST` | `127.0.0.1` | TWS / Gateway 位址 |
 | `IB_PORTS` | `7497,7496,4002,4001` | 依序嘗試的 port |
 | `IB_CLIENT_ID` | `27` | API client id（跟其他程式撞了就換一個） |
 | `IB_MARKET_DATA_TYPE` | `3` | 1=即時 3=延遲（沒訂閱自動退） |
 | `RISK_FREE` | `0.04` | IV 反推用的無風險利率 |
 
-## 端點
+## 端點（全部唯讀）
+
+`{pid}` = `txo`（永豐）/ `zc` / `zs` / `zw` / `es` / `gc` / `cl` / `ng`（IB）。
+端點形狀兩邊一致，前端不需要知道背後是哪個券商。
 
 | 端點 | 回傳 |
 |---|---|
-| `GET /api/health` | `{connected, host, port, marketDataType}` |
-| `GET /api/quote/zc` | 近月期貨報價 `{last, bid, ask, close, chgPct, month}` |
-| `GET /api/expiries/zc` | `[{id: "20260821", label: "SEP", dte, date}]` |
-| `GET /api/chain/zc?expiry=20260821` | `{underlying: {month, price}, rows: [...]}`（rows 跟前端 genChain 同形狀） |
+| `GET /api/health?pid=` | `{connected, source, ib:{...}, sinopac:{...}}` — 帶 `pid` 時只回報服務該商品的那個資料源 |
+| `GET /api/quote/{pid}` | 近月期貨報價 `{last, bid, ask, close, chgPct, month}` |
+| `GET /api/expiries/{pid}` | `[{id: "20260821", label: "SEP", dte, date}]` |
+| `GET /api/chain/{pid}?expiry=20260821` | `{underlying: {month, price}, rows: [...]}`（rows 跟前端 genChain 同形狀） |
+| `GET /api/bars/{pid}?bar=1 day&duration=3 M` | 近月期貨歷史 K 棒 `{bars: [{t,o,h,l,c,v}]}` |
+| `GET /api/positions/{pid}` | 帳戶內該商品的選擇權部位 `{positions: [{side, type, strike, premium, qty, expiry, dte}]}` |
 
-## 已知限制（v1）
+`/api/positions` 只回 secType == FOP 且 symbol / tradingClass 對得上的部位；premium 已換算成
+「點數」（averageCost ÷ multiplier），跟前端 legs 的 premium 慣例一致。**沒有任何下單端點。**
 
-- 只接標準月選（trading class `OZC` / `OZS` / `OZW`），weekly 先不接。
+## 已知限制
+
+- IB 路徑只接標準月選（trading class `OZC` / `OZS` / `OZW` / `ES` / `OG` / `LO` / `ON`），weekly 先不接。
+  新商品的 tradingClass 是標準月選的最佳猜測；對不上時 `_sec_def()` 會退到到期日最多的那個 class。
+  （永豐路徑的 TXO 月選 + 週選都收。）
 - IV Surface 3D 仍是造型化 mock，還沒接真實曲面。
 - 期權鏈快照等 6 秒收一輪，延遲數據偶爾會有缺格（顯示 0）；30 秒內重複請求走快取。
+- 期貨選擇權理論價用歐式 Black-76 近似（真實是美式），OI 靠 generic tick 101。
+
+## TAIFEX open data (probe)
+
+Open interest is not part of the Shioaji feed; TAIFEX publishes it once a
+day after the close. Before wiring a `taifex.py` source, check what your
+machine can reach:
+
+```bash
+python3 check_taifex.py
+```
+
+It lists the options-related paths in TAIFEX's OpenAPI, calls the daily
+reports and the historical CSV download, and reports which of them carries a
+per-strike OI column. No credentials; nothing is written. The design that
+would consume it is in `docs/daytrade-redesign.md`.

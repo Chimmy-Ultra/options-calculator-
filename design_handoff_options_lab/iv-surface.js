@@ -42,7 +42,47 @@
     return sp;
   }
 
-  function makeIVSurface({ container, segments = 70 }) {
+  // Bilinear sample over a strike × expiry IV matrix (percent values).
+  // xn, zn ∈ [-1, 1]; row 0 (nearest expiry) sits at zn = -1. Falls back to the
+  // procedural smile when no data is supplied (mobile still calls without data).
+  function makeSampler(data) {
+    if (!data || !data.iv || !data.iv.length || !data.iv[0] || data.iv[0].length < 2) {
+      return { sample: (xn, zn) => ivValue(xn, (zn + 1) / 2), lo: 0.18, hi: 0.40 };
+    }
+    // Sanitize: nulls → nearest non-null in the row, else the global mean.
+    const rows = data.iv.map((r) => r.slice());
+    let sum = 0, n = 0;
+    rows.forEach((r) => r.forEach((v) => { if (v != null && v > 0) { sum += v; n++; } }));
+    const mean = n ? sum / n : 24;
+    rows.forEach((r) => {
+      for (let i = 0; i < r.length; i++) {
+        if (r[i] == null || r[i] <= 0) {
+          let f = null;
+          for (let d = 1; d < r.length && f == null; d++) {
+            if (r[i - d] != null && r[i - d] > 0) f = r[i - d];
+            else if (r[i + d] != null && r[i + d] > 0) f = r[i + d];
+          }
+          r[i] = f != null ? f : mean;
+        }
+      }
+    });
+    const nR = rows.length, nC = rows[0].length;
+    let lo = Infinity, hi = -Infinity;
+    rows.forEach((r) => r.forEach((v) => { if (v < lo) lo = v; if (v > hi) hi = v; }));
+    const sample = (xn, zn) => {
+      const c = ((xn + 1) / 2) * (nC - 1);
+      const r = nR > 1 ? ((zn + 1) / 2) * (nR - 1) : 0;
+      const c0 = Math.max(0, Math.min(nC - 1, Math.floor(c))), c1 = Math.min(nC - 1, c0 + 1);
+      const r0 = Math.max(0, Math.min(nR - 1, Math.floor(r))), r1 = Math.min(nR - 1, r0 + 1);
+      const fc = c - c0, fr = r - r0;
+      const top = rows[r0][c0] * (1 - fc) + rows[r0][c1] * fc;
+      const bot = rows[r1][c0] * (1 - fc) + rows[r1][c1] * fc;
+      return (top * (1 - fr) + bot * fr) / 100; // percent → decimal
+    };
+    return { sample, lo: lo / 100, hi: hi / 100 };
+  }
+
+  function makeIVSurface({ container, segments = 70, data }) {
     if (!READY() || !container) return null;
     container.innerHTML = '';
     const w = container.clientWidth, h = container.clientHeight;
@@ -58,18 +98,7 @@
     const geom = new THREE.PlaneGeometry(size, size, segments, segments);
     geom.rotateX(-Math.PI / 2);
     const colors = new Float32Array(geom.attributes.position.count * 3);
-    const pos = geom.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i) / (size/2);
-      const z = pos.getZ(i) / (size/2);
-      const t01 = (z + 1) / 2;
-      const v = ivValue(x, t01);
-      pos.setY(i, (v - 0.18) * 4);
-      const c = ivColor(v);
-      colors[i*3] = c.r; colors[i*3+1] = c.g; colors[i*3+2] = c.b;
-    }
     geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    geom.computeVertexNormals();
 
     const mat = new THREE.MeshPhysicalMaterial({
       vertexColors: true, roughness: 0.4, metalness: 0.12, clearcoat: 0.7,
@@ -78,9 +107,62 @@
     });
     scene.add(new THREE.Mesh(geom, mat));
 
-    const wireGeom = new THREE.WireframeGeometry(geom);
-    const wire = new THREE.LineSegments(wireGeom, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.10 }));
+    const wire = new THREE.LineSegments(new THREE.WireframeGeometry(geom), new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.10 }));
     scene.add(wire);
+
+    // Dynamic tick labels (IV %, strike ends, expiry ends) — cleared and
+    // refilled on every data update.
+    const tickGroup = new THREE.Group();
+    scene.add(tickGroup);
+
+    function rebuild(d) {
+      const { sample, lo, hi } = makeSampler(d);
+      const span = Math.max(hi - lo, 0.02);
+      const pos = geom.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const xn = pos.getX(i) / (size/2);
+        const zn = pos.getZ(i) / (size/2);
+        const v = sample(xn, zn);
+        const t = (v - lo) / span;
+        pos.setY(i, t * 0.85);
+        // Reuse the violet→amber ramp: it maps [0.18, 0.40] → t, so feed it the
+        // normalized position on that same range regardless of the data's span.
+        const cc = ivColor(0.18 + t * 0.22);
+        colors[i*3] = cc.r; colors[i*3+1] = cc.g; colors[i*3+2] = cc.b;
+      }
+      pos.needsUpdate = true;
+      geom.attributes.color.needsUpdate = true;
+      geom.computeVertexNormals();
+      wire.geometry.dispose();
+      wire.geometry = new THREE.WireframeGeometry(geom);
+
+      // Refill tick labels.
+      while (tickGroup.children.length) {
+        const ch = tickGroup.children.pop();
+        if (ch.material) { if (ch.material.map) ch.material.map.dispose(); ch.material.dispose(); }
+        if (ch.geometry) ch.geometry.dispose();
+      }
+      const axColor = '#aab4c2';
+      const pct = (v) => (v * 100).toFixed(0) + '%';
+      [
+        { y: 0.85, t: pct(hi) }, { y: 0.425, t: pct((lo + hi) / 2) }, { y: 0, t: pct(lo) },
+      ].forEach(({ y, t }) => {
+        const s = makeLabel(t, axColor); s.position.set(-1.05, y + 0.02, -1); s.scale.set(0.4, 0.1, 1); tickGroup.add(s);
+        const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-1,y,-1), new THREE.Vector3(-0.94,y,-1)]);
+        tickGroup.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xaab4c2, transparent: true, opacity: 0.4 })));
+      });
+      if (d && d.strikes && d.strikes.length > 1) {
+        const fmtK = (k) => (d.strikes[1] - d.strikes[0] < 1 ? k.toFixed(2) : String(Math.round(k)));
+        const s0 = makeLabel(fmtK(d.strikes[0]), axColor); s0.position.set(-0.9, 0.14, -1.1); s0.scale.set(0.4, 0.1, 1); tickGroup.add(s0);
+        const s1 = makeLabel(fmtK(d.strikes[d.strikes.length - 1]), axColor); s1.position.set(1.0, 0.14, -1.1); s1.scale.set(0.4, 0.1, 1); tickGroup.add(s1);
+      }
+      if (d && d.expiries && d.expiries.length > 1) {
+        const e0 = makeLabel(`${d.expiries[0].label} ${d.expiries[0].dte}d`, axColor); e0.position.set(-1.12, 0.14, -0.8); e0.scale.set(0.42, 0.105, 1); tickGroup.add(e0);
+        const eN = d.expiries[d.expiries.length - 1];
+        const e1 = makeLabel(`${eN.label} ${eN.dte}d`, axColor); e1.position.set(-1.12, 0.14, 1.0); e1.scale.set(0.42, 0.105, 1); tickGroup.add(e1);
+      }
+    }
+    rebuild(data);
 
     // Axes
     const axColor = '#aab4c2';
@@ -94,14 +176,7 @@
     const lblX = makeLabel('STRIKE →', axColor); lblX.position.set(0.6, 0.05, -1.1); scene.add(lblX);
     const lblY = makeLabel('DTE →', axColor); lblY.position.set(-1.15, 0.05, 0.6); scene.add(lblY);
     const lblZ = makeLabel('IV %', axColor); lblZ.position.set(-1.05, 1.0, -1); scene.add(lblZ);
-
-    [
-      { y: 0.88, t: '40%' }, { y: 0.44, t: '29%' }, { y: 0, t: '18%' },
-    ].forEach(({ y, t }) => {
-      const s = makeLabel(t, axColor); s.position.set(-1.05, y, -1); s.scale.set(0.4, 0.1, 1); scene.add(s);
-      const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-1,y,-1), new THREE.Vector3(-0.94,y,-1)]);
-      scene.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xaab4c2, transparent: true, opacity: 0.4 })));
-    });
+    // IV % tick labels live in tickGroup (rebuilt per data update) — see rebuild().
 
     // Lights
     scene.add(new THREE.AmbientLight(0xffffff, 0.5));
@@ -186,7 +261,12 @@
       renderer.setSize(W, H); camera.aspect = W/H; camera.updateProjectionMatrix();
     });
     ro.observe(container);
-    return { destroy() { cancelAnimationFrame(raf); ro.disconnect(); if (io) io.disconnect(); renderer.dispose(); if(dom.parentNode) dom.parentNode.removeChild(dom); } };
+    return {
+      // Update the surface in place (no WebGL remount) — used when the What-if
+      // spot/IV sliders regenerate the chain grid.
+      setData(d) { try { rebuild(d); } catch (e) { console.error('IVSurface3D.setData failed', e); } },
+      destroy() { cancelAnimationFrame(raf); ro.disconnect(); if (io) io.disconnect(); renderer.dispose(); if(dom.parentNode) dom.parentNode.removeChild(dom); },
+    };
   }
 
   window.IVSurface3D = { make: makeIVSurface };

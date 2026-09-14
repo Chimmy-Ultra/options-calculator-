@@ -18,6 +18,11 @@
       fees: { perSide: 20, taxRate: 0.001 },
       settleNote: '13:30',
       ivBase: { weekly: 22, monthly: 24 },
+      // 即時資料源：'sinopac' = 永豐金 Shioaji（見 server/sinopac.py）。
+      // null = 只有 mock。ib 欄位僅 IB 商品使用。
+      live: 'sinopac',
+      // 永豐的帳務/部位需要電子憑證，唯讀研究設定刻意不裝 → 不提供部位匯入。
+      livePositions: false,
       ib: null,           // TXO 不走 IB
       mockExpiries: null, // null → 用 obsidian3.jsx 的 TXO_EXPIRIES
     },
@@ -34,6 +39,7 @@
       // ~US$2.5 per contract per side (IB commission + exchange fees, rough
       // all-in); no separate premium tax. Broker-dependent — tune per account.
       fees: { perSide: 2.5, taxRate: 0 },
+      live: 'ib', livePositions: true,
       ib: { symbol: 'ZC', exchange: 'CBOT' },
       mockExpiries: [
         { id: 'sep', label: 'SEP', dte: 43,  type: 'std', date: '8/21'  },
@@ -52,6 +58,7 @@
       settleNote: '13:20 CT',
       ivBase: { std: 20 },
       fees: { perSide: 2.5, taxRate: 0 },
+      live: 'ib', livePositions: true,
       ib: { symbol: 'ZS', exchange: 'CBOT' },
       mockExpiries: [
         { id: 'aug', label: 'AUG', dte: 15,  type: 'std', date: '7/24'  },
@@ -71,6 +78,7 @@
       settleNote: '13:20 CT',
       ivBase: { std: 30 },
       fees: { perSide: 2.5, taxRate: 0 },
+      live: 'ib', livePositions: true,
       ib: { symbol: 'ZW', exchange: 'CBOT' },
       mockExpiries: [
         { id: 'sep', label: 'SEP', dte: 43,  type: 'std', date: '8/21'  },
@@ -92,6 +100,7 @@
       ivBase: { std: 15 },
       fees: { perSide: 2.5, taxRate: 0 },
       // Standard end-of-month options trading class is 'ES' on CME.
+      live: 'ib', livePositions: true,
       ib: { symbol: 'ES', exchange: 'CME', tradingClass: 'ES' },
       mockExpiries: [
         { id: 'm1', label: 'JUL', dte: 35,  type: 'std', date: '7/18' },
@@ -110,6 +119,7 @@
       settleNote: '12:30 CT',
       ivBase: { std: 18 },
       fees: { perSide: 2.5, taxRate: 0 },
+      live: 'ib', livePositions: true,
       ib: { symbol: 'GC', exchange: 'COMEX', tradingClass: 'OG' },
       mockExpiries: [
         { id: 'm1', label: 'AUG', dte: 28,  type: 'std', date: '7/25' },
@@ -128,6 +138,7 @@
       settleNote: '14:30 CT',
       ivBase: { std: 33 },
       fees: { perSide: 2.5, taxRate: 0 },
+      live: 'ib', livePositions: true,
       ib: { symbol: 'CL', exchange: 'NYMEX', tradingClass: 'LO' },
       mockExpiries: [
         { id: 'm1', label: 'AUG', dte: 21,  type: 'std', date: '7/17' },
@@ -146,6 +157,7 @@
       settleNote: '14:30 CT',
       ivBase: { std: 45 },
       fees: { perSide: 2.5, taxRate: 0 },
+      live: 'ib', livePositions: true,
       ib: { symbol: 'NG', exchange: 'NYMEX', tradingClass: 'ON' },
       mockExpiries: [
         { id: 'm1', label: 'AUG', dte: 26,  type: 'std', date: '7/28' },

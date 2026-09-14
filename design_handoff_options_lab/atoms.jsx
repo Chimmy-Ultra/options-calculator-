@@ -483,24 +483,28 @@ function pnlDistribution(legs, spot, ivPct, dte, opts = {}) {
 // Given chain rows (from genChain) and the user's legs, returns:
 //   { level: 'good' | 'warn' | 'bad', score, badLegs: [strike,...] }
 // "Bad" criteria: no matching strike in chain, OR bid-ask spread / mid > 0.30, OR OI < 50.
-function legLiquidity(leg, rows) {
+// hasOI=false → the feed doesn't publish open interest at all (SinoPac/Shioaji
+// snapshots carry volume but not OI), so judging on OI would flag every leg as
+// thin. Spread is then the only liquidity signal.
+function legLiquidity(leg, rows, hasOI = true) {
   const r = rows.find((rr) => rr.strike === leg.strike);
   if (!r) return { level: 'bad', reason: 'strike not listed' };
   const side = leg.type === 'call' ? r.call : r.put;
   const mid = (side.bid + side.ask) / 2;
   if (mid <= 0) return { level: 'bad', reason: 'no quote' };
   const spread = (side.ask - side.bid) / mid;
-  if (side.oi < 50 || spread > 0.30) return { level: 'warn', reason: 'thin / wide spread' };
+  if ((hasOI && side.oi < 50) || spread > 0.30) return { level: 'warn', reason: 'thin / wide spread' };
   return { level: 'good', reason: 'ok' };
 }
 function dataQuality(legs, rows) {
   if (!legs || legs.length === 0 || !rows || rows.length === 0) {
     return { level: 'good', label: 'no legs', bad: 0, warn: 0, total: 0 };
   }
+  const hasOI = rows.some((r) => (r.call && r.call.oi > 0) || (r.put && r.put.oi > 0));
   let bad = 0, warn = 0;
   const badLegs = [];
   for (const l of legs) {
-    const q = legLiquidity(l, rows);
+    const q = legLiquidity(l, rows, hasOI);
     if (q.level === 'bad') { bad++; badLegs.push(l.strike); }
     else if (q.level === 'warn') warn++;
   }
