@@ -812,6 +812,16 @@ const PRICE_MAS = [
 // close, ±1σ (68.27%) and ±2σ bands of S·IV·√(t/365) drawn forward to `days`
 // (the selected expiry) in a strip of empty slots to the right of the bars.
 const MIN_VIEW_BARS = 12;
+// Opening on a year of candles squeezed them to a few pixels each; the default
+// is the recent window and the wheel zooms back out to the whole series.
+const DEFAULT_VIEW_BARS = 30;
+// Bars carry `t` as YYYYMMDD. Axis labels drop the year unless the window spans
+// one, so a day chart reads 09/11 and a monthly one 2026/09.
+function barDateLabel(t, withYear) {
+  const s = String(t || '');
+  if (s.length < 8) return s;
+  return withYear ? `${s.slice(0, 4)}/${s.slice(4, 6)}` : `${s.slice(4, 6)}/${s.slice(6, 8)}`;
+}
 // Push overlapping right-axis tags apart: keep every dashed line at its true
 // price and move only the label, so a cluster of levels near spot stays
 // readable. Order is preserved and the run is kept inside [lo, hi].
@@ -841,10 +851,10 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
   React.useEffect(() => { setView(null); }, [seriesKey]);
   const zoomAt = React.useCallback((factor, fracX) => {
     setView((v) => {
-      const f = v ? v.from : 0, t = v ? v.to : nAll;
+      const d = Math.min(nAll, DEFAULT_VIEW_BARS);
+      const f = v ? v.from : nAll - d, t = v ? v.to : nAll;
       const span = t - f;
       const next = Math.max(Math.min(MIN_VIEW_BARS, nAll), Math.min(nAll, Math.round(span * factor)));
-      if (next >= nAll) return null;
       const nf = Math.max(0, Math.min(nAll - next, Math.round(f + span * fracX - next * fracX)));
       return { from: nf, to: nf + next };
     });
@@ -862,10 +872,11 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
     return () => el.removeEventListener('wheel', onWheel);
   }, [zoomAt]);
   if (!bars || bars.length < 2) return null;
-  const W = 768, H = 282, plotW = 720, pTop = 12, pBot = 196, vTop = 210, vBot = 274;
+  const W = 768, H = 296, plotW = 720, pTop = 12, pBot = 196, vTop = 210, vBot = 274, dateY = 288;
   const n = bars.length;                       // MA / RSI still run over the whole series
-  const span = view ? Math.max(MIN_VIEW_BARS, Math.min(n, view.to - view.from)) : n;
-  const from = view ? Math.max(0, Math.min(n - span, view.from)) : 0;
+  const defSpan = Math.min(n, DEFAULT_VIEW_BARS);
+  const span = view ? Math.max(MIN_VIEW_BARS, Math.min(n, view.to - view.from)) : defSpan;
+  const from = view ? Math.max(0, Math.min(n - span, view.from)) : n - defSpan;
   const to = from + span;
   const vis = bars.slice(from, to);
   const nv = vis.length;
@@ -966,9 +977,9 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
           })}
           <span><i style={{ display: 'inline-block', width: 14, height: 2, background: '#a78bfa', verticalAlign: 'middle', marginRight: 4 }} />RSI 14</span>
           {view
-            ? <span className="tnum" onClick={() => setView(null)} title="回到全部 K 棒"
+            ? <span className="tnum" onClick={() => setView(null)} title={`回到預設的近 ${Math.min(n, DEFAULT_VIEW_BARS)} 根`}
                     style={{ cursor: 'pointer', color: '#f0c068', fontWeight: 700, userSelect: 'none' }}>{nv}/{n} 根 · 重設</span>
-            : <span style={{ opacity: 0.45 }}>滾輪縮放 · 拖曳平移</span>}
+            : <span className="tnum" style={{ opacity: 0.45 }}>近 {nv}/{n} 根 · 滾輪縮放 · 拖曳平移</span>}
         </span>
       </div>
 
@@ -1070,6 +1081,29 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
           );
         })()}
         {lastOnScale && <line x1="0" x2={plotW} y1={lastY} y2={lastY} stroke="#f0c068" strokeWidth="0.8" strokeDasharray="4 3" strokeOpacity="0.7" />}
+        {(() => {
+          // Label real bars, never interpolated dates: pick evenly spaced
+          // indices in the window, then drop any whose text would touch its
+          // neighbour so the row stays readable at every zoom level.
+          const want = Math.max(2, Math.min(7, Math.floor(plotW / 92)));
+          const idx = [];
+          for (let j = 0; j < want; j++) idx.push(from + Math.round((j * (nv - 1)) / (want - 1)));
+          const firstT = String(vis[0].t || ''), lastT = String(vis[nv - 1].t || '');
+          const withYear = firstT.slice(0, 4) !== lastT.slice(0, 4);
+          const out = []; let prevX = -Infinity;
+          for (const i of [...new Set(idx)]) {
+            const x = Math.max(16, Math.min(plotW - 16, cx(i)));
+            if (x - prevX < 46) continue;
+            prevX = x;
+            out.push(
+              <g key={i}>
+                <line x1={cx(i)} x2={cx(i)} y1={vBot} y2={vBot + 3} stroke={txt} strokeOpacity="0.5" />
+                <text x={x} y={dateY} fontSize="8.5" fill={txt} textAnchor="middle">{barDateLabel(bars[i].t, withYear)}</text>
+              </g>
+            );
+          }
+          return out;
+        })()}
       </svg>
 
       <div style={{ fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600, margin: '10px 0 4px' }}>RSI · 14</div>
