@@ -479,7 +479,7 @@ Owner's direction: the site should analyse indices and commodities too, with the
 
 **What IB did not give.** `option-midpoint-iv` came back `isValid:false` on every contract outside CBOE / CME options hours, so IV is the bid/ask mid inverted with the same Black-76 the proxy uses, on that expiry's future. Volume was 0 (weekend). No previous-session OI, so `oiChg` is 0 and the OI table's change column stays empty for these products. Freshly listed weeklies with no quotes on any contract are dropped and named in the snapshot's `notes`. `get_option_data` returns grain strikes in $/bu while quotes are in cents; the workers keyed rows in cents and the daily bars are scaled ×100 (a power of ten only, checked against the front price).
 
-**VIX.** Index options, not futures options: the proxy has no path, the site reads the snapshot only. Each expiry is matched to the VX future that settles with it and priced off that future; the headline spot is the index level. Options with no listed 9 strike give 16-row chains.
+**VIX.** Index options, not futures options: the proxy has no path, the site reads the snapshot only. Each expiry is matched to the VX future that settles with it and priced off that future; the headline price is the front VX future, the K-line the index. Options with no listed 9 strike give 16-row chains.
 
 **理論價.** Every strike shows the model price at one reference vol for the whole chain next to the market mid, with the difference: at the ATM IV the difference is the skew premium; at the 20-day realized vol it is what the market charges over realized. The toggle sits in the chain legend. Nothing is estimated — where a side has no quote the cell prints —.
 

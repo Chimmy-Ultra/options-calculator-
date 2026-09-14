@@ -116,9 +116,9 @@ def build_product(cap: dict) -> dict | None:
     bars.sort(key=lambda b: b["t"])
     front = cap.get("front") or {}
     notes = list(cap.get("notes") or [])
+    # Headline price = the front future for every product, VIX included (its
+    # options price off the VX future; the daily bars stay the index level).
     spot = _num(front.get("last")) or _num(front.get("priorClose")) or (bars[-1]["c"] if bars else None)
-    if cap.get("secType") == "OPT" and bars:
-        spot = bars[-1]["c"]  # VIX: the index level; the chains price off each expiry's VX future
     if spot is None:
         return None
     # IB's history endpoint quotes CBOT grains in $/bu while the snapshots and
@@ -174,8 +174,7 @@ def build_product(cap: dict) -> dict | None:
         "label": f"IB {asof[4:6]}/{asof[6:]} {cap_dt.strftime('%H:%M')}Z",
         "date": f"{asof[:4]}/{asof[4:6]}/{asof[6:]}", "prevDate": None, "asOf": asof,
         "capturedAt": cap.get("capturedAt"), "builtAt": datetime.now().isoformat(timespec="seconds"),
-        "spot": {"price": spot, "ref": ref if cap.get("secType") != "OPT" else (bars[-2]["c"] if len(bars) > 1 else None),
-                 "date": asof, "time": None},
+        "spot": {"price": spot, "ref": ref, "date": asof, "time": None},
         "front": {"month": front.get("contractMonth"), "lastTradingDate": front.get("lastTradingDate"), "price": _num(front.get("last")),
                   "prevClose": _num(front.get("priorClose"))},
         "expiries": expiries, "chains": chains,
