@@ -39,8 +39,8 @@ function ThetaDecay({ theme = 'dark', height = 90, width = 280, dte = 17, dteMax
       <path d={path} stroke={stroke} strokeWidth="1.5" fill="none" />
       <line x1={mx} x2={mx} y1={pad/2} y2={H-pad} stroke={txt} strokeDasharray="2 3" strokeOpacity="0.5" />
       <circle cx={mx} cy={my} r="3.5" fill={stroke} stroke={theme === 'dark' ? '#0c0e14' : '#fff'} strokeWidth="1.5" />
-      <text x={pad} y={H-3} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace">now</text>
-      <text x={W-pad} y={H-3} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace" textAnchor="end">expiry · {dte}d</text>
+      <text x={pad} y={H-3} fontSize="9" fill={txt} style={{ fontFamily: 'var(--font-mono)' }}>now</text>
+      <text x={W-pad} y={H-3} fontSize="9" fill={txt} style={{ fontFamily: 'var(--font-mono)' }} textAnchor="end">expiry · {dte}d</text>
     </svg>
   );
 }
@@ -69,9 +69,9 @@ function IVSmile({ theme = 'dark', height = 80, width = 280, iv = 28 }) {
       <line x1={W/2} x2={W/2} y1={pad/2} y2={H-pad} stroke={axis} strokeDasharray="2 3" />
       <path d={path} stroke={stroke} strokeWidth="1.5" fill="none" />
       <circle cx={mid[0]} cy={mid[1]} r="3" fill={stroke} stroke={theme === 'dark' ? '#0c0e14' : '#fff'} strokeWidth="1.5" />
-      <text x={pad} y={H-2} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace">−ITM</text>
-      <text x={W/2} y={H-2} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace" textAnchor="middle">ATM</text>
-      <text x={W-pad} y={H-2} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace" textAnchor="end">+OTM</text>
+      <text x={pad} y={H-2} fontSize="9" fill={txt} style={{ fontFamily: 'var(--font-mono)' }}>−ITM</text>
+      <text x={W/2} y={H-2} fontSize="9" fill={txt} style={{ fontFamily: 'var(--font-mono)' }} textAnchor="middle">ATM</text>
+      <text x={W-pad} y={H-2} fontSize="9" fill={txt} style={{ fontFamily: 'var(--font-mono)' }} textAnchor="end">+OTM</text>
     </svg>
   );
 }
@@ -97,7 +97,7 @@ function POPGauge({ theme = 'dark', size = 110, value = 0.68 }) {
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H}>
       {arc(start, end, trackColor, 6)}
       {arc(start, a, fillColor, 6)}
-      <text x={cx} y={cy - 6} textAnchor="middle" fontSize="22" fontWeight="600" fill={txt} fontFamily="ui-monospace, SF Mono, monospace">{Math.round(t * 100)}%</text>
+      <text x={cx} y={cy - 6} textAnchor="middle" fontSize="22" fontWeight="600" fill={txt} style={{ fontFamily: 'var(--font-mono)' }}>{Math.round(t * 100)}%</text>
     </svg>
   );
 }
@@ -113,7 +113,7 @@ function ScenarioTimeline({ theme = 'dark', items, current }) {
         const isCurrent = i === current;
         return (
           <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', zIndex: 1 }}>
-            <div style={{ fontSize: 9, opacity: 0.55, marginBottom: 6, fontFamily: 'ui-monospace, SF Mono, monospace' }}>{it.t}</div>
+            <div style={{ fontSize: 9, opacity: 0.55, marginBottom: 6, fontFamily: 'var(--font-mono)' }}>{it.t}</div>
             <div style={{
               width: isCurrent ? 12 : 8, height: isCurrent ? 12 : 8, borderRadius: 999,
               background: it.pnl >= 0
@@ -122,7 +122,7 @@ function ScenarioTimeline({ theme = 'dark', items, current }) {
               boxShadow: isCurrent ? `0 0 0 4px ${dark ? 'rgba(240,192,104,0.20)' : 'rgba(217,154,44,0.18)'}` : 'none',
               transition: 'all .2s',
             }} />
-            <div className="tnum" style={{ fontSize: 10, marginTop: 6, fontFamily: 'ui-monospace, SF Mono, monospace', color: it.pnl >= 0 ? (dark ? '#f0c068' : '#a06f1f') : (dark ? '#5fa3d4' : '#2a5e8c') }}>
+            <div className="tnum" style={{ fontSize: 10, marginTop: 6, fontFamily: 'var(--font-mono)', color: it.pnl >= 0 ? (dark ? '#f0c068' : '#a06f1f') : (dark ? '#5fa3d4' : '#2a5e8c') }}>
               {it.pnl >= 0 ? '+' : ''}${it.pnl}
             </div>
           </div>
@@ -194,9 +194,9 @@ function GreeksProfile({ legs, spot, iv = 24, dte = 17, theme = 'dark', height =
         <path d={pathFor(series.theta)} fill="none" stroke={colors.theta} strokeWidth="1.8" strokeOpacity="0.95" />
         <path d={pathFor(series.vega)}  fill="none" stroke={colors.vega}  strokeWidth="1.8" strokeOpacity="0.95" />
         {/* axis labels */}
-        <text x={pad} y={H - 4} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace">{Math.round(series.xs[0])}</text>
-        <text x={W - pad} y={H - 4} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace" textAnchor="end">{Math.round(series.xs[N])}</text>
-        <text x={x(spotIdx)} y={H - 4} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace" textAnchor="middle">spot</text>
+        <text x={pad} y={H - 4} fontSize="9" fill={txt} style={{ fontFamily: 'var(--font-mono)' }}>{Math.round(series.xs[0])}</text>
+        <text x={W - pad} y={H - 4} fontSize="9" fill={txt} style={{ fontFamily: 'var(--font-mono)' }} textAnchor="end">{Math.round(series.xs[N])}</text>
+        <text x={x(spotIdx)} y={H - 4} fontSize="9" fill={txt} style={{ fontFamily: 'var(--font-mono)' }} textAnchor="middle">spot</text>
       </svg>
       {/* current-spot legend */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 6, marginTop: 8 }}>
@@ -212,7 +212,7 @@ function GreeksProfile({ legs, spot, iv = 24, dte = 17, theme = 'dark', height =
             border: `1px solid ${colors[it.k]}33`,
           }}>
             <div style={{ fontSize: 9, opacity: 0.65, fontWeight: 600, color: colors[it.k] }}>{it.label}</div>
-            <div className="tnum" style={{ fontSize: 12, fontFamily: 'ui-monospace, SF Mono, monospace', fontWeight: 600 }}>{it.val}</div>
+            <div className="tnum" style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{it.val}</div>
           </div>
         ))}
       </div>
@@ -244,7 +244,7 @@ function PnLDistribution({ legs, spot, iv = 24, dte = 17, theme = 'dark', height
   return (
     <div>
       {/* stats row */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, fontSize: 10, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, fontSize: 10, fontFamily: 'var(--font-mono)' }}>
         <span><span style={{ opacity: 0.55 }}>POP </span><span style={{ color: '#f0c068', fontWeight: 700 }}>{popPct}%</span></span>
         <span><span style={{ opacity: 0.55 }}>E[P&L] </span><span style={{ color: ePnlNTD >= 0 ? upColor : downColor, fontWeight: 600 }}>{ePnlNTD >= 0 ? '+' : ''}{cur}{ePnlNTD.toLocaleString()}</span></span>
         <span><span style={{ opacity: 0.55 }}>P10 </span><span style={{ color: downColor, fontWeight: 600 }}>{cur}{p10NTD.toLocaleString()}</span></span>
@@ -275,8 +275,8 @@ function PnLDistribution({ legs, spot, iv = 24, dte = 17, theme = 'dark', height
         <line x1={xat(dist.p10)} x2={xat(dist.p10)} y1={H - pad - 4} y2={H - pad + 2} stroke={txt} strokeWidth="1.2" />
         <line x1={xat(dist.p90)} x2={xat(dist.p90)} y1={H - pad - 4} y2={H - pad + 2} stroke={txt} strokeWidth="1.2" />
         {/* end labels */}
-        <text x={pad} y={H - 2} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace">{cur}{Math.round(lo * ntdMult).toLocaleString()}</text>
-        <text x={W - pad} y={H - 2} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace" textAnchor="end">{cur}{Math.round(hi * ntdMult).toLocaleString()}</text>
+        <text x={pad} y={H - 2} fontSize="9" fill={txt} style={{ fontFamily: 'var(--font-mono)' }}>{cur}{Math.round(lo * ntdMult).toLocaleString()}</text>
+        <text x={W - pad} y={H - 2} fontSize="9" fill={txt} style={{ fontFamily: 'var(--font-mono)' }} textAnchor="end">{cur}{Math.round(hi * ntdMult).toLocaleString()}</text>
       </svg>
     </div>
   );
@@ -285,7 +285,10 @@ function PnLDistribution({ legs, spot, iv = 24, dte = 17, theme = 'dark', height
 // ─────────────────────────────────────────────────────────────────────────────
 // OI Profile — mirrored horizontal bars: Call OI (left, red) vs Put OI (right, teal).
 // Reads chain rows from window.genChain(spot, contract). ATM row highlighted.
-function OIProfile({ spot, contract = 'monthly', theme = 'dark', height, maxRows = 13, rows: rowsProp }) {
+// showChange: print "(+274) 3245" next to each bar (the 未平倉變化 layout every
+// Taiwanese OI table uses); walls: { call, put } strikes of the max-OI walls —
+// those rows get solid bars and a colored strike (壓力 / 支撐).
+function OIProfile({ spot, contract = 'monthly', theme = 'dark', height, maxRows = 13, rows: rowsProp, showChange = false, walls = null }) {
   const genRows = useMemoM(() => {
     if (rowsProp && rowsProp.length) return [];
     if (!window.genChain) return [];
@@ -302,18 +305,23 @@ function OIProfile({ spot, contract = 'monthly', theme = 'dark', height, maxRows
   const upColor = '#ef5350', downColor = '#26a69a';
   const txt = theme === 'dark' ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.50)';
   const rowH = 16;
+  const chg = (v) => (v == null ? null : (
+    <span style={{ fontSize: 9, color: v > 0 ? upColor : v < 0 ? downColor : txt, opacity: v === 0 ? 0.6 : 1 }}>({v > 0 ? '+' : ''}{v})</span>
+  ));
 
   return (
     <div style={{ width: '100%' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 9, opacity: 0.55, marginBottom: 6, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase' }}>
-        <span style={{ color: upColor }}>Call OI</span>
-        <span>Strike</span>
-        <span style={{ color: downColor }}>Put OI</span>
+        <span style={{ color: upColor }}>買權 未平倉</span>
+        <span>履約價</span>
+        <span style={{ color: downColor }}>賣權 未平倉</span>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         {visible.map((r) => {
           const cw = (r.call.oi / maxOI) * 100;
           const pw = (r.put.oi  / maxOI) * 100;
+          const isCallWall = !!walls && r.strike === walls.call;
+          const isPutWall = !!walls && r.strike === walls.put;
           return (
             <div key={r.strike} style={{
               display: 'grid', gridTemplateColumns: '1fr 56px 1fr', alignItems: 'center', gap: 6,
@@ -323,37 +331,43 @@ function OIProfile({ spot, contract = 'monthly', theme = 'dark', height, maxRows
               background: r.atm ? 'rgba(240,192,104,0.08)' : 'transparent',
               border: r.atm ? '1px solid rgba(240,192,104,0.25)' : '1px solid transparent',
             }} title={`Strike ${r.strike} · Call OI ${r.call.oi.toLocaleString()} · Put OI ${r.put.oi.toLocaleString()}`}>
-              {/* Call bar — grows to the LEFT */}
-              <div style={{ height: 8, position: 'relative' }}>
-                <div style={{
-                  position: 'absolute', right: 0, top: 0, bottom: 0,
-                  width: `${cw}%`,
-                  background: `linear-gradient(270deg, ${upColor}cc, ${upColor}55)`,
-                  borderRadius: '4px 0 0 4px',
-                }} />
+              {/* Call bar — grows to the LEFT; numbers sit to its left when showChange */}
+              <div style={{ height: showChange ? 12 : 8, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4, fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums' }}>
+                {showChange && <span style={{ fontSize: 9, whiteSpace: 'nowrap', color: isCallWall ? upColor : txt, fontWeight: isCallWall ? 700 : 500 }}>{chg(r.call.oiChg)} {r.call.oi.toLocaleString()}</span>}
+                <div style={{ position: 'relative', flex: showChange ? '0 0 46%' : '1 1 auto', alignSelf: 'stretch', height: showChange ? undefined : 8 }}>
+                  <div style={{
+                    position: 'absolute', right: 0, top: showChange ? 2 : 0, bottom: showChange ? 2 : 0,
+                    width: `${cw}%`,
+                    background: isCallWall ? upColor : `linear-gradient(270deg, ${upColor}cc, ${upColor}55)`,
+                    borderRadius: '4px 0 0 4px',
+                  }} />
+                </div>
               </div>
               {/* Strike label */}
               <div style={{
-                fontSize: 11, fontFamily: 'ui-monospace, SF Mono, monospace',
-                fontWeight: r.atm ? 700 : 500, textAlign: 'center',
-                color: r.atm ? '#f7d394' : '#e8eaef',
+                fontSize: 11, fontFamily: 'var(--font-mono)',
+                fontWeight: (r.atm || isCallWall || isPutWall) ? 700 : 500, textAlign: 'center',
+                color: r.atm ? '#f7d394' : isCallWall ? upColor : isPutWall ? downColor : '#e8eaef',
                 fontVariantNumeric: 'tabular-nums',
               }}>{r.strike}</div>
               {/* Put bar — grows to the RIGHT */}
-              <div style={{ height: 8, position: 'relative' }}>
-                <div style={{
-                  position: 'absolute', left: 0, top: 0, bottom: 0,
-                  width: `${pw}%`,
-                  background: `linear-gradient(90deg, ${downColor}cc, ${downColor}55)`,
-                  borderRadius: '0 4px 4px 0',
-                }} />
+              <div style={{ height: showChange ? 12 : 8, position: 'relative', display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums' }}>
+                <div style={{ position: 'relative', flex: showChange ? '0 0 46%' : '1 1 auto', alignSelf: 'stretch', height: showChange ? undefined : 8 }}>
+                  <div style={{
+                    position: 'absolute', left: 0, top: showChange ? 2 : 0, bottom: showChange ? 2 : 0,
+                    width: `${pw}%`,
+                    background: isPutWall ? downColor : `linear-gradient(90deg, ${downColor}cc, ${downColor}55)`,
+                    borderRadius: '0 4px 4px 0',
+                  }} />
+                </div>
+                {showChange && <span style={{ fontSize: 9, whiteSpace: 'nowrap', color: isPutWall ? downColor : txt, fontWeight: isPutWall ? 700 : 500 }}>{r.put.oi.toLocaleString()} {chg(r.put.oiChg)}</span>}
               </div>
             </div>
           );
         })}
       </div>
-      <div style={{ marginTop: 6, fontSize: 9, opacity: 0.45, fontFamily: 'ui-monospace, SF Mono, monospace', textAlign: 'right' }}>
-        max OI in view: {maxOI.toLocaleString()}
+      <div style={{ marginTop: 6, fontSize: 9, opacity: 0.45, fontFamily: 'var(--font-mono)', textAlign: 'right' }}>
+        顯示範圍最大 OI {maxOI.toLocaleString()}
       </div>
     </div>
   );
@@ -367,13 +381,13 @@ function DataQualityPill({ quality }) {
   const ringBg   = quality.level === 'good' ? 'rgba(77,208,200,0.10)' : quality.level === 'warn' ? 'rgba(240,192,104,0.10)' : 'rgba(239,83,80,0.10)';
   const border   = quality.level === 'good' ? 'rgba(77,208,200,0.30)' : quality.level === 'warn' ? 'rgba(240,192,104,0.35)' : 'rgba(239,83,80,0.35)';
   const fmtLabel = quality.total === 0 ? '—' :
-    `${quality.total - quality.bad - quality.warn}/${quality.total} liquid${quality.bad ? ` · ${quality.bad} bad` : ''}${quality.warn ? ` · ${quality.warn} thin` : ''}`;
+    `${quality.total - quality.bad - quality.warn}/${quality.total} 有量${quality.bad ? ` · ${quality.bad} 無量` : ''}${quality.warn ? ` · ${quality.warn} 量少` : ''}`;
   return (
     <div style={{
       display: 'inline-flex', alignItems: 'center', gap: 6,
-      padding: '4px 9px', borderRadius: 999,
+      padding: '4px 8px', borderRadius: 0,
       background: ringBg, border: `1px solid ${border}`,
-      fontSize: 10, fontFamily: 'ui-monospace, SF Mono, monospace',
+      fontSize: 10, fontFamily: 'var(--font-mono)',
     }} title={quality.label}>
       <span style={{
         width: 7, height: 7, borderRadius: 4, background: dotColor,
@@ -401,9 +415,9 @@ function PnLAttribution({ legs, spot, iv, dte, theme = 'dark', height = 150, wid
   const dSpot = spot - baseSpot;
   const dIv   = iv   - baseIv;
   const items = [
-    { key: 'spot',  label: 'Spot Δ',   sub: `${baseSpot.toLocaleString()} → ${spot.toLocaleString()} (${dSpot >= 0 ? '+' : ''}${dSpot})`, value: pg.delta * dSpot * ntdMult },
-    { key: 'iv',    label: 'IV Δ',     sub: `${baseIv}% → ${iv}% (${dIv >= 0 ? '+' : ''}${dIv.toFixed(1)})`, value: pg.vega * dIv * ntdMult },
-    { key: 'theta', label: 'Θ /day',   sub: 'time decay if held 1 day',                                       value: pg.theta * ntdMult },
+    { key: 'spot',  label: '現價變動', sub: `${baseSpot.toLocaleString()} → ${spot.toLocaleString()} (${dSpot >= 0 ? '+' : ''}${dSpot})`, value: pg.delta * dSpot * ntdMult },
+    { key: 'iv',    label: 'IV 變動',  sub: `${baseIv}% → ${iv}% (${dIv >= 0 ? '+' : ''}${dIv.toFixed(1)})`, value: pg.vega * dIv * ntdMult },
+    { key: 'theta', label: 'Θ／日',    sub: '持有一天的時間價值流失',                                          value: pg.theta * ntdMult },
   ];
   const maxAbs = Math.max(...items.map((it) => Math.abs(it.value)), 1);
   const upColor = '#ef5350', downColor = '#26a69a';
@@ -427,10 +441,10 @@ function PnLAttribution({ legs, spot, iv, dte, theme = 'dark', height = 150, wid
             {/* bar */}
             <rect x={x} y={yMid - barH/2} width={Math.max(0, w)} height={barH} fill={color} fillOpacity="0.55" rx="3" />
             {/* label (left) */}
-            <text x={pad} y={yMid - 4} fontSize="11" fontWeight="600" fill={theme === 'dark' ? '#e8eaef' : '#1d1d22'} fontFamily="ui-monospace, SF Mono, monospace">{it.label}</text>
-            <text x={pad} y={yMid + 9} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace">{it.sub}</text>
+            <text x={pad} y={yMid - 4} fontSize="11" fontWeight="600" fill={theme === 'dark' ? '#e8eaef' : '#1d1d22'} style={{ fontFamily: 'var(--font-mono)' }}>{it.label}</text>
+            <text x={pad} y={yMid + 9} fontSize="9" fill={txt} style={{ fontFamily: 'var(--font-mono)' }}>{it.sub}</text>
             {/* value (right) */}
-            <text x={W - pad} y={yMid + 4} fontSize="12" fontWeight="700" textAnchor="end" fill={color} fontFamily="ui-monospace, SF Mono, monospace">
+            <text x={W - pad} y={yMid + 4} fontSize="12" fontWeight="700" textAnchor="end" fill={color} style={{ fontFamily: 'var(--font-mono)' }}>
               {it.value >= 0 ? '+' : ''}{cur}{Math.round(it.value).toLocaleString()}
             </text>
           </g>
@@ -478,9 +492,9 @@ function MaxPain({ spot, contract = 'monthly', theme = 'dark', height = 160, wid
   const distance = maxPainStrike - spot;
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6, fontSize: 10, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
-        <span><span style={{ opacity: 0.55 }}>max pain </span><span style={{ color: minColor, fontWeight: 700, fontSize: 12 }}>{maxPainStrike}</span></span>
-        <span><span style={{ opacity: 0.55 }}>vs spot </span><span style={{ color: distance >= 0 ? '#ef5350' : '#26a69a', fontWeight: 600 }}>{distance >= 0 ? '+' : ''}{distance}</span></span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6, fontSize: 10, fontFamily: 'var(--font-mono)' }}>
+        <span><span style={{ opacity: 0.55 }}>最大痛苦點 </span><span style={{ color: minColor, fontWeight: 700, fontSize: 12 }}>{maxPainStrike}</span></span>
+        <span><span style={{ opacity: 0.55 }}>距現價 </span><span style={{ color: distance >= 0 ? '#ef5350' : '#26a69a', fontWeight: 600 }}>{distance >= 0 ? '+' : ''}{distance}</span></span>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} style={{ display: 'block' }}>
         {/* baseline */}
@@ -493,7 +507,7 @@ function MaxPain({ spot, contract = 'monthly', theme = 'dark', height = 160, wid
           return (
             <g>
               <line x1={sx} x2={sx} y1={pad/2} y2={H - pad} stroke={txt} strokeDasharray="3 3" strokeOpacity="0.7" />
-              <text x={sx} y={pad - 2} fontSize="9" fill={txt} textAnchor="middle" fontFamily="ui-monospace, SF Mono, monospace">spot</text>
+              <text x={sx} y={pad - 2} fontSize="9" fill={txt} textAnchor="middle" style={{ fontFamily: 'var(--font-mono)' }}>spot</text>
             </g>
           );
         })()}
@@ -512,17 +526,17 @@ function MaxPain({ spot, contract = 'monthly', theme = 'dark', height = 160, wid
                 rx="1.5"
               />
               {isMin && (
-                <text x={xat(i)} y={Math.max(pad + 8, H - pad - h - 4)} fontSize="9" fill={minColor} textAnchor="middle" fontWeight="700" fontFamily="ui-monospace, SF Mono, monospace">↓</text>
+                <text x={xat(i)} y={Math.max(pad + 8, H - pad - h - 4)} fontSize="9" fill={minColor} textAnchor="middle" fontWeight="700" style={{ fontFamily: 'var(--font-mono)' }}>↓</text>
               )}
             </g>
           );
         })}
         {/* x-axis labels: low / atm / high */}
-        <text x={pad} y={H - 3} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace">{pains[0].strike}</text>
-        <text x={W - pad} y={H - 3} fontSize="9" fill={txt} textAnchor="end" fontFamily="ui-monospace, SF Mono, monospace">{pains[pains.length - 1].strike}</text>
+        <text x={pad} y={H - 3} fontSize="9" fill={txt} style={{ fontFamily: 'var(--font-mono)' }}>{pains[0].strike}</text>
+        <text x={W - pad} y={H - 3} fontSize="9" fill={txt} textAnchor="end" style={{ fontFamily: 'var(--font-mono)' }}>{pains[pains.length - 1].strike}</text>
       </svg>
-      <div style={{ marginTop: 4, fontSize: 9, opacity: 0.45, fontFamily: 'ui-monospace, SF Mono, monospace', textAlign: 'right' }}>
-        min pain = {cur}{Math.round(minPainNTD).toLocaleString()}
+      <div style={{ marginTop: 4, fontSize: 9, opacity: 0.45, fontFamily: 'var(--font-mono)', textAlign: 'right' }}>
+        買方最低總收益 {cur}{Math.round(minPainNTD).toLocaleString()}
       </div>
     </div>
   );
@@ -581,7 +595,7 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
     width: '100%', padding: '8px 10px', borderRadius: 8,
     border: `1px solid ${fieldBorder}`, background: fieldBg,
     color: dark ? '#e8eaef' : '#1d1d22',
-    fontFamily: 'ui-monospace, SF Mono, monospace', fontSize: 13, fontWeight: 600,
+    fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600,
     fontVariantNumeric: 'tabular-nums', outline: 'none',
   };
   const upColor = '#ef5350', downColor = '#26a69a';
@@ -592,8 +606,8 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
       {/* Type toggle */}
       <div style={{ display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden', border: `1px solid ${fieldBorder}` }}>
         {[
-          { id: 'call', label: 'CALL', color: upColor },
-          { id: 'put',  label: 'PUT',  color: downColor },
+          { id: 'call', label: '買權', color: upColor },
+          { id: 'put',  label: '賣權', color: downColor },
         ].map((opt) => {
           const active = type === opt.id;
           return (
@@ -610,16 +624,16 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
       {/* Strike slider — IV auto-pulled from the smile; spot / DTE from context */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <span style={labelStyle}>Strike</span>
-          <span className="tnum" style={{ fontSize: 13, fontWeight: 600, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
+          <span style={labelStyle}>履約價</span>
+          <span className="tnum" style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
             {fmtK(strike)}{strike === atm ? ' · ATM' : ''}
           </span>
         </div>
         <input type="range" min={kMin} max={kMax} step={step} value={strike}
           onChange={(e) => setStrike(parseFloat(e.target.value))} style={{ width: '100%', accentColor: accent }} />
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, opacity: 0.5, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, opacity: 0.5, fontFamily: 'var(--font-mono)' }}>
           <span>{fmtK(kMin)}</span>
-          <span>spot {spot.toLocaleString()} · {dte}d · IV {strikeIv.toFixed(1)}%</span>
+          <span>現價 {spot.toLocaleString()} · {dte} 天 · IV {strikeIv.toFixed(1)}%</span>
           <span>{fmtK(kMax)}</span>
         </div>
       </div>
@@ -632,25 +646,25 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
-            <div style={labelStyle}>Theoretical price</div>
+            <div style={labelStyle}>理論價</div>
             <div className="tnum" style={{
               fontSize: 30, fontWeight: 700, letterSpacing: -0.6,
-              fontFamily: 'ui-monospace, SF Mono, monospace', lineHeight: 1.05,
+              fontFamily: 'var(--font-mono)', lineHeight: 1.05,
               color: dark ? '#e8eaef' : '#1d1d22',
             }}>{result.price.toFixed(2)}</div>
-            <div style={{ fontSize: 11, opacity: 0.55, marginTop: 4, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
-              ≈ {P.cur}{Math.round(result.price * P.mult).toLocaleString()} ({type === 'call' ? 'CALL' : 'PUT'} K={fmtK(strike)})
+            <div style={{ fontSize: 11, opacity: 0.55, marginTop: 4, fontFamily: 'var(--font-mono)' }}>
+              ≈ {P.cur}{Math.round(result.price * P.mult).toLocaleString()} （{type === 'call' ? '買權' : '賣權'} {fmtK(strike)}）
             </div>
           </div>
           {hasMarket && (
             <div style={{ textAlign: 'right' }}>
-              <div style={labelStyle}>vs market</div>
+              <div style={labelStyle}>對市價</div>
               <div className="tnum" style={{
-                fontSize: 18, fontWeight: 700, fontFamily: 'ui-monospace, SF Mono, monospace',
+                fontSize: 18, fontWeight: 700, fontFamily: 'var(--font-mono)',
                 color: mispricingPct >= 0 ? upColor : downColor,
               }}>{mispricingPct >= 0 ? '+' : ''}{mispricingPct.toFixed(2)}%</div>
-              <div style={{ fontSize: 9, opacity: 0.45, fontFamily: 'ui-monospace, SF Mono, monospace' }}>
-                {mispricingPct >= 0 ? 'model > market (maybe cheap)' : 'model < market (maybe rich)'}
+              <div style={{ fontSize: 9, opacity: 0.45, fontFamily: 'var(--font-mono)' }}>
+                {mispricingPct >= 0 ? '模型 > 市價（可能偏便宜）' : '模型 < 市價（可能偏貴）'}
               </div>
             </div>
           )}
@@ -659,9 +673,9 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
 
       {/* Optional market price comparison */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <span style={labelStyle}>Market price (optional — check cheap / rich)</span>
+        <span style={labelStyle}>市價（選填：比較貴或便宜）</span>
         <input type="number" value={marketPx} onChange={(e) => setMarketPx(e.target.value)}
-          placeholder="Enter market price…" style={fieldStyle} step="0.01" />
+          placeholder="輸入市價…" style={fieldStyle} step="0.01" />
       </div>
 
       {/* Greeks row */}
@@ -677,16 +691,16 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
             padding: '8px 4px', borderRadius: 8, textAlign: 'center',
             background: fieldBg, border: `1px solid ${fieldBorder}`,
           }}>
-            <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.6, fontFamily: 'ui-monospace, SF Mono, monospace' }}>{g.l}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.6, fontFamily: 'var(--font-mono)' }}>{g.l}</div>
             <div className="tnum" style={{
-              fontSize: 12, fontWeight: 700, marginTop: 2, fontFamily: 'ui-monospace, SF Mono, monospace',
+              fontSize: 12, fontWeight: 700, marginTop: 2, fontFamily: 'var(--font-mono)',
               color: g.v > 0 ? upColor : g.v < 0 ? downColor : (dark ? '#e8eaef' : '#1d1d22'),
             }}>{g.fmt(g.v)}</div>
           </div>
         ))}
       </div>
 
-      <div style={{ fontSize: 9, opacity: 0.4, fontFamily: 'ui-monospace, SF Mono, monospace', textAlign: 'right' }}>
+      <div style={{ fontSize: 9, opacity: 0.4, fontFamily: 'var(--font-mono)', textAlign: 'right' }}>
         {P.model === 'b76' ? 'Black-76 · futures option' : 'Black-Scholes · European'} · {P.unitLabel}
       </div>
     </div>
@@ -748,10 +762,10 @@ function KBarChart({ bars, theme = 'dark', height = 160, width = 304 }) {
       <line x1={padL} x2={W - padR + 4} y1={y(last.c)} y2={y(last.c)}
         stroke={lastUp ? up : down} strokeWidth="1" strokeDasharray="3 3" strokeOpacity="0.55" />
       <text x={W - padR + 6} y={y(last.c) + 3.5} fontSize="10" fontWeight="700"
-        fill={lastUp ? up : down} fontFamily="ui-monospace, SF Mono, monospace">{fmt(last.c)}</text>
+        fill={lastUp ? up : down} style={{ fontFamily: 'var(--font-mono)' }}>{fmt(last.c)}</text>
       {/* 高低價標 */}
-      <text x={W - padR + 6} y={padT + 8} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace">{fmt(hi)}</text>
-      <text x={W - padR + 6} y={padT + priceH} fontSize="9" fill={txt} fontFamily="ui-monospace, SF Mono, monospace">{fmt(lo)}</text>
+      <text x={W - padR + 6} y={padT + 8} fontSize="9" fill={txt} style={{ fontFamily: 'var(--font-mono)' }}>{fmt(hi)}</text>
+      <text x={W - padR + 6} y={padT + priceH} fontSize="9" fill={txt} style={{ fontFamily: 'var(--font-mono)' }}>{fmt(lo)}</text>
       {bars.map((b, i) => {
         const isUp = b.c >= b.o;
         const col = isUp ? up : down;
@@ -768,7 +782,7 @@ function KBarChart({ bars, theme = 'dark', height = 160, width = 304 }) {
       })}
       {/* 首尾日期（live 才有） */}
       {bars[0].t && (
-        <text x={padL} y={H - 6 - volH} fontSize="8" fill={txt} fontFamily="ui-monospace, SF Mono, monospace">
+        <text x={padL} y={H - 6 - volH} fontSize="8" fill={txt} style={{ fontFamily: 'var(--font-mono)' }}>
           {bars[0].t.slice(4, 6)}/{bars[0].t.slice(6, 8)}
         </text>
       )}
@@ -781,16 +795,43 @@ function KBarChart({ bars, theme = 'dark', height = 160, width = 304 }) {
 // mockup): candles + MA5/MA20 overlays + volume + RSI(14) subchart + OHLC
 // readout. Taiwan colors: red = up, teal = down. Renders from the same `bars`
 // array as KBarChart (live IB history or genBars mock).
-function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceLabel = '' }) {
+// levels: [{ price, label, color }] — horizontal dashed lines with a price tag on
+// the right axis (the 開 / 昨 / 成本 tag style of Taiwanese day-trading charts).
+// A level within 60% of the bar range beyond the bars stretches the scale to
+// include it; anything further gets a pinned marker at the chart edge instead.
+// Moving averages drawn on the price pane: the Taiwanese daily set (5 / 10 /
+// 20 / 60). Click a legend entry to hide / show that line.
+const PRICE_MAS = [
+  { k: 5,  color: '#f0c068' },
+  { k: 10, color: '#e26dd0' },
+  { k: 20, color: '#5fa3d4' },
+  { k: 60, color: '#fb923c' },
+];
+
+// cone: { ivPct, days, label } — thinkorswim's probability cone: from the last
+// close, ±1σ (68.27%) and ±2σ bands of S·IV·√(t/365) drawn forward to `days`
+// (the selected expiry) in a strip of empty slots to the right of the bars.
+function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceLabel = '', levels = [], cone = null }) {
   const dark = theme === 'dark';
+  const [hiddenMa, setHiddenMa] = React.useState({});
   if (!bars || bars.length < 2) return null;
   const W = 768, H = 282, plotW = 720, pTop = 12, pBot = 196, vTop = 210, vBot = 274;
   const n = bars.length;
   const closes = bars.map((b) => b.c);
-  const pMin = Math.min(...bars.map((b) => b.l)) * 0.998;
-  const pMax = Math.max(...bars.map((b) => b.h)) * 1.002;
+  const barMin = Math.min(...bars.map((b) => b.l)), barMax = Math.max(...bars.map((b) => b.h));
+  const barRng = Math.max(barMax - barMin, 1e-9);
+  const lv = (levels || []).filter((l) => Number.isFinite(l.price));
+  const inScale = lv.filter((l) => l.price >= barMin - barRng * 0.6 && l.price <= barMax + barRng * 0.6);
+  const hasCone = !!(cone && cone.ivPct > 0 && cone.days > 0);
+  const coneSlots = hasCone ? Math.max(6, Math.round(n * 0.14)) : 0;
+  const anchor = bars[n - 1].c;
+  const coneSig = (t) => anchor * (cone.ivPct / 100) * Math.sqrt(Math.max(t, 0) / 365);
+  const coneEnd = hasCone ? coneSig(cone.days) : 0;
+  const pMin = Math.min(barMin, ...inScale.map((l) => l.price), hasCone ? anchor - 2 * coneEnd : Infinity) * 0.998;
+  const pMax = Math.max(barMax, ...inScale.map((l) => l.price), hasCone ? anchor + 2 * coneEnd : -Infinity) * 1.002;
   const y = (p) => pTop + ((pMax - p) / (pMax - pMin)) * (pBot - pTop);
-  const xw = plotW / n;
+  const levelTags = lv.map((l) => ({ ...l, pinned: !inScale.includes(l), y: inScale.includes(l) ? y(l.price) : (l.price > pMax ? pTop + 4 : pBot - 4) }));
+  const xw = plotW / (n + coneSlots);
   const cx = (i) => i * xw + xw / 2;
   const bw = Math.min(7, Math.max(2, xw * 0.62));
   const vMax = Math.max(...bars.map((b) => b.v), 1);
@@ -829,34 +870,43 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
   const last = bars[n - 1];
   const lastUp = last.c >= last.o;
   const lastY = y(last.c);
-  // Hide a grid price label if it would collide with the gold last-price label.
+  // Hide a grid price label if it would collide with the gold last-price label
+  // or a level tag.
   const gridLines = [0.12, 0.37, 0.62, 0.87].map((f) => {
     const p = pMin + f * (pMax - pMin);
     const gy = y(p);
-    return { y: gy, lab: fmt(p), hideLabel: Math.abs(gy - lastY) < 11 };
+    return { y: gy, lab: fmt(p), hideLabel: Math.abs(gy - lastY) < 11 || levelTags.some((l) => Math.abs(gy - l.y) < 11) };
   });
 
   return (
     <div>
       {/* OHLC readout + overlay legend */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-        <span style={{ fontSize: 10, letterSpacing: 0.8, textTransform: 'uppercase', opacity: 0.6, fontWeight: 600 }}>
+        <span style={{ fontSize: 10, opacity: 0.6, fontWeight: 600 }}>
           {code}{periodLabel ? ` · ${periodLabel}` : ''}
         </span>
-        <span className="tnum" style={{ fontSize: 11, fontFamily: 'ui-monospace, SF Mono, monospace', opacity: 0.85, display: 'inline-flex', gap: 12 }}>
-          <span><span style={{ opacity: 0.5 }}>O</span> {fmt(last.o)}</span>
-          <span><span style={{ opacity: 0.5 }}>H</span> {fmt(last.h)}</span>
-          <span><span style={{ opacity: 0.5 }}>L</span> {fmt(last.l)}</span>
-          <span><span style={{ opacity: 0.5 }}>C</span> <b style={{ color: lastUp ? up : down }}>{fmt(last.c)}</b></span>
+        <span className="tnum" style={{ fontSize: 11, fontFamily: 'var(--font-mono)', opacity: 0.85, display: 'inline-flex', gap: 12 }}>
+          <span><span style={{ opacity: 0.5 }}>開</span> {fmt(last.o)}</span>
+          <span><span style={{ opacity: 0.5 }}>高</span> {fmt(last.h)}</span>
+          <span><span style={{ opacity: 0.5 }}>低</span> {fmt(last.l)}</span>
+          <span><span style={{ opacity: 0.5 }}>收</span> <b style={{ color: lastUp ? up : down }}>{fmt(last.c)}</b></span>
         </span>
-        <span style={{ display: 'inline-flex', gap: 10, fontSize: 10, fontFamily: 'ui-monospace, Menlo, monospace', opacity: 0.8 }}>
-          <span><i style={{ display: 'inline-block', width: 14, height: 2, background: '#f0c068', verticalAlign: 'middle', marginRight: 4 }} />MA5</span>
-          <span><i style={{ display: 'inline-block', width: 14, height: 2, background: '#5fa3d4', verticalAlign: 'middle', marginRight: 4 }} />MA20</span>
+        <span style={{ display: 'inline-flex', gap: 10, fontSize: 10, fontFamily: 'var(--font-mono)', opacity: 0.8 }}>
+          {PRICE_MAS.map((m) => {
+            const off = !!hiddenMa[m.k] || n < m.k;
+            return (
+              <span key={m.k} onClick={() => { if (n >= m.k) setHiddenMa((h) => ({ ...h, [m.k]: !h[m.k] })); }}
+                title={n < m.k ? `needs ${m.k} bars` : (off ? 'show' : 'hide')}
+                style={{ cursor: n >= m.k ? 'pointer' : 'default', opacity: off ? 0.4 : 1, textDecoration: hiddenMa[m.k] ? 'line-through' : 'none', userSelect: 'none' }}>
+                <i style={{ display: 'inline-block', width: 14, height: 2, background: m.color, verticalAlign: 'middle', marginRight: 4 }} />MA{m.k}
+              </span>
+            );
+          })}
           <span><i style={{ display: 'inline-block', width: 14, height: 2, background: '#a78bfa', verticalAlign: 'middle', marginRight: 4 }} />RSI 14</span>
         </span>
       </div>
 
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: 'block', fontFamily: 'ui-monospace, Menlo, monospace' }}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: 'block', fontFamily: 'var(--font-mono)' }}>
         {gridLines.map((g, i) => (
           <g key={i}>
             <line x1="0" x2={plotW} y1={g.y} y2={g.y} stroke={grid} strokeDasharray="2 4" />
@@ -877,14 +927,44 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
             </g>
           );
         })}
-        <polyline points={maPts(5)} fill="none" stroke="#f0c068" strokeWidth="1.4" strokeLinejoin="round" />
-        <polyline points={maPts(20)} fill="none" stroke="#5fa3d4" strokeWidth="1.4" strokeLinejoin="round" />
+        {PRICE_MAS.map((m) => (!hiddenMa[m.k] && n >= m.k) && (
+          <polyline key={m.k} points={maPts(m.k)} fill="none" stroke={m.color} strokeWidth={m.k >= 60 ? 1.6 : 1.4} strokeLinejoin="round" />
+        ))}
+        {/* Level overlays: dashed line + label at the left, price tag on the right axis */}
+        {levelTags.map((l, i) => (
+          <g key={i}>
+            {!l.pinned && <line x1="0" x2={plotW} y1={l.y} y2={l.y} stroke={l.color} strokeWidth="1" strokeDasharray="6 4" strokeOpacity="0.85" />}
+            {l.label && <text x="4" y={l.price >= last.c ? l.y - 3 : l.y + 10} fontSize="9" fontWeight="600" fill={l.color} fillOpacity="0.9">{l.label}{l.pinned ? (l.price > pMax ? ' ▲' : ' ▼') : ''}</text>}
+            <rect x={plotW + 2} y={l.y - 6.5} width={46} height={13} rx="2.5" fill={l.color} fillOpacity={l.pinned ? 0.55 : 0.9} />
+            <text x={plotW + 25} y={l.y + 3} fontSize="9" fontWeight="700" fill="#fff" textAnchor="middle">{fmt(l.price)}</text>
+          </g>
+        ))}
+        {/* Probability cone: ±2σ (light) and ±1σ (darker) from the last close to the expiry */}
+        {hasCone && (() => {
+          const x0 = cx(n - 1), x1 = cx(n + coneSlots - 1);
+          const pts = (k, sign) => {
+            const out = [];
+            for (let j = 0; j <= 12; j++) { const f = j / 12; out.push(`${(x0 + (x1 - x0) * f).toFixed(1)},${y(anchor + sign * k * coneSig(cone.days * f)).toFixed(1)}`); }
+            return out;
+          };
+          const band = (k, op) => <polygon points={[...pts(k, 1), ...pts(k, -1).reverse()].join(' ')} fill="#a78bfa" fillOpacity={op} />;
+          const edge = (k, sign) => <polyline points={pts(k, sign).join(' ')} fill="none" stroke="#a78bfa" strokeWidth="1" strokeOpacity={k === 1 ? 0.9 : 0.5} strokeDasharray={k === 1 ? '' : '3 3'} />;
+          const lab = (k, sign) => <text x={x1 - 2} y={y(anchor + sign * k * coneEnd) + (sign > 0 ? -3 : 9)} fontSize="8.5" fontWeight="700" fill="#a78bfa" textAnchor="end">{sign > 0 ? '+' : '−'}{k}σ {fmt(anchor + sign * k * coneEnd)}</text>;
+          return (
+            <g>
+              {band(2, 0.07)}{band(1, 0.12)}
+              {edge(2, 1)}{edge(2, -1)}{edge(1, 1)}{edge(1, -1)}
+              {lab(1, 1)}{lab(1, -1)}{lab(2, 1)}{lab(2, -1)}
+              <text x={x1} y={pBot - 3} fontSize="8.5" fontWeight="600" fill="#a78bfa" fillOpacity="0.9" textAnchor="end">機率錐 ±1σ/2σ · IV {cone.ivPct.toFixed(1)}% · {cone.days}d{cone.label ? ` → ${cone.label}` : ''}</text>
+            </g>
+          );
+        })()}
         <line x1="0" x2={plotW} y1={y(last.c)} y2={y(last.c)} stroke="#f0c068" strokeWidth="0.8" strokeDasharray="4 3" strokeOpacity="0.7" />
         <text x={plotW + 6} y={y(last.c) + 3.5} fontSize="10" fontWeight="700" fill="#f0c068">{fmt(last.c)}</text>
       </svg>
 
       <div style={{ fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600, margin: '10px 0 4px' }}>RSI · 14</div>
-      <svg viewBox={`0 0 ${W} 66`} width="100%" style={{ display: 'block', fontFamily: 'ui-monospace, Menlo, monospace' }}>
+      <svg viewBox={`0 0 ${W} 66`} width="100%" style={{ display: 'block', fontFamily: 'var(--font-mono)' }}>
         <line x1="0" x2={plotW} y1={rsiY(70)} y2={rsiY(70)} stroke={grid} strokeDasharray="2 4" />
         <line x1="0" x2={plotW} y1={rsiY(30)} y2={rsiY(30)} stroke={grid} strokeDasharray="2 4" />
         <text x={plotW + 6} y={rsiY(70) + 3} fontSize="9" fill={txt}>70</text>
@@ -893,10 +973,124 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
       </svg>
 
       {sourceLabel && (
-        <div style={{ marginTop: 12, fontSize: 10, opacity: 0.5, fontFamily: 'ui-monospace, Menlo, monospace' }}>{sourceLabel}</div>
+        <div style={{ marginTop: 12, fontSize: 10, opacity: 0.5, fontFamily: 'var(--font-mono)' }}>{sourceLabel}</div>
       )}
     </div>
   );
 }
 
-Object.assign(window, { ThetaDecay, IVSmile, POPGauge, ScenarioTimeline, GreeksProfile, PnLDistribution, OIProfile, DataQualityPill, PnLAttribution, MaxPain, OptionPricer, genBars, KBarChart, PriceChart });
+// P&L heatmap — OptionStrat's table: rows = underlying prices around spot,
+// columns = dates from today to the front expiry, cell = the position's P&L
+// (currency, gross of fees) from the same Black-Scholes / Black-76 valuation
+// as the payoff chart, at the workspace IV held constant.
+function PnLHeatmap({ legs, spot, iv, dte, P, theme = 'dark', cols = 8, rowsN = 15 }) {
+  const dark = theme === 'dark';
+  if (!legs || !legs.length || !(spot > 0)) return null;
+  const T0 = window.frontDte(legs, dte);
+  const cost = window.portfolioCostPts(legs);
+  const r = P.r / 100, model = P.model, mult = P.mult;
+  const step = Math.max(P.strikeStep, Math.round((spot * 0.01) / P.strikeStep) * P.strikeStep);
+  const centre = Math.round(spot / P.strikeStep) * P.strikeStep;
+  const half = Math.floor(rowsN / 2);
+  const prices = []; for (let i = half; i >= -half; i--) prices.push(centre + i * step);
+  const days = []; for (let k = 0; k < cols; k++) days.push((T0 * k) / (cols - 1));
+  const today = new Date();
+  const dateLab = (d, k) => {
+    if (k === 0) return '今天';
+    if (k === cols - 1) return '到期';
+    const dt = new Date(today.getTime() + Math.round(d) * 86400000);
+    return `${dt.getMonth() + 1}/${dt.getDate()}`;
+  };
+  const grid = prices.map((S) => days.map((d) => (window.portfolioValuePts(legs, S, iv, d, dte, r, model) - cost) * mult));
+  const maxAbs = Math.max(...grid.flat().map((v) => Math.abs(v)), 1);
+  const fmtK = (v) => { const a = Math.abs(v); const s = v < 0 ? '−' : '+'; return a >= 1e5 ? `${s}${(a / 1e3).toFixed(0)}k` : a >= 1e3 ? `${s}${(a / 1e3).toFixed(1)}k` : `${s}${a.toFixed(0)}`; };
+  const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
+  const txt = dark ? 'rgba(255,255,255,0.55)' : 'rgba(20,30,50,0.55)';
+  const up = '#ef5350', down = '#26a69a';
+  const isSpotRow = (S) => Math.abs(S - spot) <= step / 2;
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table className="tnum" style={{ borderCollapse: 'separate', borderSpacing: 2, width: '100%', fontFamily: 'var(--font-mono)', fontSize: 10.5 }}>
+        <thead>
+          <tr>
+            <th style={{ textAlign: 'right', fontWeight: 600, color: txt, fontSize: 9.5, padding: '2px 6px' }}>{P.code}</th>
+            {days.map((d, k) => <th key={k} style={{ fontWeight: 600, color: txt, fontSize: 9.5, padding: '2px 0', whiteSpace: 'nowrap' }}>{dateLab(d, k)}<div style={{ fontWeight: 500, opacity: 0.7 }}>{Math.round(T0 - d)}d</div></th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {prices.map((S, i) => (
+            <tr key={S}>
+              <td style={{ textAlign: 'right', padding: '0 6px', fontWeight: isSpotRow(S) ? 700 : 500, color: isSpotRow(S) ? '#f0c068' : txt, whiteSpace: 'nowrap' }}>{fmtP(S)}</td>
+              {grid[i].map((v, k) => {
+                const a = 0.10 + 0.6 * Math.abs(v) / maxAbs;
+                const bg = v > 0 ? `rgba(239,83,80,${a.toFixed(2)})` : v < 0 ? `rgba(38,166,154,${a.toFixed(2)})` : 'transparent';
+                return <td key={k} title={`${fmtP(S)} · ${dateLab(days[k], k)} · ${P.cur}${Math.round(v).toLocaleString()}`}
+                  style={{ textAlign: 'center', padding: '3px 2px', borderRadius: 3, background: bg, color: dark ? '#fff' : '#1c2433', fontWeight: isSpotRow(S) ? 700 : 500, outline: isSpotRow(S) ? '1px solid rgba(240,192,104,0.5)' : 'none' }}>{fmtK(v)}</td>;
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Volatility cone (IVolatility / Amberdata idiom): for several windows, the
+// distribution of realized volatility — min / p25 / median / p75 / max over
+// every window of that length in the daily history — against today's value
+// and the ATM implied volatility. HV = stdev of log returns × √252.
+function hvSeries(closes, w) {
+  const out = [];
+  for (let end = w; end < closes.length; end++) {
+    const rets = [];
+    for (let i = end - w + 1; i <= end; i++) rets.push(Math.log(closes[i] / closes[i - 1]));
+    const m = rets.reduce((a, b) => a + b, 0) / rets.length;
+    const v = rets.reduce((a, b) => a + (b - m) * (b - m), 0) / (rets.length - 1);
+    out.push(Math.sqrt(v * 252) * 100);
+  }
+  return out;
+}
+function VolCone({ bars, ivPct, theme = 'dark', windows = [5, 10, 20, 60], width = 304, height = 150 }) {
+  const dark = theme === 'dark';
+  const closes = (bars || []).map((b) => b.c).filter((c) => c > 0);
+  const stats = windows.map((w) => {
+    const s = hvSeries(closes, w);
+    if (s.length < 5) return null;
+    const so = [...s].sort((a, b) => a - b);
+    const q = (p) => so[Math.min(so.length - 1, Math.floor(p * (so.length - 1)))];
+    return { w, n: s.length, min: so[0], p25: q(0.25), med: q(0.5), p75: q(0.75), max: so[so.length - 1], now: s[s.length - 1] };
+  }).filter(Boolean);
+  if (!stats.length) return <div style={{ fontSize: 11, opacity: 0.5 }}>需要更多日K才能畫波動率錐。</div>;
+  const padL = 30, padR = 8, padT = 10, padB = 20;
+  const lo = Math.min(...stats.map((x) => x.min), ivPct > 0 ? ivPct : Infinity) * 0.9;
+  const hi = Math.max(...stats.map((x) => x.max), ivPct > 0 ? ivPct : 0) * 1.08;
+  const x = (i) => padL + (i / (stats.length - 1)) * (width - padL - padR);
+  const y = (v) => padT + ((hi - v) / (hi - lo)) * (height - padT - padB);
+  const path = (key) => stats.map((st, i) => `${x(i).toFixed(1)},${y(st[key]).toFixed(1)}`);
+  const txt = dark ? 'rgba(255,255,255,0.55)' : 'rgba(20,30,50,0.55)';
+  const grid = dark ? 'rgba(255,255,255,0.10)' : 'rgba(20,30,50,0.12)';
+  const ticks = [lo, (lo + hi) / 2, hi].map((v) => Math.round(v));
+  return (
+    <div>
+      <svg viewBox={`0 0 ${width} ${height}`} width="100%" style={{ display: 'block', fontFamily: 'var(--font-mono)' }}>
+        {ticks.map((v, i) => <g key={i}><line x1={padL} x2={width - padR} y1={y(v)} y2={y(v)} stroke={grid} strokeDasharray="2 4" /><text x={padL - 4} y={y(v) + 3} fontSize="8.5" fill={txt} textAnchor="end">{v}%</text></g>)}
+        <polygon points={[...path('p75'), ...path('p25').reverse()].join(' ')} fill="#5fa3d4" fillOpacity="0.22" />
+        <polyline points={path('max').join(' ')} fill="none" stroke="#5fa3d4" strokeWidth="1" strokeDasharray="3 3" strokeOpacity="0.8" />
+        <polyline points={path('min').join(' ')} fill="none" stroke="#5fa3d4" strokeWidth="1" strokeDasharray="3 3" strokeOpacity="0.8" />
+        <polyline points={path('med').join(' ')} fill="none" stroke="#5fa3d4" strokeWidth="1.4" />
+        <polyline points={path('now').join(' ')} fill="none" stroke="#f0c068" strokeWidth="1.6" />
+        {stats.map((st, i) => <circle key={i} cx={x(i)} cy={y(st.now)} r="2.6" fill="#f0c068" />)}
+        {ivPct > 0 && <g><line x1={padL} x2={width - padR} y1={y(ivPct)} y2={y(ivPct)} stroke="#a78bfa" strokeWidth="1.2" strokeDasharray="5 3" /><text x={width - padR} y={y(ivPct) - 3} fontSize="8.5" fontWeight="700" fill="#a78bfa" textAnchor="end">IV {ivPct.toFixed(1)}%</text></g>}
+        {stats.map((st, i) => <text key={i} x={x(i)} y={height - 6} fontSize="9" fill={txt} textAnchor="middle">{st.w}日</text>)}
+      </svg>
+      <div className="tnum" style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', fontSize: 9.5, color: txt, fontFamily: 'var(--font-mono)', marginTop: 4 }}>
+        <span><i style={{ display: 'inline-block', width: 10, height: 2, background: '#f0c068', verticalAlign: 'middle', marginRight: 4 }} />目前 HV</span>
+        <span><i style={{ display: 'inline-block', width: 10, height: 2, background: '#5fa3d4', verticalAlign: 'middle', marginRight: 4 }} />歷史中位數</span>
+        <span><i style={{ display: 'inline-block', width: 10, height: 6, background: 'rgba(95,163,212,0.3)', verticalAlign: 'middle', marginRight: 4 }} />25–75 分位</span>
+        <span>虛線 最小／最大 · 樣本 {stats.map((st) => `${st.w}日 n=${st.n}`).join('、')}</span>
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { ThetaDecay, IVSmile, POPGauge, ScenarioTimeline, GreeksProfile, PnLDistribution, OIProfile, DataQualityPill, PnLAttribution, MaxPain, OptionPricer, genBars, KBarChart, PriceChart, PnLHeatmap, VolCone });

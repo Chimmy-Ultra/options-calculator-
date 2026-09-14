@@ -11,6 +11,12 @@
   GET /api/chain/{pid}       → ?expiry=YYYYMMDD 的期權鏈，rows 形狀跟前端 genChain 一致
   GET /api/bars/{pid}        → 近月期貨歷史 K 棒
   GET /api/positions/{pid}   → 目前帳戶的選擇權部位（唯讀，載入前端 legs 用）
+  GET /api/oi/{pid}          → ?expiry=YYYYMMDD 的每檔未平倉（TAIFEX 每日行情，見 taifex.py）
+  GET /api/market/{pid}      → 籌碼：P/C 比、外資淨未平倉、十大交易人（TAIFEX 每日，見 taifex.py）
+  GET /api/top20/{pid}       → 權值股 TOP20：期交所成分股權重 + 證交所日收盤（見 taifex.py）
+  GET /api/intraday/{pid}    → 1 分 K + 成本線 (高+低)/2 + 多空差額（永豐逐筆 tick_type，或期交所逐筆 tick rule 近似）
+  GET /api/twse/{pid}        → 台股籌碼日報：證交所三大法人買賣超 + 融資融券餘額（前一交易日，見 taifex.py）
+  GET /api/premarket/{pid}   → 盤前脈絡：ES / NQ 期指、費半、VIX、台積電 ADR 與 2330、美元／台幣（SGX 期貨），走 IB
 
 唯讀行情 + 部位代理：只讀行情與持倉，不下單、不改單（沒有任何下單端點）。
 沒訂閱 CME 即時行情時自動退到 15 分鐘延遲數據（IB_MARKET_DATA_TYPE=3）。
@@ -27,10 +33,11 @@ from datetime import date, datetime
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from ib_async import IB, Future, FuturesOption
+from ib_async import IB, Contract, Future, FuturesOption
 
 import pricing
 import sinopac
+import taifex
 
 # Standard (monthly) options trading class; weeklies not wired yet.
 # tradingClass for the newer products is a best-guess for the standard monthly
@@ -38,9 +45,13 @@ import sinopac
 # doesn't match, so a wrong guess degrades gracefully.
 # "source" selects the data backend: "ib" = Interactive Brokers (futures
 # options), "sinopac" = 永豐金 Shioaji (TXO 台指選擇權). Both are read-only.
+# "oi" names a separate open-interest source for products whose quote feed has
+# none: "taifex" = the exchange's daily report (taifex.py), merged into the
+# chain rows and served whole by /api/oi.
 PRODUCTS = {
     "txo": {"source": "sinopac", "symbol": "TXO", "exchange": "TAIFEX", "strikeStep": 50.0,
-            "index": ("TSE", "001"), "underlyingFuture": "TXF", "monthlyCategory": "TXO"},
+            "index": ("TSE", "001"), "underlyingFuture": "TXF", "monthlyCategory": "TXO",
+            "oi": "taifex"},
     "zc": {"source": "ib", "symbol": "ZC", "exchange": "CBOT", "tradingClass": "OZC", "strikeStep": 10.0},
     "zs": {"source": "ib", "symbol": "ZS", "exchange": "CBOT", "tradingClass": "OZS", "strikeStep": 20.0},
     "zw": {"source": "ib", "symbol": "ZW", "exchange": "CBOT", "tradingClass": "OZW", "strikeStep": 10.0},
@@ -48,7 +59,35 @@ PRODUCTS = {
     "gc": {"source": "ib", "symbol": "GC", "exchange": "COMEX", "tradingClass": "OG", "strikeStep": 25.0},
     "cl": {"source": "ib", "symbol": "CL", "exchange": "NYMEX", "tradingClass": "LO", "strikeStep": 1.0},
     "ng": {"source": "ib", "symbol": "NG", "exchange": "NYMEX", "tradingClass": "ON", "strikeStep": 0.1},
+    # Added with the IB snapshot (2026-09): index + 農副產品 + Brent. Trading
+    # classes are the standard monthly class as IB lists it; a wrong guess
+    # still works through _sec_def's most-expirations fallback. VIX has no row:
+    # its options are index options (OPT), not FOP, so the proxy does not serve
+    # it — the deployed site reads it from ib-eod.js only.
+    "nq": {"source": "ib", "symbol": "NQ", "exchange": "CME", "tradingClass": "NQ", "strikeStep": 100.0},
+    "zm": {"source": "ib", "symbol": "ZM", "exchange": "CBOT", "tradingClass": "OZM", "strikeStep": 5.0},
+    "zl": {"source": "ib", "symbol": "ZL", "exchange": "CBOT", "tradingClass": "OZL", "strikeStep": 1.0},
+    "le": {"source": "ib", "symbol": "LE", "exchange": "CME", "tradingClass": "LE", "strikeStep": 2.0},
+    "he": {"source": "ib", "symbol": "HE", "exchange": "CME", "tradingClass": "HE", "strikeStep": 2.0},
+    "bz": {"source": "ib", "symbol": "BZ", "exchange": "NYMEX", "tradingClass": "BE", "strikeStep": 1.0},
 }
+
+# 盤前脈絡 — the overseas read a Taiwan day trader takes before the 08:45 open,
+# through the same IB session that serves the futures options. Futures resolve
+# to the front month at request time; the rest are pinned by conId (looked up
+# with IBKR's contract search, 2026-09-13) so a symbol clash on another
+# exchange cannot swap the instrument. The SGX USD/TWD future quotes TWD per
+# USD (≈ 31.6), the same side as the spot rate. Read-only, like everything here.
+PREMARKET = [
+    {"key": "es", "symbol": "ES", "exchange": "CME", "kind": "future"},
+    {"key": "nq", "symbol": "NQ", "exchange": "CME", "kind": "future"},
+    {"key": "sox", "symbol": "SOX", "exchange": "PHLX", "kind": "index", "conId": 416898},
+    {"key": "vix", "symbol": "VIX", "exchange": "CBOE", "kind": "index", "conId": 13455763},
+    {"key": "tsm", "symbol": "TSM", "exchange": "SMART", "kind": "stock", "conId": 6223250},
+    {"key": "2330", "symbol": "2330", "exchange": "TWSE", "kind": "stock", "conId": 37928709},
+    {"key": "usdtwd", "symbol": "TWD", "exchange": "SGX", "currency": "USD", "kind": "future"},
+]
+PREMARKET_CACHE_TTL_S = 30.0
 
 IB_HOST = os.environ.get("IB_HOST", "127.0.0.1")
 # TWS paper / TWS live / Gateway paper / Gateway live — 依序試
@@ -124,7 +163,7 @@ async def _futures(spec: dict) -> list:
     if hit:
         return hit
     cds = await ib.reqContractDetailsAsync(
-        Future(spec["symbol"], exchange=spec["exchange"], currency="USD")
+        Future(spec["symbol"], exchange=spec["exchange"], currency=spec.get("currency", "USD"))
     )
     today = date.today().strftime("%Y%m%d")
     futs = sorted(
@@ -186,6 +225,10 @@ async def health(pid: str | None = None):
     """Connection status. With ?pid= the answer is for that product's own data
     source, so the frontend only shows a live badge when the backend that
     actually serves that product is up; without it, connected means "any source"."""
+    if pid and pid.lower() not in PRODUCTS:
+        # Nothing here serves it (e.g. VIX, snapshot-only) — the frontend then
+        # falls back to its end-of-day snapshot instead of treating us as live.
+        return {"connected": False, "source": None, "serverTime": datetime.now().isoformat(timespec="seconds")}
     src = PRODUCTS.get((pid or "").lower(), {}).get("source") if pid else None
 
     sino_ok = await sinopac.ensure_connected() if (src in (None, "sinopac")) else False
@@ -229,6 +272,10 @@ async def quote(pid: str):
         "ask": _f(t.ask) if t else None,
         "close": close,
         "chgPct": round((last - close) / close * 100, 2) if last and close else None,
+        # Today's running session range (the 關卡價 base).
+        "open": _f(t.open) if t else None,
+        "high": _f(t.high) if t else None,
+        "low": _f(t.low) if t else None,
     }
 
 
@@ -310,7 +357,12 @@ async def bars(pid: str, duration: str = "3 M", bar: str = "1 day"):
 async def chain(pid: str, expiry: str):
     spec = _product(pid)
     if spec.get("source") == "sinopac":
-        return await _from_sinopac(sinopac.chain(spec, expiry), "option chain")
+        data = await _from_sinopac(sinopac.chain(spec, expiry), "option chain")
+        if spec.get("oi") == "taifex":
+            # Shioaji snapshots have no OI; fill it from TAIFEX's daily report
+            # (previous session's numbers). Unreachable → rows keep oi: 0.
+            data = taifex.merge_into_chain(data, await taifex.open_interest(expiry))
+        return data
     cache_key = ("chain", spec["symbol"], expiry)
     hit = _cache_get(cache_key)
     if hit:
@@ -404,6 +456,158 @@ async def chain(pid: str, expiry: str):
     }
     _cache_put(cache_key, result, CHAIN_CACHE_TTL_S)
     return result
+
+
+@app.get("/api/oi/{pid}")
+async def open_interest(pid: str, expiry: str | None = None):
+    """Per-strike open interest for one expiry from TAIFEX's daily report — the
+    whole strike range, not just the chain's ±8 — with the change vs the
+    previous session and the max-OI strikes (壓力 / 支撐). Public data, no
+    broker login needed. `expiry` = YYYYMMDD; omitted → the nearest unexpired.
+    """
+    spec = _product(pid)
+    if spec.get("oi") != "taifex":
+        raise HTTPException(404, f"no open-interest source for {pid!r}")
+    data = await taifex.open_interest(expiry)
+    if data is None:
+        raise HTTPException(503, "TAIFEX daily report unavailable")
+    if not data:
+        tbl = await taifex.table()
+        raise HTTPException(404, f"expiry {expiry} not in TAIFEX report (have {[e['id'] for e in taifex.expiries(tbl or {})]})")
+    return data
+
+
+@app.get("/api/market/{pid}")
+async def market(pid: str):
+    """Daily positioning from TAIFEX: market-wide put/call ratio (with ~23
+    sessions of history), 外資 net futures position in TX-equivalent contracts
+    (TX + MTX/4 + TMF/20, the exchange's own conversion) and the top-10 large
+    traders' net position in the front month. Previous session's numbers."""
+    spec = _product(pid)
+    if spec.get("oi") != "taifex":
+        raise HTTPException(404, f"no positioning source for {pid!r}")
+    data = await taifex.market()
+    if data is None:
+        raise HTTPException(503, "TAIFEX daily reports unavailable")
+    return data
+
+
+@app.get("/api/intraday/{pid}")
+async def intraday(pid: str, date: str | None = None):
+    """1-minute bars with 自由人's 成本線 ((session high + low) / 2) and the
+    多空差額 (running 外盤 − 內盤). With a Shioaji session the exchange's own
+    tick_type decides 外盤 / 內盤 (flow: "tick-type"); otherwise TAIFEX's daily
+    tick file with the tick rule (flow: "tick-rule", an approximation).
+    `date` = YYYYMMDD, default the latest available."""
+    spec = _product(pid)
+    if spec.get("oi") != "taifex":
+        raise HTTPException(404, f"no intraday source for {pid!r}")
+    if spec.get("source") == "sinopac" and sinopac.installed():
+        try:
+            exact = await sinopac.intraday(spec, date)
+        except Exception:
+            exact = None
+        if exact:
+            return exact
+    data = await taifex.intraday(date)
+    if data is None:
+        raise HTTPException(503, "no tick file for that date")
+    return data
+
+
+@app.get("/api/top20/{pid}")
+async def top20(pid: str):
+    """權值股 TOP20: the twenty heaviest TAIEX constituents (TAIFEX's monthly
+    constituent-weight table) with the previous session's move from TWSE's
+    daily closing table. Public data; None → 503."""
+    spec = _product(pid)
+    if spec.get("oi") != "taifex":
+        raise HTTPException(404, f"no index-weight source for {pid!r}")
+    data = await taifex.top20()
+    if data is None:
+        raise HTTPException(503, "TAIFEX weights / TWSE daily table unavailable")
+    return data
+
+
+@app.get("/api/twse/{pid}")
+async def twse(pid: str):
+    """台股籌碼日報 from TWSE: 三大法人 net buy / sell by category (NT$) and the
+    margin balances (融資 / 融券) against the previous session. Public data,
+    previous session's numbers; None → 503."""
+    spec = _product(pid)
+    if spec.get("oi") != "taifex":
+        raise HTTPException(404, f"no TWSE source for {pid!r}")
+    data = await taifex.twse_daily()
+    if data is None:
+        raise HTTPException(503, "TWSE daily tables unavailable")
+    return data
+
+
+async def _premarket_contracts() -> list:
+    """[(item, Contract | None)] for PREMARKET, resolved once per hour. None
+    when IB has no such contract — the row is reported as `no-contract`."""
+    key = ("premarket-contracts",)
+    hit = _cache_get(key)
+    if hit:
+        return hit
+    out = []
+    for item in PREMARKET:
+        c = None
+        try:
+            if item["kind"] == "future":
+                c = (await _futures(item))[0][1]
+            else:
+                q = await ib.qualifyContractsAsync(Contract(conId=item["conId"]))
+                c = q[0] if q and q[0].conId else None
+        except Exception:
+            c = None
+        out.append((item, c))
+    _cache_put(key, out, 3600)
+    return out
+
+
+@app.get("/api/premarket/{pid}")
+async def premarket(pid: str):
+    """盤前脈絡: the overseas quotes read before the Taiwan open — ES / NQ front
+    month, SOX, VIX, TSM ADR against 2330, the SGX USD/TWD future — from IB.
+    `chg` is against IB's prior close. Every row carries `status`: ok /
+    no-data (IB has the contract but no quote, e.g. no subscription) /
+    no-contract. Cached 30 s; IB not connected → 503."""
+    spec = _product(pid)
+    if spec.get("oi") != "taifex":
+        raise HTTPException(404, f"no premarket read for {pid!r}")
+    hit = _cache_get(("premarket",))
+    if hit is not None:
+        return hit
+    async with _ib_lock:
+        if not await _ensure_connected():
+            raise HTTPException(503, "IB not connected")
+        pairs = await _premarket_contracts()
+        contracts = [c for _, c in pairs if c is not None]
+        tickers = await ib.reqTickersAsync(*contracts) if contracts else []
+    by_conid = {t.contract.conId: t for t in tickers if t.contract}
+    rows = []
+    for item, c in pairs:
+        t = by_conid.get(c.conId) if c is not None else None
+        last = _f(t.last) if t else None
+        close = _f(t.close) if t else None
+        px = last or close
+        chg = round(px - close, 4) if (px is not None and close) else None
+        rows.append({
+            "key": item["key"], "symbol": item["symbol"],
+            "exchange": c.exchange if c else item["exchange"],
+            "localSymbol": (c.localSymbol or None) if c else None,
+            "currency": c.currency if c else item.get("currency"),
+            "last": px, "prevClose": close, "chg": chg,
+            "chgPct": round(chg / close * 100, 2) if chg is not None else None,
+            "high": _f(t.high) if t else None, "low": _f(t.low) if t else None,
+            "time": t.time.isoformat(timespec="seconds") if (t and t.time) else None,
+            "status": "ok" if px else ("no-contract" if c is None else "no-data"),
+        })
+    data = {"source": "ib", "asOf": datetime.now().isoformat(timespec="seconds"),
+            "marketDataType": MARKET_DATA_TYPE, "rows": rows}
+    _cache_put(("premarket",), data, PREMARKET_CACHE_TTL_S)
+    return data
 
 
 @app.get("/api/positions/{pid}")

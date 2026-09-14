@@ -1,10 +1,23 @@
-/* Liquid Glass design tokens — shared across all 3 directions */
+/* Terminal design tokens — flat dark ground, thin borders, no glass. */
 
 :root {
-  /* Type stack — Apple system fonts with web fallbacks */
-  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter Display", "Inter", system-ui, sans-serif;
-  --font-text: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  /* Type stack (owner's pick, 2026-09): the platform's own faces. Chinese and
+     UI text in 蘋方 / 微軟正黑體, numbers in the system sans with tabular
+     figures. Components must use these variables — no inline font stacks. */
+  --font-display: "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-text: "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: -apple-system, "SF Pro Text", "Segoe UI", "Helvetica Neue", Arial, "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+
+  /* Terminal palette (dark). body.light overrides below. */
+  --bg: #0b0e13;
+  --panel: #11151c;
+  --panel2: #161b24;
+  --border: #232b36;
+  --text: #e6e9ef;
+  --text2: #9aa3b2;
+  --muted: #6b7482;
+  --seg-on: rgba(255,255,255,0.10);
+  --gold: #f0c068;
 
   /* Diverging P&L palette (oklch — colorblind-friendlier than red/green) */
   --pnl-up:    oklch(0.78 0.14 75);   /* warm amber */
@@ -16,11 +29,21 @@
   /* Status accent (single brand accent, used sparingly) */
   --accent:    oklch(0.66 0.16 250); /* serene blue */
 }
+body.light {
+  --bg: #f2f4f8;
+  --panel: #ffffff;
+  --panel2: #f5f7fa;
+  --border: #d3d9e3;
+  --text: #1c2433;
+  --text2: #4b5565;
+  --muted: #7b8494;
+  --seg-on: rgba(20,40,80,0.10);
+}
 
 /* Tabular figures for any number column */
 .tnum {
   font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum" 1, "cv11" 1;
+  font-feature-settings: "tnum" 1;
 }
 .mono { font-family: var(--font-mono); }
 
@@ -38,24 +61,6 @@
    配色抄自 claude.ai/design 的設計稿（期權交易主畫面.dc.html）。
    桌面 shell 用這些 class 覆蓋；圖表/期權鏈等元件走各自的 theme='light' 分支。
    ─────────────────────────────────────────────────────────────────────────── */
-body.light .g2 { color: #1c2433 !important; }
-body.light .g2-panel {
-  background: linear-gradient(155deg, rgba(255,255,255,0.72), rgba(244,247,252,0.55)) !important;
-  border-color: rgba(25,40,70,0.12) !important;
-  box-shadow: 0 1px 0 rgba(255,255,255,0.85) inset, 0 20px 40px -20px rgba(30,45,80,0.22), 0 1px 2px rgba(30,45,80,0.08) !important;
-}
-body.light .g2-raised {
-  background: linear-gradient(155deg, rgba(255,255,255,0.88), rgba(238,242,250,0.72)) !important;
-  border-color: rgba(25,40,70,0.16) !important;
-  box-shadow: 0 1px 0 rgba(255,255,255,0.9) inset, 0 28px 56px -24px rgba(30,45,80,0.3) !important;
-}
-body.light .g2-chip {
-  background: linear-gradient(150deg, rgba(255,255,255,0.92), rgba(240,244,250,0.72)) !important;
-  border-color: rgba(25,40,70,0.14) !important;
-  box-shadow: 0 1px 0 rgba(255,255,255,0.9) inset, 0 4px 12px -6px rgba(30,45,80,0.14) !important;
-}
-/* Glass2 內層白色高光在亮底下太亮 → 收掉 */
-body.light .g2 > [aria-hidden] { opacity: 0.4; }
 /* shell 內散落的深色 helper（tile / select / 期權鏈底） */
 body.light .lt-tile { background: rgba(20,40,80,0.05) !important; border-color: rgba(25,40,70,0.12) !important; }
 body.light .lt-prodsel { background: rgba(20,40,80,0.08) !important; color: #1c2433 !important; }
@@ -65,3 +70,22 @@ body.light .lt-chainbg { background: rgba(255,255,255,0.55) !important; border-c
 /* Calculator side columns: children keep their natural height and the column
    scrolls, instead of flex-shrinking and clipping/overlapping when tall. */
 .calc-col > * { flex-shrink: 0; }
+
+/* Segmented control (flat) */
+.seg { display: inline-flex; border: 1px solid var(--border); }
+.seg > button { padding: 4px 10px; font-size: 11px; font-weight: 600; background: transparent; color: var(--text2); border: none; border-right: 1px solid var(--border); cursor: pointer; font-family: inherit; white-space: nowrap; }
+.seg > button:last-child { border-right: none; }
+.seg > button.on { background: var(--seg-on); color: var(--text); }
+
+/* Adjustable panel grid (react-grid-layout). Panels drag by their header bar
+   and resize from the bottom-right corner while 調整版面 is on. */
+.react-grid-layout { position: relative; }
+.react-grid-item { transition: transform 200ms ease, width 200ms ease, height 200ms ease; }
+.react-grid-item.cssTransforms { transition-property: transform, width, height; }
+.react-grid-item.resizing, .react-grid-item.react-draggable-dragging { transition: none; z-index: 3; will-change: transform; }
+.react-grid-item.react-grid-placeholder { background: rgba(240,192,104,0.14); border: 1px dashed var(--gold); opacity: 1; z-index: 2; transition-duration: 100ms; user-select: none; }
+.react-grid-item > .react-resizable-handle { position: absolute; width: 18px; height: 18px; right: 0; bottom: 0; cursor: se-resize; background: linear-gradient(135deg, transparent 55%, var(--gold) 55%, var(--gold) 70%, transparent 70%, transparent 80%, var(--gold) 80%); opacity: 0.85; z-index: 4; }
+.pg-editing .pg-handle { cursor: move; box-shadow: inset 0 0 0 1px rgba(240,192,104,0.35); }
+.pg-item > .g2 { height: 100%; display: flex; flex-direction: column; }
+.pg-body { flex: 1; min-height: 0; overflow: auto; }
+.react-resizable-hide > .react-resizable-handle { display: none; }

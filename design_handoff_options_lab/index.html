@@ -5,6 +5,7 @@
 <!-- Responsive: mobile uses device width; desktop layout activates ≥1024px via JS. -->
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Options Lab · TXO 選擇權計算機</title>
+<!-- Fonts: the platform's own faces (蘋方 / 微軟正黑體, system numbers) — the stacks live in tokens.css -->
 <link rel="stylesheet" href="tokens.css" />
 <!-- PWA manifest + theme colors -->
 <link rel="manifest" href="manifest.webmanifest" />
@@ -18,7 +19,7 @@
 <link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
 <style>
-  html, body { margin: 0; padding: 0; background: #0a0d14; font-family: var(--font-display); min-height: 100vh; }
+  html, body { margin: 0; padding: 0; background: #0b0e13; font-family: var(--font-display); min-height: 100vh; }
   body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
   * { box-sizing: border-box; }
   input[type="number"]::-webkit-outer-spin-button,
@@ -48,10 +49,15 @@
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+<!-- Adjustable panel grid (UMD; exposes window.ReactGridLayout). Missing = panels stack in their default order. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-grid-layout/1.5.0/react-grid-layout.min.js"></script>
 <script src="surface3d.js"></script>
 
 <script src="iv-surface.js"></script>
 <script src="products.js"></script>
+<!-- Optional: TAIFEX previous-session snapshot (server/taifex.py --write). Missing file = harmless 404, app stays mock without a proxy. -->
+<script src="taifex-eod.js"></script>
+<script src="ib-eod.js"></script>
 <script src="data-live.js"></script>
 <script type="text/babel" src="tweaks-panel.jsx"></script>
 <script type="text/babel" src="atoms.jsx"></script>
