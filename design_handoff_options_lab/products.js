@@ -90,6 +90,27 @@
       ],
     },
     {
+      // CME spec: 100 short tons, quoted US$/ton → US$100 per $1 (IB's option
+      // descriptions carry no multiplier for ZM, so this is the exchange's number).
+      id: 'zm', code: 'ZM', nameZh: '黃豆粉', name: 'Soybean Meal',
+      cur: 'US$', mult: 100, unitLabel: '×US$100 / $·ton',
+      strikeStep: 5, pxDecimals: 2,
+      model: 'b76', r: 4.0, skew: 'call',
+      defaultSpot: 347, defaultIv: 22,
+      spotMin: 250, spotMax: 450, spotStep: 0.1,
+      ivMin: 10, ivMax: 60,
+      settleNote: '13:20 CT',
+      ivBase: { std: 22 },
+      fees: { perSide: 2.5, taxRate: 0 },
+      live: 'ib', livePositions: true,
+      ib: { symbol: 'ZM', exchange: 'CBOT', tradingClass: 'OZM' },
+      mockExpiries: [
+        { id: 'm1', label: 'OCT', dte: 11, type: 'std', date: '9/25'  },
+        { id: 'm2', label: 'NOV', dte: 39, type: 'std', date: '10/23' },
+        { id: 'm3', label: 'DEC', dte: 67, type: 'std', date: '11/20' },
+      ],
+    },
+    {
       id: 'le', code: 'LE', nameZh: '活牛', name: 'Live Cattle',
       cur: 'US$', mult: 400, unitLabel: '×US$400/¢ · 40,000 lb',
       strikeStep: 2, pxDecimals: 3,
