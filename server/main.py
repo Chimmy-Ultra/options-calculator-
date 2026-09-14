@@ -69,7 +69,7 @@ PRODUCTS = {
     "zl": {"source": "ib", "symbol": "ZL", "exchange": "CBOT", "tradingClass": "OZL", "strikeStep": 1.0},
     "le": {"source": "ib", "symbol": "LE", "exchange": "CME", "tradingClass": "LE", "strikeStep": 2.0},
     "he": {"source": "ib", "symbol": "HE", "exchange": "CME", "tradingClass": "HE", "strikeStep": 2.0},
-    "bz": {"source": "ib", "symbol": "BZ", "exchange": "NYMEX", "tradingClass": "BZO", "strikeStep": 1.0},
+    "bz": {"source": "ib", "symbol": "BZ", "exchange": "NYMEX", "tradingClass": "BE", "strikeStep": 1.0},
 }
 
 # 盤前脈絡 — the overseas read a Taiwan day trader takes before the 08:45 open,

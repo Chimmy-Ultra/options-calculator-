@@ -229,6 +229,26 @@
         { id: 'm3', label: 'OCT', dte: 88,  type: 'std', date: '9/26' },
       ],
     },
+    {
+      id: 'bz', code: 'BZ', nameZh: '布蘭特原油', name: 'Brent Crude (last day)',
+      cur: 'US$', mult: 1000, unitLabel: '×US$1,000 / bbl',
+      strikeStep: 1, pxDecimals: 2,
+      model: 'b76', r: 4.0, skew: 'call',
+      defaultSpot: 107.3, defaultIv: 35,
+      spotMin: 80, spotMax: 140, spotStep: 0.01,
+      ivMin: 15, ivMax: 100,
+      settleNote: '13:30 CT',
+      ivBase: { std: 35 },
+      fees: { perSide: 2.5, taxRate: 0 },
+      live: 'ib', livePositions: true,
+      // IB lists the standard monthly class as BE (seen in the option descriptions).
+      ib: { symbol: 'BZ', exchange: 'NYMEX', tradingClass: 'BE' },
+      mockExpiries: [
+        { id: 'm1', label: 'NOV', dte: 11, type: 'std', date: '9/25'  },
+        { id: 'm2', label: 'DEC', dte: 43, type: 'std', date: '10/27' },
+        { id: 'm3', label: 'JAN', dte: 74, type: 'std', date: '11/25' },
+      ],
+    },
   ];
 
   window.PRODUCTS = PRODUCTS;
