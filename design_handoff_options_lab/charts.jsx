@@ -811,19 +811,73 @@ const PRICE_MAS = [
 // cone: { ivPct, days, label } — thinkorswim's probability cone: from the last
 // close, ±1σ (68.27%) and ±2σ bands of S·IV·√(t/365) drawn forward to `days`
 // (the selected expiry) in a strip of empty slots to the right of the bars.
+const MIN_VIEW_BARS = 12;
+// Push overlapping right-axis tags apart: keep every dashed line at its true
+// price and move only the label, so a cluster of levels near spot stays
+// readable. Order is preserved and the run is kept inside [lo, hi].
+function spreadTags(items, gap, lo, hi) {
+  const a = items.slice().sort((p, q) => p.y - q.y).map((x) => ({ ...x, ty: x.y }));
+  for (let i = 1; i < a.length; i++) if (a[i].ty - a[i - 1].ty < gap) a[i].ty = a[i - 1].ty + gap;
+  const over = a.length ? a[a.length - 1].ty - hi : 0;
+  if (over > 0) {
+    a.forEach((x) => { x.ty -= over; });
+    for (let i = a.length - 2; i >= 0; i--) if (a[i + 1].ty - a[i].ty < gap) a[i].ty = a[i + 1].ty - gap;
+  }
+  a.forEach((x) => { x.ty = Math.max(lo, x.ty); });
+  return a;
+}
+
 function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceLabel = '', levels = [], cone = null }) {
   const dark = theme === 'dark';
   const [hiddenMa, setHiddenMa] = React.useState({});
+  // Visible bar window into `bars`; null = the whole series. The wheel zooms
+  // about the cursor, dragging pans, and switching product / period / session
+  // resets it.
+  const [view, setView] = React.useState(null);
+  const svgRef = React.useRef(null);
+  const dragRef = React.useRef(null);
+  const nAll = (bars && bars.length) || 0;
+  const seriesKey = nAll ? `${nAll}:${bars[0].t}:${bars[nAll - 1].t}` : '';
+  React.useEffect(() => { setView(null); }, [seriesKey]);
+  const zoomAt = React.useCallback((factor, fracX) => {
+    setView((v) => {
+      const f = v ? v.from : 0, t = v ? v.to : nAll;
+      const span = t - f;
+      const next = Math.max(Math.min(MIN_VIEW_BARS, nAll), Math.min(nAll, Math.round(span * factor)));
+      if (next >= nAll) return null;
+      const nf = Math.max(0, Math.min(nAll - next, Math.round(f + span * fracX - next * fracX)));
+      return { from: nf, to: nf + next };
+    });
+  }, [nAll]);
+  React.useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return undefined;
+    // Non-passive so the page behind the panel does not scroll while zooming.
+    const onWheel = (e) => {
+      e.preventDefault();
+      const r = el.getBoundingClientRect();
+      zoomAt(e.deltaY > 0 ? 1.3 : 1 / 1.3, Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)));
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [zoomAt]);
   if (!bars || bars.length < 2) return null;
   const W = 768, H = 282, plotW = 720, pTop = 12, pBot = 196, vTop = 210, vBot = 274;
-  const n = bars.length;
+  const n = bars.length;                       // MA / RSI still run over the whole series
+  const span = view ? Math.max(MIN_VIEW_BARS, Math.min(n, view.to - view.from)) : n;
+  const from = view ? Math.max(0, Math.min(n - span, view.from)) : 0;
+  const to = from + span;
+  const vis = bars.slice(from, to);
+  const nv = vis.length;
+  const atRightEdge = to === n;
   const closes = bars.map((b) => b.c);
-  const barMin = Math.min(...bars.map((b) => b.l)), barMax = Math.max(...bars.map((b) => b.h));
+  // Price scale follows the visible bars, so zooming in actually expands them.
+  const barMin = Math.min(...vis.map((b) => b.l)), barMax = Math.max(...vis.map((b) => b.h));
   const barRng = Math.max(barMax - barMin, 1e-9);
   const lv = (levels || []).filter((l) => Number.isFinite(l.price));
   const inScale = lv.filter((l) => l.price >= barMin - barRng * 0.6 && l.price <= barMax + barRng * 0.6);
-  const hasCone = !!(cone && cone.ivPct > 0 && cone.days > 0);
-  const coneSlots = hasCone ? Math.max(6, Math.round(n * 0.14)) : 0;
+  const hasCone = !!(cone && cone.ivPct > 0 && cone.days > 0 && atRightEdge);
+  const coneSlots = hasCone ? Math.max(6, Math.round(nv * 0.14)) : 0;
   const anchor = bars[n - 1].c;
   const coneSig = (t) => anchor * (cone.ivPct / 100) * Math.sqrt(Math.max(t, 0) / 365);
   const coneEnd = hasCone ? coneSig(cone.days) : 0;
@@ -831,10 +885,10 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
   const pMax = Math.max(barMax, ...inScale.map((l) => l.price), hasCone ? anchor + 2 * coneEnd : -Infinity) * 1.002;
   const y = (p) => pTop + ((pMax - p) / (pMax - pMin)) * (pBot - pTop);
   const levelTags = lv.map((l) => ({ ...l, pinned: !inScale.includes(l), y: inScale.includes(l) ? y(l.price) : (l.price > pMax ? pTop + 4 : pBot - 4) }));
-  const xw = plotW / (n + coneSlots);
-  const cx = (i) => i * xw + xw / 2;
+  const xw = plotW / (nv + coneSlots);
+  const cx = (i) => (i - from) * xw + xw / 2;   // i indexes the whole series
   const bw = Math.min(7, Math.max(2, xw * 0.62));
-  const vMax = Math.max(...bars.map((b) => b.v), 1);
+  const vMax = Math.max(...vis.map((b) => b.v), 1);
   const up = '#ef5350', down = '#26a69a';
   const txt = dark ? 'rgba(255,255,255,0.55)' : 'rgba(20,30,50,0.55)';
   const grid = dark ? 'rgba(255,255,255,0.10)' : 'rgba(20,30,50,0.12)';
@@ -872,10 +926,18 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
   const lastY = y(last.c);
   // Hide a grid price label if it would collide with the gold last-price label
   // or a level tag.
+  // Everything that wants a slot on the right axis, including the gold last
+  // price, decluttered together; the dashed lines stay at their true prices.
+  const lastOnScale = lastY >= pTop && lastY <= pBot;
+  const axisTags = spreadTags([
+    ...levelTags.map((l, i) => ({ ...l, key: 'l' + i })),
+    ...(lastOnScale ? [{ key: 'last', y: lastY, price: last.c, color: '#f0c068', isLast: true }] : []),
+  ], 14, pTop + 7, pBot - 7);
+  const leftLabels = spreadTags(levelTags.filter((l) => l.label), 13.5, pTop + 9, pBot - 4);
   const gridLines = [0.12, 0.37, 0.62, 0.87].map((f) => {
     const p = pMin + f * (pMax - pMin);
     const gy = y(p);
-    return { y: gy, lab: fmt(p), hideLabel: Math.abs(gy - lastY) < 11 || levelTags.some((l) => Math.abs(gy - l.y) < 11) };
+    return { y: gy, lab: fmt(p), hideLabel: axisTags.some((l) => Math.abs(gy - l.ty) < 11) };
   });
 
   return (
@@ -903,17 +965,42 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
             );
           })}
           <span><i style={{ display: 'inline-block', width: 14, height: 2, background: '#a78bfa', verticalAlign: 'middle', marginRight: 4 }} />RSI 14</span>
+          {view
+            ? <span className="tnum" onClick={() => setView(null)} title="回到全部 K 棒"
+                    style={{ cursor: 'pointer', color: '#f0c068', fontWeight: 700, userSelect: 'none' }}>{nv}/{n} 根 · 重設</span>
+            : <span style={{ opacity: 0.45 }}>滾輪縮放 · 拖曳平移</span>}
         </span>
       </div>
 
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: 'block', fontFamily: 'var(--font-mono)' }}>
+      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width="100%"
+           style={{ display: 'block', fontFamily: 'var(--font-mono)', cursor: view ? 'grab' : 'default', touchAction: 'none' }}
+           onPointerDown={(e) => {
+             if (!view) return;
+             dragRef.current = { x: e.clientX, from, span };
+             e.currentTarget.setPointerCapture(e.pointerId);
+             e.currentTarget.style.cursor = 'grabbing';
+           }}
+           onPointerMove={(e) => {
+             const d = dragRef.current;
+             if (!d) return;
+             const r = e.currentTarget.getBoundingClientRect();
+             const shift = Math.round(((d.x - e.clientX) / r.width) * d.span);
+             const nf = Math.max(0, Math.min(n - d.span, d.from + shift));
+             if (nf !== from) setView({ from: nf, to: nf + d.span });
+           }}
+           onPointerUp={(e) => { dragRef.current = null; e.currentTarget.style.cursor = view ? 'grab' : 'default'; }}
+           onPointerCancel={() => { dragRef.current = null; }}>
+        <defs>
+          <clipPath id="pc-plot"><rect x="0" y="0" width={plotW} height={vBot} /></clipPath>
+        </defs>
         {gridLines.map((g, i) => (
           <g key={i}>
             <line x1="0" x2={plotW} y1={g.y} y2={g.y} stroke={grid} strokeDasharray="2 4" />
             {!g.hideLabel && <text x={plotW + 6} y={g.y + 3} fontSize="9" fill={txt}>{g.lab}</text>}
           </g>
         ))}
-        {bars.map((b, i) => {
+        {vis.map((b, k) => {
+          const i = from + k;
           const isUp = b.c >= b.o;
           const col = isUp ? up : down;
           const top = y(Math.max(b.o, b.c));
@@ -927,16 +1014,39 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
             </g>
           );
         })}
-        {PRICE_MAS.map((m) => (!hiddenMa[m.k] && n >= m.k) && (
-          <polyline key={m.k} points={maPts(m.k)} fill="none" stroke={m.color} strokeWidth={m.k >= 60 ? 1.6 : 1.4} strokeLinejoin="round" />
+        <g clipPath="url(#pc-plot)">
+          {PRICE_MAS.map((m) => (!hiddenMa[m.k] && n >= m.k) && (
+            <polyline key={m.k} points={maPts(m.k)} fill="none" stroke={m.color} strokeWidth={m.k >= 60 ? 1.6 : 1.4} strokeLinejoin="round" />
+          ))}
+        </g>
+        {/* Level overlays: the dashed line marks the true price; the label and the
+            right-axis tag sit at their decluttered slots, joined by a leader. */}
+        {levelTags.map((l, i) => (!l.pinned) && (
+          <line key={'ln' + i} x1="0" x2={plotW} y1={l.y} y2={l.y} stroke={l.color} strokeWidth="1" strokeDasharray="6 4" strokeOpacity="0.85" />
         ))}
-        {/* Level overlays: dashed line + label at the left, price tag on the right axis */}
-        {levelTags.map((l, i) => (
-          <g key={i}>
-            {!l.pinned && <line x1="0" x2={plotW} y1={l.y} y2={l.y} stroke={l.color} strokeWidth="1" strokeDasharray="6 4" strokeOpacity="0.85" />}
-            {l.label && <text x="4" y={l.price >= last.c ? l.y - 3 : l.y + 10} fontSize="9" fontWeight="600" fill={l.color} fillOpacity="0.9">{l.label}{l.pinned ? (l.price > pMax ? ' ▲' : ' ▼') : ''}</text>}
-            <rect x={plotW + 2} y={l.y - 6.5} width={46} height={13} rx="2.5" fill={l.color} fillOpacity={l.pinned ? 0.55 : 0.9} />
-            <text x={plotW + 25} y={l.y + 3} fontSize="9" fontWeight="700" fill="#fff" textAnchor="middle">{fmt(l.price)}</text>
+        {leftLabels.map((l, i) => {
+          const txtLab = l.label + (l.pinned ? (l.price > pMax ? ' \u25b2' : ' \u25bc') : '');
+          // SVG will not size a box to its text: CJK runs ~9.2px and the rest
+          // ~5px at this font size, which is close enough for a backing chip.
+          const wLab = 7 + [...txtLab].reduce((a, ch) => a + (/[\u2e80-\u9fff\uff00-\uffef]/.test(ch) ? 9.2 : 5), 0);
+          return (
+            <g key={'lb' + i}>
+              {Math.abs(l.ty - l.y) > 1.5 && (
+                <line x1="1.5" x2="1.5" y1={l.y} y2={l.ty - 3} stroke={l.color} strokeWidth="0.9" strokeOpacity="0.55" />
+              )}
+              <rect x="3" y={l.ty - 8.5} width={wLab} height="11.5" rx="2"
+                    fill={dark ? 'rgba(11,14,19,0.74)' : 'rgba(255,255,255,0.8)'} />
+              <text x="6.5" y={l.ty} fontSize="9" fontWeight="600" fill={l.color} fillOpacity="0.95">{txtLab}</text>
+            </g>
+          );
+        })}
+        {axisTags.map((l) => (
+          <g key={l.key}>
+            {Math.abs(l.ty - l.y) > 1.5 && (
+              <line x1={plotW} x2={plotW + 2} y1={l.y} y2={l.ty} stroke={l.color} strokeWidth="0.8" strokeOpacity="0.6" />
+            )}
+            <rect x={plotW + 2} y={l.ty - 6.5} width={46} height={13} rx="2.5" fill={l.color} fillOpacity={l.pinned ? 0.55 : l.isLast ? 1 : 0.9} />
+            <text x={plotW + 25} y={l.ty + 3} fontSize="9" fontWeight="700" fill={l.isLast ? '#0a0d14' : '#fff'} textAnchor="middle">{fmt(l.price)}</text>
           </g>
         ))}
         {/* Probability cone: ±2σ (light) and ±1σ (darker) from the last close to the expiry */}
@@ -959,8 +1069,7 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
             </g>
           );
         })()}
-        <line x1="0" x2={plotW} y1={y(last.c)} y2={y(last.c)} stroke="#f0c068" strokeWidth="0.8" strokeDasharray="4 3" strokeOpacity="0.7" />
-        <text x={plotW + 6} y={y(last.c) + 3.5} fontSize="10" fontWeight="700" fill="#f0c068">{fmt(last.c)}</text>
+        {lastOnScale && <line x1="0" x2={plotW} y1={lastY} y2={lastY} stroke="#f0c068" strokeWidth="0.8" strokeDasharray="4 3" strokeOpacity="0.7" />}
       </svg>
 
       <div style={{ fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600, margin: '10px 0 4px' }}>RSI · 14</div>
@@ -969,7 +1078,8 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
         <line x1="0" x2={plotW} y1={rsiY(30)} y2={rsiY(30)} stroke={grid} strokeDasharray="2 4" />
         <text x={plotW + 6} y={rsiY(70) + 3} fontSize="9" fill={txt}>70</text>
         <text x={plotW + 6} y={rsiY(30) + 3} fontSize="9" fill={txt}>30</text>
-        <polyline points={rsiPts.join(' ')} fill="none" stroke="#a78bfa" strokeWidth="1.4" strokeLinejoin="round" />
+        <clipPath id="pc-rsi"><rect x="0" y="0" width={plotW} height="66" /></clipPath>
+        <polyline clipPath="url(#pc-rsi)" points={rsiPts.join(' ')} fill="none" stroke="#a78bfa" strokeWidth="1.4" strokeLinejoin="round" />
       </svg>
 
       {sourceLabel && (

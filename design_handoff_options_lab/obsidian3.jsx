@@ -795,8 +795,27 @@ function Obsidian3() {
   }, [dayBars]);
 
   // Add leg from chain
+  // One click on the chain = one lot of that contract. A contract is the same
+  // one when strike, call / put AND expiry all match (legs without their own
+  // dte follow the workspace dte, so calendars stay separate). Clicking the
+  // side already held adds a lot and averages the entry premium; clicking the
+  // opposite side takes one off and drops the leg once the position is flat —
+  // 平倉, rather than stacking a second leg that merely nets to zero.
   function addLegFromChain(leg) {
-    setLegs((prev) => [...prev, leg]);
+    setLegs((prev) => {
+      const i = prev.findIndex((l) => l.strike === leg.strike && l.type === leg.type
+        && (l.dte == null ? leg.dte : l.dte) === leg.dte);
+      if (i < 0) return [...prev, leg];
+      const cur = prev[i];
+      if (cur.side === leg.side) {
+        const qty = cur.qty + leg.qty;
+        const premium = (cur.premium * cur.qty + leg.premium * leg.qty) / qty;
+        return prev.map((l, j) => (j === i ? { ...l, qty, premium: Math.round(premium * 100) / 100 } : l));
+      }
+      const qty = cur.qty - leg.qty;
+      if (qty <= 0) return prev.filter((_, j) => j !== i);
+      return prev.map((l, j) => (j === i ? { ...l, qty } : l));
+    });
   }
 
   // ── Mobile / foldable layout — completely different shell.
