@@ -71,13 +71,18 @@ function aggBars(bars, unit) {
 const TXO_SPOT = 21850;
 const STRIKE_STEP = 50;
 // Default legs: a bull-call spread（ATM+1 檔 / ATM+5 檔），premium 用該商品的
-// 定價模型（TXO=BS、穀物=Black-76）在 default spot/iv 與預設到期日算出。
-function defaultLegsFor(P, dte) {
+// 定價模型（TXO=BS、穀物=Black-76）在給定的 spot/iv 與到期日算出。
+// `spot` defaults to the product's placeholder, but the caller passes the real
+// one once a snapshot or the proxy has answered — TXO's placeholder is 21,850
+// against an actual index near 45,800, which put the whole default spread ten
+// thousand points away and flattened the payoff chart.
+function defaultLegsFor(P, dte, spot) {
   const st = P.strikeStep;
-  const k1 = Math.round((P.defaultSpot + st) / st) * st;
+  const s0 = (spot > 0) ? spot : P.defaultSpot;
+  const k1 = Math.round((s0 + st) / st) * st;
   return [
-    _mkLeg('long',  'call', P.defaultSpot, k1, P.defaultIv, dte, P),
-    _mkLeg('short', 'call', P.defaultSpot, k1 + 4 * st, P.defaultIv, dte, P),
+    _mkLeg('long',  'call', s0, k1, P.defaultIv, dte, P),
+    _mkLeg('short', 'call', s0, k1 + 4 * st, P.defaultIv, dte, P),
   ];
 }
 // 商品的到期日清單：live（IB 真實到期日）> 商品 mock > TXO 週/月選。
@@ -174,6 +179,7 @@ function Eyebrow({ children, right, hk }) {
 function WorkspaceTabs({ value, onChange }) {
   // Desktop tabs, in the terminal's words; the active one carries a gold underline.
   const items = [
+    { id: 'watch',  label: '自選' },
     { id: 'levels', label: '關卡' },
     { id: 'chain',  label: '報價表' },
     { id: 'chart',  label: 'K線' },
@@ -405,6 +411,7 @@ const GRID_DEFAULTS = {
     { i: 'twse',      x: 0, y: 58, w: 4, h: 9 },
   ],
   chart: [{ i: 'kline', x: 0, y: 0, w: 12, h: 19 }],
+  watch: [{ i: 'watch', x: 0, y: 0, w: 6, h: 21 }],
   chain: [
     { i: 'chain',   x: 0, y: 0,  w: 8, h: 24 },
     { i: 'whatif',  x: 8, y: 0,  w: 4, h: 6 },
@@ -439,7 +446,7 @@ function Obsidian3() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [workspace, setWorkspace] = uS(() => {
     const s = readSaved();
-    return (s && ['levels', 'chain', 'chart', 'calc', 'lab', 'iv', 'pricer'].includes(s.workspace)) ? s.workspace : 'levels';
+    return (s && ['watch', 'levels', 'chain', 'chart', 'calc', 'lab', 'iv', 'pricer'].includes(s.workspace)) ? s.workspace : 'levels';
   });
   // Lab sub-view: '3d' P&L surface | 'iv' IV surface. A workspace saved as the
   // old top-level 'iv' tab lands on the IV sub-view.
@@ -490,12 +497,18 @@ function Obsidian3() {
   const expiries = productExpiries(P, live && live.expiries);
   const expiry = expiries.find((e) => e.id === expiryId) || expiries[0];
 
+  // The exact array `defaultLegsFor` last produced. "The user has not touched
+  // the position" is then reference equality against it — no false positives if
+  // someone happens to build the same spread by hand.
+  const autoLegs = uR(null);
   const [legs, setLegs] = uS(() => {
     const s = readSaved();
     const pid = initialProductId();
     const P0 = window.getProduct(pid);
     const saved = s && s.legsByProduct && sanitizeLegs(s.legsByProduct[pid]);
-    return saved || defaultLegsFor(P0, defaultExpiryFor(P0).dte);
+    if (saved) return saved;
+    autoLegs.current = defaultLegsFor(P0, defaultExpiryFor(P0).dte);
+    return autoLegs.current;
   });
   const [spot, setSpot] = uS(() => {
     const s = readSaved();
@@ -549,8 +562,31 @@ function Obsidian3() {
     setExpiryId(e0.id);
     setSpot(p.defaultSpot);
     setIv(p.defaultIv);
-    setLegs(defaultLegsFor(p, e0.dte));
+    autoLegs.current = defaultLegsFor(p, e0.dte);
+    setLegs(autoLegs.current);
   }
+
+  // Re-centre the generated default spread on the first real spot. The product
+  // registry only carries a placeholder (TXO's is 21,850 against an index near
+  // 45,800), and the real one lands a moment later from the snapshot or the
+  // proxy — without this the opening position sits ten thousand points away and
+  // the payoff chart and P&L table read flat everywhere. Only ever touches legs
+  // this component generated itself; one edit and `legs` is a different array,
+  // so the guard stops matching for good.
+  uE(() => {
+    if (legs !== autoLegs.current || !legs.length) return;
+    // Stay armed while `spot` is still the registry placeholder — the effect
+    // runs on the very first render, and disarming there would spend the one
+    // shot before the snapshot has answered.
+    if (!(spot > 0) || spot === P.defaultSpot) return;
+    // Now it is a real spot: re-centre once, then never again. The What-if rail
+    // moves `spot` to test the position against a scenario, and a position that
+    // slid along with it would make that meaningless.
+    autoLegs.current = null;
+    const next = defaultLegsFor(P, legs[0].dte, spot);
+    if (next[0].strike === legs[0].strike) return;
+    setLegs(next);
+  }, [spot, P, legs]);
 
   // IB live：商品有 ib 設定且本機 proxy（server/）活著 → 抓期貨報價 + 真實到期日。
   // proxy 不在 / IB 沒連線 → 安靜留在 mock。
@@ -705,7 +741,7 @@ function Obsidian3() {
   // On phone/fold, Compare is the only desktop-exclusive workspace (it needs the
   // multi-card grid to be useful). IV Surface is now mobile-friendly so it stays.
   uE(() => {
-    if (vp.layout !== 'desk' && (workspace === 'compare' || workspace === 'chart' || workspace === 'levels' || workspace === 'lab')) setWorkspace('calc');
+    if (vp.layout !== 'desk' && (workspace === 'compare' || workspace === 'chart' || workspace === 'levels' || workspace === 'lab' || workspace === 'watch')) setWorkspace('calc');
   }, [vp.layout]);
   // Desktop: Pricer/Compare tabs removed — redirect stale state to Chain; the
   // old IV Surface tab lives in Lab now.
@@ -955,6 +991,9 @@ function Obsidian3() {
           accent={accent} t={t} D={D}
           quality={quality} grid={grid} hv20={hv20}
         />
+      )}
+      {workspace === 'watch' && (
+        <WatchWorkspace grid={grid} onPick={(pid) => { switchProduct(pid); setWorkspace('chart'); }} />
       )}
       {workspace === 'chart' && (
         <ChartWorkspace
@@ -1584,7 +1623,7 @@ function KeyLevelsPanel({ K, P, spot, light = false }) {
   const dim = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
   if (!K) return <div className="mono" style={{ fontSize: 11, color: dim }}>日K不足，無法計算。</div>;
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
-  const rows = [...K.levels, { key: 'SPOT', name: `現價 ${P.code}`, price: spot, hit: null, group: 'spot' }].sort((a, b) => b.price - a.price);
+  const rows = [...K.levels, { key: 'SPOT', name: P.underlyingLabel || `現價 ${P.code}`, price: spot, hit: null, group: 'spot' }].sort((a, b) => b.price - a.price);
   const col = (r) => r.group === 'spot' ? LEVEL_COLORS.spot : r.group === 'profile' ? LEVEL_COLORS.band : r.price > spot ? LEVEL_COLORS.up : r.price < spot ? LEVEL_COLORS.down : 'var(--text)';
   return (
     <div>
@@ -1727,7 +1766,7 @@ function LevelsLadder({ P, spot, L, G, costLine = null, light }) {
     rows.push({ price: L.atm.strike + L.straddle, label: '價平＋價平和', detail: `${fmtP(L.atm.strike)} + ${window.fmtPx(L.straddle, P)}`, color: LEVEL_COLORS.band });
     rows.push({ price: L.atm.strike - L.straddle, label: '價平－價平和', detail: `${fmtP(L.atm.strike)} − ${window.fmtPx(L.straddle, P)}`, color: LEVEL_COLORS.band });
   }
-  rows.push({ price: spot, label: `現價 ${P.code}`, detail: L.straddle != null ? `價平和 ${window.fmtPx(L.straddle, P)} · 價平 ${fmtP(L.atm.strike)}` : '沒有價平權利金', color: LEVEL_COLORS.spot, isSpot: true });
+  rows.push({ price: spot, label: P.underlyingLabel || `現價 ${P.code}`, detail: L.straddle != null ? `價平和 ${window.fmtPx(L.straddle, P)} · 價平 ${fmtP(L.atm.strike)}` : '沒有價平權利金', color: LEVEL_COLORS.spot, isSpot: true });
   if (L.support) rows.push({ price: L.support.strike, label: '支撐', detail: `Put OI 最大 ${L.support.oi.toLocaleString()}${chg(L.support.oiChg)}`, color: LEVEL_COLORS.down });
   if (L.maxPain) rows.push({ price: L.maxPain.strike, label: '最大痛苦點', detail: '買方到期損失最大的結算價', color: LEVEL_COLORS.gex });
   if (costLine != null) rows.push({ price: costLine.price, label: '成本線', detail: `（${costLine.running ? '今' : '前'}高 + 低）÷ 2 · 上多下空`, color: LEVEL_COLORS.spot });
@@ -2048,7 +2087,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
   const pc = M && M.pcRatio, fx = M && M.foreign, t10 = M && M.top10;
   const noMkt = isLive ? '期交所資料未載入' : '模擬模式沒有籌碼資料';
   const tiles = (<>
-        <LevelTile label={`現價 ${P.code}`} value={fmtP(spot)} color={spotChg == null ? LEVEL_COLORS.spot : spotChg >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down}
+        <LevelTile label={P.underlyingLabel || `現價 ${P.code}`} value={fmtP(spot)} color={spotChg == null ? LEVEL_COLORS.spot : spotChg >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down}
           sub={spotChg != null ? <><Chg v={spotChg} fmt={(x) => fmtP(x)} /> {q.chgPct != null ? `（${q.chgPct >= 0 ? '+' : ''}${q.chgPct}%）` : ''}</> : (isLive ? liveLabel(live, P) : '模擬')} light={light} />
         <LevelTile label="價平和" hk="straddle" color={LEVEL_COLORS.band}
           value={L.straddle != null ? window.fmtPx(L.straddle, P) : '—'}
@@ -2132,6 +2171,79 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
 }
 
 // ───────────────────────────────────────────────── CHART WORKSPACE
+// ───────────────────────────────────────────────── WATCHLIST WORKSPACE
+// 自選 — the board modelled on moomoo's watchlist: name over code, a mini
+// price line, the close, and the move as a filled colour block.
+//
+// It is a PREVIOUS-SESSION board and says so. Every row's price is that
+// product's last daily close and the move is against the close before it, one
+// basis for the whole list, taken from the same bars the sparkline draws. The
+// captures did not all run on the same day, so each row carries its own date
+// rather than one heading implying they share one.
+//
+// moomoo's mini chart is the running intraday shape; only TXO has intraday in
+// the snapshot, so these are daily closes and the header says 近30日.
+function WatchWorkspace({ onPick, grid }) {
+  const rows = (window.PRODUCTS || []).map((P) => {
+    const r = (window.LiveData && window.LiveData.watchRow) ? window.LiveData.watchRow(P.id) : null;
+    return { P, r };
+  });
+  // Dates are YYYYMMDD strings — sort them, never Math.min, which coerces to a number.
+  const dated = rows.filter((x) => x.r).map((x) => x.r.date).sort();
+  const md = (d) => `${d.slice(4, 6)}/${d.slice(6)}`;
+  const span = dated.length ? (dated[0] === dated[dated.length - 1] ? md(dated[0]) : `${md(dated[0])}\u2013${md(dated[dated.length - 1])}`) : '';
+  const missing = rows.filter((x) => !x.r).length;
+  const body = (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {rows.map(({ P, r }) => {
+        const up = r && r.chgPct >= 0;
+        const col = up ? '#ef5350' : '#26a69a';
+        return (
+          <button key={P.id} onClick={() => r && r.hasChain && onPick(P.id)} disabled={!r || !r.hasChain}
+            title={r && !r.hasChain ? `${P.nameZh || P.name} \u53ea\u6293\u4e86\u5831\u50f9\u548c\u65e5\u7dda\uff0c\u9084\u6c92\u6709\u9078\u64c7\u6b0a\u93c8\uff1b\u9ede\u9032\u53bb\u6703\u662f\u6a21\u64ec\u8cc7\u6599\uff0c\u6240\u4ee5\u5148\u64cb\u4e0b\u4f86` : undefined}
+            style={{
+            display: 'grid', gridTemplateColumns: '1fr 96px 92px 76px', alignItems: 'center', gap: 10,
+            padding: '8px 10px', border: 'none', borderBottom: '1px solid var(--border)',
+            background: 'transparent', color: 'var(--text)', font: 'inherit', textAlign: 'left',
+            cursor: (r && r.hasChain) ? 'pointer' : 'default', opacity: r ? 1 : 0.45,
+          }}>
+            <span style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {P.nameZh || P.name}
+              </div>
+              <div className="tnum" style={{ fontSize: 9.5, color: 'var(--text2)', fontFamily: 'var(--font-mono)', marginTop: 1 }}>
+                {P.code}{r ? ` \u00b7 ${r.date.slice(4, 6)}/${r.date.slice(6)} \u00b7 ${r.source}${r.hasChain ? '' : ' \u00b7 \u50c5\u5831\u50f9'}` : ' \u00b7 \u5c1a\u7121\u5feb\u7167'}
+              </div>
+            </span>
+            {r ? <Sparkline series={r.series} /> : <span />}
+            <span className="tnum" style={{ fontSize: 13, fontFamily: 'var(--font-mono)', textAlign: 'right' }}>
+              {r ? window.fmtPx(r.close, P) : '\u2014'}
+            </span>
+            {r
+              ? <span className="tnum" style={{
+                  fontSize: 11.5, fontWeight: 700, fontFamily: 'var(--font-mono)', textAlign: 'center',
+                  background: col, color: '#fff', padding: '4px 0', borderRadius: 2,
+                }}>{(up ? '+' : '\u2212') + Math.abs(r.chgPct).toFixed(2)}%</span>
+              : <span style={{ fontSize: 10, color: 'var(--text2)', textAlign: 'center' }}>無資料</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+  const panels = [{
+    i: 'watch',
+    title: <>自選 · {rows.length - missing}/{rows.length} 商品</>,
+    right: gridCap(`\u524d\u4e00\u4ea4\u6613\u65e5\u6536\u76e4 \u00b7 \u8d70\u52e2\u70ba\u8fd130\u65e5\u65e5\u7dda` + (span ? ` \u00b7 ${span}` : '')),
+    pad: 0,
+    body,
+  }];
+  return (
+    <div style={GRID_BODY}>
+      <PanelGrid tab="watch" panels={panels} defaults={GRID_DEFAULTS.watch} grid={grid} />
+    </div>
+  );
+}
+
 // Top-level Chart tab (from the design): full-width candles + MA + RSI.
 // Desktop only — mobile keeps the K線 sub-tab inside Calc.
 function ChartWorkspace({ P, bars, barsLive, live, theme, light, barPeriodId, setBarPeriodId, barSession, setBarSession, cone = null, D, grid }) {

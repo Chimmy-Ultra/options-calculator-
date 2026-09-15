@@ -18,7 +18,9 @@ import asyncio
 import csv
 import io
 import json
+import math
 import os
+import statistics
 import sys
 import time
 import urllib.parse
@@ -749,10 +751,23 @@ def _fetch_index() -> dict:
         rows = (json.loads(_decode(r.read())).get("RtData") or {}).get("QuoteList") or []
     idx = next(r for r in rows if r.get("SymbolID") == "TXF-S")
     fut = next((r for r in rows if str(r.get("SymbolID", "")).endswith("-F")), None)
+
+    def _quote(row):
+        """(price, ref). Outside session hours the list rolls to the next
+        business day with every live field blank and CRefPrice holding the
+        session that just closed, so a blank price falls back to that close
+        and `ref` goes unknown rather than inventing a zero change."""
+        last, ref = _num(row.get("CLastPrice")), _num(row.get("CRefPrice"))
+        return (last, ref) if last is not None else (ref, None)
+
+    price, ref = _quote(idx)
+    if price is None:
+        raise ValueError("TAIFEX quote list carried no index price")
+    fut_px, fut_ref = _quote(fut) if fut else (None, None)
     return {
-        "price": float(idx["CLastPrice"]), "ref": _num(idx.get("CRefPrice")),
+        "price": price, "ref": ref,
         "date": idx.get("CDate", ""), "time": idx.get("CTime", ""),
-        "futures": {"name": fut.get("DispCName"), "price": _num(fut.get("CLastPrice")),
+        "futures": {"name": fut.get("DispCName"), "price": fut_px, "ref": fut_ref,
                     "settle": _num(fut.get("SettlementPrice"))} if fut else None,
     }
 
@@ -824,6 +839,39 @@ def _fetch_proxy_json(base: str, path: str):
         return json.loads(r.read().decode("utf-8"))
 
 
+def _parity_forward(cur: dict, spot: float, t_years: float, r: float) -> float | None:
+    """The forward this expiry's options actually price against, recovered from
+    put-call parity on the settlement premiums: F = K + (C - P) * e^(rT).
+
+    One futures price cannot serve the whole board. TXO settles on the index,
+    and each expiry's forward is the index less the dividends still to be paid
+    before it -- Taiwan's ex-dividend season runs through the summer, so the
+    near weeks sit below the index and the far month sits above the front
+    future. On 2026/09/14 parity implied 45,780 for 9/16 (the front TX future
+    to 0.3 of a point) but 45,922 for 10/21, and inverting the October chain
+    against the front future split the same strike into a 28.1% call and a
+    25.3% put. Per-expiry forwards closed that 2.76-point gap to 0.34.
+
+    Corroborated by the exchange's own futures board, which lists a separate
+    contract per month: on the same session TAIFEX quoted 臺指期096 at 45,777
+    and 臺指期106 at 45,903, against parity forwards of 45,781 and 45,911.
+
+    Median over the near-the-money strikes, so one stale settlement cannot move
+    it. None when too few strikes price both sides, or when the answer is too
+    far from the front future to be a forward -- the caller falls back to spot.
+    """
+    fs = []
+    for k, sides in cur.items():
+        c, p = (sides.get("call") or {}).get("settle"), (sides.get("put") or {}).get("settle")
+        if c is None or p is None or abs(k - spot) / spot > 0.02:
+            continue
+        fs.append(k + (c - p) * math.exp(r * t_years))
+    if len(fs) < 5:
+        return None
+    f = statistics.median(fs)
+    return f if abs(f - spot) / spot <= 0.05 else None
+
+
 async def build_snapshot(product_id: str = "txo", n_expiries: int = 5, strike_pct: float = 0.08, proxy: str | None = None):
     """The previous session as the frontend consumes it. None if TAIFEX is down.
     `proxy` = a running server/main.py whose IB session supplies the 盤前脈絡 block."""
@@ -848,10 +896,28 @@ async def build_snapshot(product_id: str = "txo", n_expiries: int = 5, strike_pc
         intra = await intraday()
     except Exception:
         intra = None
-    spot = idx["price"]
+    # TXO is priced off the TX future, not the index. Put-call parity on the
+    # 2026/09/14 chain implies a forward of 45,780.6 against a futures
+    # settlement of 45,780.0 and an index of 45,862.5 — the options quote the
+    # future to within a point. Inverting IV against the index made the same
+    # strike read 22.14% on the call and 28.07% on the put; against the future
+    # both read 25.1%, as put-call parity requires. The 82-point gap is the
+    # dividend basis, which a flat 1.5% Black-Scholes carry cannot represent.
     data_date = max(d for e in tbl.values() for d in e["dates"])          # yyyy/mm/dd
     asof = data_date.replace("/", "")
     asof_d = datetime.strptime(asof, "%Y%m%d").date()
+    fut = idx.get("futures") or {}
+    day_bars = bars["day"] or []
+    # The live quote counts only while it describes this session; once the
+    # quote list rolls it carries the settlement price, which sits a few points
+    # off the day session's close. The close is what the K-line draws and what
+    # the 關卡價 and 成本線 are measured from, so the headline follows it.
+    live = _num(fut.get("price")) if idx["date"] == asof else None
+    bar_close = day_bars[-1]["c"] if day_bars and day_bars[-1]["t"] == asof else None
+    spot = live or bar_close or _num(fut.get("price")) or _num(fut.get("settle")) or idx["price"]
+    # Reference = the future's previous close, so the headline change is the
+    # future's own move rather than the index's.
+    spot_ref = day_bars[-2]["c"] if len(day_bars) >= 2 else None
 
     expiries, chains, oi = [], {}, {}
     for e in [x for x in sorted(tbl) if x > asof][:n_expiries]:
@@ -863,26 +929,39 @@ async def build_snapshot(product_id: str = "txo", n_expiries: int = 5, strike_pc
         expiries.append({"id": e, "label": label, "type": kind, "date": f"{d.month}/{d.day:02d}", "month": tbl[e]["month"]})
         t_years = max((d - asof_d).days, 0.5) / 365.0
         cur = tbl[e]["dates"][data_date]
+        # Each expiry prices against its own forward, not the front future.
+        fwd = _parity_forward(cur, spot, t_years, RISK_FREE_TW) or spot
         rows = []
         for r in summ["rows"]:
             k = r["strike"]
             if abs(k - spot) / spot > strike_pct:
                 continue
-            row = {"strike": k, "atm": False, "itmCall": k < spot, "itmPut": k > spot}
+            row = {"strike": k, "atm": False, "itmCall": k < fwd, "itmPut": k > fwd}
             for side, right in (("call", "C"), ("put", "P")):
                 raw = cur.get(k, {}).get(side, {})
                 last = raw.get("close") if raw.get("close") is not None else (raw.get("settle") or 0.0)
                 bid, ask = raw.get("bid"), raw.get("ask")
-                mid = (bid + ask) / 2 if bid and ask else None
-                iv = pricing.implied_vol(right, spot, k, mid or last, t_years, RISK_FREE_TW, "bs") or 0.0
-                delta = pricing.delta(right, spot, k, max(iv, 1e-4), t_years, RISK_FREE_TW, "bs")
+                # IV comes off 結算價, not the bid-ask mid. TAIFEX's last best
+                # bid / ask at 13:30 is frequently one-sided on a thin strike
+                # (530 / 1000 on a 500-point option), and a mid taken from that
+                # lifts the whole smile: on 2026/09/11 the mid gave 32% and 34%
+                # at two strikes whose neighbours sat at 22%. 結算價 is the
+                # exchange's own mark, published for every strike whether or not
+                # it traded, and inverting it made the smile 15x smoother
+                # (mean |2nd difference| 7.57 -> 0.52 over the ATM +/- 500 band).
+                mark = raw.get("settle") if raw.get("settle") is not None else last
+                iv = pricing.implied_vol(right, fwd, k, mark, t_years, RISK_FREE_TW, "b76") or 0.0
+                delta = pricing.delta(right, fwd, k, max(iv, 1e-4), t_years, RISK_FREE_TW, "b76")
                 row[side] = {"bid": bid or 0.0, "ask": ask or 0.0, "last": last,
                              "iv": round(iv * 100, 2), "oi": r[side]["oi"], "oiChg": r[side]["oiChg"],
                              "vol": r[side]["vol"], "delta": round(delta, 4)}
             rows.append(row)
         if rows:
-            min(rows, key=lambda x: abs(x["strike"] - spot))["atm"] = True
-        chains[e] = {"rows": rows}
+            min(rows, key=lambda x: abs(x["strike"] - fwd))["atm"] = True
+        # `forward` is context only: the frontend must not adopt it as spot, or
+        # picking a far expiry would drag the headline off the front TX future
+        # the K-line and the 關卡價 run on.
+        chains[e] = {"rows": rows, "forward": round(fwd, 1)}
         oi[e] = {k: v for k, v in summ.items() if k != "rows"}
         # compact: [strike, callOi, callOiChg, callSettle, callPrevSettle, putOi, putOiChg, putSettle, putPrevSettle]
         # prevSettle = the session before the snapshot's own premiums, so the
@@ -897,7 +976,15 @@ async def build_snapshot(product_id: str = "txo", n_expiries: int = 5, strike_pc
         "product": product_id, "source": "taifex-eod",
         "date": data_date, "prevDate": next(iter(oi.values()))["prevDate"] if oi else None,
         "asOf": asof, "builtAt": datetime.now().isoformat(timespec="seconds"),
-        "spot": {"price": spot, "ref": idx["ref"], "date": idx["date"], "time": idx["time"]},
+        # `spot` is what everything prices against — the front TX future.
+        # The index it settles on is kept alongside as context.
+        # The quote list rolls to the next business day once the session ends,
+        # so its date/time only describe this price while they still match the
+        # session the chain came from.
+        "spot": {"price": spot, "ref": spot_ref, "base": "futures",
+                 "date": idx["date"] if idx["date"] == asof else asof,
+                 "time": idx["time"] if idx["date"] == asof else None},
+        "index": {"price": idx["price"], "ref": idx["ref"]},
         "futures": idx["futures"],
         "expiries": expiries, "chains": chains, "oi": oi,
         "bars": bars["day"], "barsFull": bars["full"],

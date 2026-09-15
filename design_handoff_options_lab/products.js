@@ -8,7 +8,11 @@
       id: 'txo', code: 'TXO', nameZh: '台指選', name: 'TAIEX Options',
       cur: 'NT$', mult: 50, unitLabel: '×50 NTD/pt',
       strikeStep: 50,
-      model: 'bs', r: 1.5, skew: 'put',
+      // Black-76 on the front TX future, not Black-Scholes on the index: the
+      // options quote the future (put-call parity recovers it to within a
+      // point) and the index runs ~80 points above it on the dividend basis.
+      model: 'b76', r: 1.5, skew: 'put',
+      underlyingLabel: '台指期',
       defaultSpot: 21850, defaultIv: 24,
       spotMin: 20000, spotMax: 23500, spotStep: 10,
       ivMin: 10, ivMax: 50,

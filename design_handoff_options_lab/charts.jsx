@@ -812,6 +812,16 @@ const PRICE_MAS = [
 // close, ±1σ (68.27%) and ±2σ bands of S·IV·√(t/365) drawn forward to `days`
 // (the selected expiry) in a strip of empty slots to the right of the bars.
 const MIN_VIEW_BARS = 12;
+// Opening on a year of candles squeezed them to a few pixels each; the default
+// is the recent window and the wheel zooms back out to the whole series.
+const DEFAULT_VIEW_BARS = 30;
+// Bars carry `t` as YYYYMMDD. Axis labels drop the year unless the window spans
+// one, so a day chart reads 09/11 and a monthly one 2026/09.
+function barDateLabel(t, withYear) {
+  const s = String(t || '');
+  if (s.length < 8) return s;
+  return withYear ? `${s.slice(0, 4)}/${s.slice(4, 6)}` : `${s.slice(4, 6)}/${s.slice(6, 8)}`;
+}
 // Push overlapping right-axis tags apart: keep every dashed line at its true
 // price and move only the label, so a cluster of levels near spot stays
 // readable. Order is preserved and the run is kept inside [lo, hi].
@@ -841,10 +851,10 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
   React.useEffect(() => { setView(null); }, [seriesKey]);
   const zoomAt = React.useCallback((factor, fracX) => {
     setView((v) => {
-      const f = v ? v.from : 0, t = v ? v.to : nAll;
+      const d = Math.min(nAll, DEFAULT_VIEW_BARS);
+      const f = v ? v.from : nAll - d, t = v ? v.to : nAll;
       const span = t - f;
       const next = Math.max(Math.min(MIN_VIEW_BARS, nAll), Math.min(nAll, Math.round(span * factor)));
-      if (next >= nAll) return null;
       const nf = Math.max(0, Math.min(nAll - next, Math.round(f + span * fracX - next * fracX)));
       return { from: nf, to: nf + next };
     });
@@ -862,10 +872,13 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
     return () => el.removeEventListener('wheel', onWheel);
   }, [zoomAt]);
   if (!bars || bars.length < 2) return null;
-  const W = 768, H = 282, plotW = 720, pTop = 12, pBot = 196, vTop = 210, vBot = 274;
+  // The right gutter carries two columns: the price tags (as before) and the
+  // percent axis beyond them, so neither has to give up its slot.
+  const W = 812, H = 296, plotW = 720, pTop = 12, pBot = 196, vTop = 210, vBot = 274, dateY = 288;
   const n = bars.length;                       // MA / RSI still run over the whole series
-  const span = view ? Math.max(MIN_VIEW_BARS, Math.min(n, view.to - view.from)) : n;
-  const from = view ? Math.max(0, Math.min(n - span, view.from)) : 0;
+  const defSpan = Math.min(n, DEFAULT_VIEW_BARS);
+  const span = view ? Math.max(MIN_VIEW_BARS, Math.min(n, view.to - view.from)) : defSpan;
+  const from = view ? Math.max(0, Math.min(n - span, view.from)) : n - defSpan;
   const to = from + span;
   const vis = bars.slice(from, to);
   const nv = vis.length;
@@ -894,6 +907,37 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
   const grid = dark ? 'rgba(255,255,255,0.10)' : 'rgba(20,30,50,0.12)';
   const dec = pMax >= 5000 ? 0 : pMax >= 100 ? 1 : 2;
   const fmt = (p) => p.toFixed(dec);
+  // Right-hand percent axis, against the previous session's close so the last
+  // bar reads the same number as the headline. (moomoo scales its percent axis
+  // to the first visible bar, which re-bases on every zoom; this keeps the
+  // chart and the top bar telling one story.)
+  const pctBase = n >= 2 ? bars[n - 2].c : bars[n - 1].c;
+  const fmtPct = (p) => {
+    const v = pctBase > 0 ? (p / pctBase - 1) * 100 : 0;
+    return { text: `${v >= 0 ? '+' : '\u2212'}${Math.abs(v).toFixed(2)}%`, col: v >= 0 ? up : down };
+  };
+  // The visible window's extremes, annotated moomoo-style further down.
+  const hiBar = vis.reduce((a, b) => (b.h > a.h ? b : a), vis[0]);
+  const loBar = vis.reduce((a, b) => (b.l < a.l ? b : a), vis[0]);
+  const extremes = [
+    { i: from + vis.indexOf(hiBar), price: hiBar.h, dy: -9 },
+    { i: from + vis.indexOf(loBar), price: loBar.l, dy: 10 },
+  ];
+  // Range presets, the row moomoo puts under the chart tabs. One that needs
+  // more bars than the series holds is dropped rather than clamped, so no two
+  // buttons land on the same window.
+  const ytdBars = (() => {
+    const yr = String(bars[n - 1].t || '').slice(0, 4);
+    let k = 0;
+    for (let i = n - 1; i >= 0 && String(bars[i].t || '').slice(0, 4) === yr; i--) k++;
+    return k;
+  })();
+  const seenSpan = new Set();
+  const presets = [
+    { label: '1\u6708', bars: 22 }, { label: '3\u6708', bars: 63 }, { label: '\u534a\u5e74', bars: 126 },
+    { label: '\u4eca\u5e74', bars: ytdBars }, { label: '1\u5e74', bars: 252 },
+  ].filter((x) => x.bars >= MIN_VIEW_BARS && x.bars < n && !seenSpan.has(x.bars) && seenSpan.add(x.bars))
+    .concat([{ label: '\u5168\u90e8', bars: n }]);
 
   // simple moving average polyline (starts at bar k-1)
   const maPts = (k) => {
@@ -937,7 +981,7 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
   const gridLines = [0.12, 0.37, 0.62, 0.87].map((f) => {
     const p = pMin + f * (pMax - pMin);
     const gy = y(p);
-    return { y: gy, lab: fmt(p), hideLabel: axisTags.some((l) => Math.abs(gy - l.ty) < 11) };
+    return { y: gy, price: p, lab: fmt(p), hideLabel: axisTags.some((l) => Math.abs(gy - l.ty) < 11) };
   });
 
   return (
@@ -966,10 +1010,26 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
           })}
           <span><i style={{ display: 'inline-block', width: 14, height: 2, background: '#a78bfa', verticalAlign: 'middle', marginRight: 4 }} />RSI 14</span>
           {view
-            ? <span className="tnum" onClick={() => setView(null)} title="回到全部 K 棒"
+            ? <span className="tnum" onClick={() => setView(null)} title={`回到預設的近 ${Math.min(n, DEFAULT_VIEW_BARS)} 根`}
                     style={{ cursor: 'pointer', color: '#f0c068', fontWeight: 700, userSelect: 'none' }}>{nv}/{n} 根 · 重設</span>
-            : <span style={{ opacity: 0.45 }}>滾輪縮放 · 拖曳平移</span>}
+            : <span className="tnum" style={{ opacity: 0.45 }}>近 {nv}/{n} 根 · 滾輪縮放 · 拖曳平移</span>}
         </span>
+      </div>
+
+      {/* Range presets — click a period instead of scrolling the wheel back. */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
+        {presets.map((r) => {
+          const on = span === r.bars && to === n;
+          return (
+            <button key={r.label} onClick={() => setView({ from: n - r.bars, to: n })} style={{
+              padding: '3px 9px', borderRadius: 2, border: '1px solid var(--border)',
+              background: on ? 'rgba(240,192,104,0.16)' : 'transparent',
+              borderColor: on ? '#f0c068' : 'var(--border)',
+              color: on ? '#f0c068' : 'var(--text2)',
+              fontFamily: 'inherit', fontSize: 10, fontWeight: 600, cursor: 'pointer', lineHeight: 1.4,
+            }}>{r.label}</button>
+          );
+        })}
       </div>
 
       <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width="100%"
@@ -993,12 +1053,17 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
         <defs>
           <clipPath id="pc-plot"><rect x="0" y="0" width={plotW} height={vBot} /></clipPath>
         </defs>
-        {gridLines.map((g, i) => (
-          <g key={i}>
-            <line x1="0" x2={plotW} y1={g.y} y2={g.y} stroke={grid} strokeDasharray="2 4" />
-            {!g.hideLabel && <text x={plotW + 6} y={g.y + 3} fontSize="9" fill={txt}>{g.lab}</text>}
-          </g>
-        ))}
+        <text x={W - 4} y="8" fontSize="8" fill={txt} fillOpacity="0.8" textAnchor="end">vs 昨收</text>
+        {gridLines.map((g, i) => {
+          const pc = fmtPct(g.price);
+          return (
+            <g key={i}>
+              <line x1="0" x2={plotW} y1={g.y} y2={g.y} stroke={grid} strokeDasharray="2 4" />
+              {!g.hideLabel && <text x={plotW + 6} y={g.y + 3} fontSize="9" fill={txt}>{g.lab}</text>}
+              <text x={W - 4} y={g.y + 3} fontSize="8.5" fill={pc.col} fillOpacity="0.9" textAnchor="end">{pc.text}</text>
+            </g>
+          );
+        })}
         {vis.map((b, k) => {
           const i = from + k;
           const isUp = b.c >= b.o;
@@ -1070,6 +1135,55 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
           );
         })()}
         {lastOnScale && <line x1="0" x2={plotW} y1={lastY} y2={lastY} stroke="#f0c068" strokeWidth="0.8" strokeDasharray="4 3" strokeOpacity="0.7" />}
+        {/* Window high / low, marked the way moomoo does: a thin leader out of
+            the wick tip into empty space, the price as plain text with no chip,
+            pointing right unless the bar sits near the right edge. Drawn last
+            so a level chip cannot bury it. */}
+        {extremes.map((m, k) => {
+          const x0 = cx(m.i), y0 = y(m.price);
+          const dir = x0 < plotW * 0.72 ? 1 : -1;
+          const x1 = Math.max(4, Math.min(plotW - 4, x0 + dir * 30));
+          // Keep the label inside the price pane: a low sitting on the floor
+          // would otherwise drop its text into the volume row.
+          const y1 = Math.max(pTop + 10, Math.min(pBot - 8, y0 + m.dy));
+          const above = y1 <= y0;
+          return (
+            <g key={'ex' + k}>
+              <line x1={x0} x2={x1} y1={y0} y2={y1} stroke={txt} strokeWidth="0.8" strokeOpacity="0.8" />
+              <text x={x1 + dir * 3} y={above ? y1 - 1 : y1 + 7} fontSize="8.5" fontWeight="600"
+                    fill={txt} textAnchor={dir > 0 ? 'start' : 'end'}>{fmt(m.price)}</text>
+            </g>
+          );
+        })}
+        <g>
+          <rect x="3" y={vTop - 13} width="82" height="12" rx="2" fill={dark ? 'rgba(11,14,19,0.74)' : 'rgba(255,255,255,0.8)'} />
+          <text x="6" y={vTop - 4} fontSize="8.5" fontWeight="600" fill={txt} fillOpacity="0.9">
+            成交量 {(vis[nv - 1].v || 0).toLocaleString()}
+          </text>
+        </g>
+        {(() => {
+          // Label real bars, never interpolated dates: pick evenly spaced
+          // indices in the window, then drop any whose text would touch its
+          // neighbour so the row stays readable at every zoom level.
+          const want = Math.max(2, Math.min(7, Math.floor(plotW / 92)));
+          const idx = [];
+          for (let j = 0; j < want; j++) idx.push(from + Math.round((j * (nv - 1)) / (want - 1)));
+          const firstT = String(vis[0].t || ''), lastT = String(vis[nv - 1].t || '');
+          const withYear = firstT.slice(0, 4) !== lastT.slice(0, 4);
+          const out = []; let prevX = -Infinity;
+          for (const i of [...new Set(idx)]) {
+            const x = Math.max(16, Math.min(plotW - 16, cx(i)));
+            if (x - prevX < 46) continue;
+            prevX = x;
+            out.push(
+              <g key={i}>
+                <line x1={cx(i)} x2={cx(i)} y1={vBot} y2={vBot + 3} stroke={txt} strokeOpacity="0.5" />
+                <text x={x} y={dateY} fontSize="8.5" fill={txt} textAnchor="middle">{barDateLabel(bars[i].t, withYear)}</text>
+              </g>
+            );
+          }
+          return out;
+        })()}
       </svg>
 
       <div style={{ fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600, margin: '10px 0 4px' }}>RSI · 14</div>
@@ -1086,6 +1200,29 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
         <div style={{ marginTop: 12, fontSize: 10, opacity: 0.5, fontFamily: 'var(--font-mono)' }}>{sourceLabel}</div>
       )}
     </div>
+  );
+}
+
+// Sparkline — the watchlist's mini price line over the last N daily closes,
+// with a soft fill under it. Deliberately NEUTRAL, not red/teal: it spans a
+// month while the row's chip beside it reports one session, so colouring both
+// puts a red rising line next to a green chip on the same row. moomoo can
+// colour its mini chart because that one is the running intraday shape, the
+// same period as its chip. The shape carries the trend; the chip carries the
+// colour.
+function Sparkline({ series, w = 96, h = 26 }) {
+  if (!series || series.length < 2) return null;
+  const lo = Math.min(...series), hi = Math.max(...series);
+  const rng = Math.max(hi - lo, 1e-9);
+  const px = (i) => (i / (series.length - 1)) * (w - 2) + 1;
+  const py = (v) => h - 2 - ((v - lo) / rng) * (h - 4);
+  const pts = series.map((v, i) => px(i).toFixed(1) + ',' + py(v).toFixed(1)).join(' ');
+  const col = 'var(--text2)';
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} width={w} height={h} style={{ display: 'block' }} aria-hidden="true">
+      <polygon points={`1,${h} ${pts} ${(w - 1).toFixed(1)},${h}`} fill={col} fillOpacity="0.10" />
+      <polyline points={pts} fill="none" stroke={col} strokeWidth="1.2" strokeOpacity="0.85" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
   );
 }
 
@@ -1203,4 +1340,4 @@ function VolCone({ bars, ivPct, theme = 'dark', windows = [5, 10, 20, 60], width
   );
 }
 
-Object.assign(window, { ThetaDecay, IVSmile, POPGauge, ScenarioTimeline, GreeksProfile, PnLDistribution, OIProfile, DataQualityPill, PnLAttribution, MaxPain, OptionPricer, genBars, KBarChart, PriceChart, PnLHeatmap, VolCone });
+Object.assign(window, { ThetaDecay, IVSmile, POPGauge, ScenarioTimeline, GreeksProfile, PnLDistribution, OIProfile, DataQualityPill, PnLAttribution, MaxPain, OptionPricer, genBars, KBarChart, PriceChart, PnLHeatmap, VolCone, Sparkline });
