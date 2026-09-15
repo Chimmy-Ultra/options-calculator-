@@ -71,13 +71,18 @@ function aggBars(bars, unit) {
 const TXO_SPOT = 21850;
 const STRIKE_STEP = 50;
 // Default legs: a bull-call spread（ATM+1 檔 / ATM+5 檔），premium 用該商品的
-// 定價模型（TXO=BS、穀物=Black-76）在 default spot/iv 與預設到期日算出。
-function defaultLegsFor(P, dte) {
+// 定價模型（TXO=BS、穀物=Black-76）在給定的 spot/iv 與到期日算出。
+// `spot` defaults to the product's placeholder, but the caller passes the real
+// one once a snapshot or the proxy has answered — TXO's placeholder is 21,850
+// against an actual index near 45,800, which put the whole default spread ten
+// thousand points away and flattened the payoff chart.
+function defaultLegsFor(P, dte, spot) {
   const st = P.strikeStep;
-  const k1 = Math.round((P.defaultSpot + st) / st) * st;
+  const s0 = (spot > 0) ? spot : P.defaultSpot;
+  const k1 = Math.round((s0 + st) / st) * st;
   return [
-    _mkLeg('long',  'call', P.defaultSpot, k1, P.defaultIv, dte, P),
-    _mkLeg('short', 'call', P.defaultSpot, k1 + 4 * st, P.defaultIv, dte, P),
+    _mkLeg('long',  'call', s0, k1, P.defaultIv, dte, P),
+    _mkLeg('short', 'call', s0, k1 + 4 * st, P.defaultIv, dte, P),
   ];
 }
 // 商品的到期日清單：live（IB 真實到期日）> 商品 mock > TXO 週/月選。
@@ -492,12 +497,18 @@ function Obsidian3() {
   const expiries = productExpiries(P, live && live.expiries);
   const expiry = expiries.find((e) => e.id === expiryId) || expiries[0];
 
+  // The exact array `defaultLegsFor` last produced. "The user has not touched
+  // the position" is then reference equality against it — no false positives if
+  // someone happens to build the same spread by hand.
+  const autoLegs = uR(null);
   const [legs, setLegs] = uS(() => {
     const s = readSaved();
     const pid = initialProductId();
     const P0 = window.getProduct(pid);
     const saved = s && s.legsByProduct && sanitizeLegs(s.legsByProduct[pid]);
-    return saved || defaultLegsFor(P0, defaultExpiryFor(P0).dte);
+    if (saved) return saved;
+    autoLegs.current = defaultLegsFor(P0, defaultExpiryFor(P0).dte);
+    return autoLegs.current;
   });
   const [spot, setSpot] = uS(() => {
     const s = readSaved();
@@ -551,8 +562,31 @@ function Obsidian3() {
     setExpiryId(e0.id);
     setSpot(p.defaultSpot);
     setIv(p.defaultIv);
-    setLegs(defaultLegsFor(p, e0.dte));
+    autoLegs.current = defaultLegsFor(p, e0.dte);
+    setLegs(autoLegs.current);
   }
+
+  // Re-centre the generated default spread on the first real spot. The product
+  // registry only carries a placeholder (TXO's is 21,850 against an index near
+  // 45,800), and the real one lands a moment later from the snapshot or the
+  // proxy — without this the opening position sits ten thousand points away and
+  // the payoff chart and P&L table read flat everywhere. Only ever touches legs
+  // this component generated itself; one edit and `legs` is a different array,
+  // so the guard stops matching for good.
+  uE(() => {
+    if (legs !== autoLegs.current || !legs.length) return;
+    // Stay armed while `spot` is still the registry placeholder — the effect
+    // runs on the very first render, and disarming there would spend the one
+    // shot before the snapshot has answered.
+    if (!(spot > 0) || spot === P.defaultSpot) return;
+    // Now it is a real spot: re-centre once, then never again. The What-if rail
+    // moves `spot` to test the position against a scenario, and a position that
+    // slid along with it would make that meaningless.
+    autoLegs.current = null;
+    const next = defaultLegsFor(P, legs[0].dte, spot);
+    if (next[0].strike === legs[0].strike) return;
+    setLegs(next);
+  }, [spot, P, legs]);
 
   // IB live：商品有 ib 設定且本機 proxy（server/）活著 → 抓期貨報價 + 真實到期日。
   // proxy 不在 / IB 沒連線 → 安靜留在 mock。
