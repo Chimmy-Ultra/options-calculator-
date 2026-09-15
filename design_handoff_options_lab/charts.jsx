@@ -1203,6 +1203,29 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
   );
 }
 
+// Sparkline — the watchlist's mini price line over the last N daily closes,
+// with a soft fill under it. Deliberately NEUTRAL, not red/teal: it spans a
+// month while the row's chip beside it reports one session, so colouring both
+// puts a red rising line next to a green chip on the same row. moomoo can
+// colour its mini chart because that one is the running intraday shape, the
+// same period as its chip. The shape carries the trend; the chip carries the
+// colour.
+function Sparkline({ series, w = 96, h = 26 }) {
+  if (!series || series.length < 2) return null;
+  const lo = Math.min(...series), hi = Math.max(...series);
+  const rng = Math.max(hi - lo, 1e-9);
+  const px = (i) => (i / (series.length - 1)) * (w - 2) + 1;
+  const py = (v) => h - 2 - ((v - lo) / rng) * (h - 4);
+  const pts = series.map((v, i) => px(i).toFixed(1) + ',' + py(v).toFixed(1)).join(' ');
+  const col = 'var(--text2)';
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} width={w} height={h} style={{ display: 'block' }} aria-hidden="true">
+      <polygon points={`1,${h} ${pts} ${(w - 1).toFixed(1)},${h}`} fill={col} fillOpacity="0.10" />
+      <polyline points={pts} fill="none" stroke={col} strokeWidth="1.2" strokeOpacity="0.85" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 // P&L heatmap — OptionStrat's table: rows = underlying prices around spot,
 // columns = dates from today to the front expiry, cell = the position's P&L
 // (currency, gross of fees) from the same Black-Scholes / Black-76 valuation
@@ -1317,4 +1340,4 @@ function VolCone({ bars, ivPct, theme = 'dark', windows = [5, 10, 20, 60], width
   );
 }
 
-Object.assign(window, { ThetaDecay, IVSmile, POPGauge, ScenarioTimeline, GreeksProfile, PnLDistribution, OIProfile, DataQualityPill, PnLAttribution, MaxPain, OptionPricer, genBars, KBarChart, PriceChart, PnLHeatmap, VolCone });
+Object.assign(window, { ThetaDecay, IVSmile, POPGauge, ScenarioTimeline, GreeksProfile, PnLDistribution, OIProfile, DataQualityPill, PnLAttribution, MaxPain, OptionPricer, genBars, KBarChart, PriceChart, PnLHeatmap, VolCone, Sparkline });

@@ -174,6 +174,7 @@ function Eyebrow({ children, right, hk }) {
 function WorkspaceTabs({ value, onChange }) {
   // Desktop tabs, in the terminal's words; the active one carries a gold underline.
   const items = [
+    { id: 'watch',  label: '自選' },
     { id: 'levels', label: '關卡' },
     { id: 'chain',  label: '報價表' },
     { id: 'chart',  label: 'K線' },
@@ -405,6 +406,7 @@ const GRID_DEFAULTS = {
     { i: 'twse',      x: 0, y: 58, w: 4, h: 9 },
   ],
   chart: [{ i: 'kline', x: 0, y: 0, w: 12, h: 19 }],
+  watch: [{ i: 'watch', x: 0, y: 0, w: 6, h: 21 }],
   chain: [
     { i: 'chain',   x: 0, y: 0,  w: 8, h: 24 },
     { i: 'whatif',  x: 8, y: 0,  w: 4, h: 6 },
@@ -439,7 +441,7 @@ function Obsidian3() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [workspace, setWorkspace] = uS(() => {
     const s = readSaved();
-    return (s && ['levels', 'chain', 'chart', 'calc', 'lab', 'iv', 'pricer'].includes(s.workspace)) ? s.workspace : 'levels';
+    return (s && ['watch', 'levels', 'chain', 'chart', 'calc', 'lab', 'iv', 'pricer'].includes(s.workspace)) ? s.workspace : 'levels';
   });
   // Lab sub-view: '3d' P&L surface | 'iv' IV surface. A workspace saved as the
   // old top-level 'iv' tab lands on the IV sub-view.
@@ -705,7 +707,7 @@ function Obsidian3() {
   // On phone/fold, Compare is the only desktop-exclusive workspace (it needs the
   // multi-card grid to be useful). IV Surface is now mobile-friendly so it stays.
   uE(() => {
-    if (vp.layout !== 'desk' && (workspace === 'compare' || workspace === 'chart' || workspace === 'levels' || workspace === 'lab')) setWorkspace('calc');
+    if (vp.layout !== 'desk' && (workspace === 'compare' || workspace === 'chart' || workspace === 'levels' || workspace === 'lab' || workspace === 'watch')) setWorkspace('calc');
   }, [vp.layout]);
   // Desktop: Pricer/Compare tabs removed — redirect stale state to Chain; the
   // old IV Surface tab lives in Lab now.
@@ -955,6 +957,9 @@ function Obsidian3() {
           accent={accent} t={t} D={D}
           quality={quality} grid={grid} hv20={hv20}
         />
+      )}
+      {workspace === 'watch' && (
+        <WatchWorkspace grid={grid} onPick={(pid) => { switchProduct(pid); setWorkspace('chart'); }} />
       )}
       {workspace === 'chart' && (
         <ChartWorkspace
@@ -2132,6 +2137,79 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
 }
 
 // ───────────────────────────────────────────────── CHART WORKSPACE
+// ───────────────────────────────────────────────── WATCHLIST WORKSPACE
+// 自選 — the board modelled on moomoo's watchlist: name over code, a mini
+// price line, the close, and the move as a filled colour block.
+//
+// It is a PREVIOUS-SESSION board and says so. Every row's price is that
+// product's last daily close and the move is against the close before it, one
+// basis for the whole list, taken from the same bars the sparkline draws. The
+// captures did not all run on the same day, so each row carries its own date
+// rather than one heading implying they share one.
+//
+// moomoo's mini chart is the running intraday shape; only TXO has intraday in
+// the snapshot, so these are daily closes and the header says 近30日.
+function WatchWorkspace({ onPick, grid }) {
+  const rows = (window.PRODUCTS || []).map((P) => {
+    const r = (window.LiveData && window.LiveData.watchRow) ? window.LiveData.watchRow(P.id) : null;
+    return { P, r };
+  });
+  // Dates are YYYYMMDD strings — sort them, never Math.min, which coerces to a number.
+  const dated = rows.filter((x) => x.r).map((x) => x.r.date).sort();
+  const md = (d) => `${d.slice(4, 6)}/${d.slice(6)}`;
+  const span = dated.length ? (dated[0] === dated[dated.length - 1] ? md(dated[0]) : `${md(dated[0])}\u2013${md(dated[dated.length - 1])}`) : '';
+  const missing = rows.filter((x) => !x.r).length;
+  const body = (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {rows.map(({ P, r }) => {
+        const up = r && r.chgPct >= 0;
+        const col = up ? '#ef5350' : '#26a69a';
+        return (
+          <button key={P.id} onClick={() => r && r.hasChain && onPick(P.id)} disabled={!r || !r.hasChain}
+            title={r && !r.hasChain ? `${P.nameZh || P.name} \u53ea\u6293\u4e86\u5831\u50f9\u548c\u65e5\u7dda\uff0c\u9084\u6c92\u6709\u9078\u64c7\u6b0a\u93c8\uff1b\u9ede\u9032\u53bb\u6703\u662f\u6a21\u64ec\u8cc7\u6599\uff0c\u6240\u4ee5\u5148\u64cb\u4e0b\u4f86` : undefined}
+            style={{
+            display: 'grid', gridTemplateColumns: '1fr 96px 92px 76px', alignItems: 'center', gap: 10,
+            padding: '8px 10px', border: 'none', borderBottom: '1px solid var(--border)',
+            background: 'transparent', color: 'var(--text)', font: 'inherit', textAlign: 'left',
+            cursor: (r && r.hasChain) ? 'pointer' : 'default', opacity: r ? 1 : 0.45,
+          }}>
+            <span style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {P.nameZh || P.name}
+              </div>
+              <div className="tnum" style={{ fontSize: 9.5, color: 'var(--text2)', fontFamily: 'var(--font-mono)', marginTop: 1 }}>
+                {P.code}{r ? ` \u00b7 ${r.date.slice(4, 6)}/${r.date.slice(6)} \u00b7 ${r.source}${r.hasChain ? '' : ' \u00b7 \u50c5\u5831\u50f9'}` : ' \u00b7 \u5c1a\u7121\u5feb\u7167'}
+              </div>
+            </span>
+            {r ? <Sparkline series={r.series} /> : <span />}
+            <span className="tnum" style={{ fontSize: 13, fontFamily: 'var(--font-mono)', textAlign: 'right' }}>
+              {r ? window.fmtPx(r.close, P) : '\u2014'}
+            </span>
+            {r
+              ? <span className="tnum" style={{
+                  fontSize: 11.5, fontWeight: 700, fontFamily: 'var(--font-mono)', textAlign: 'center',
+                  background: col, color: '#fff', padding: '4px 0', borderRadius: 2,
+                }}>{(up ? '+' : '\u2212') + Math.abs(r.chgPct).toFixed(2)}%</span>
+              : <span style={{ fontSize: 10, color: 'var(--text2)', textAlign: 'center' }}>無資料</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+  const panels = [{
+    i: 'watch',
+    title: <>自選 · {rows.length - missing}/{rows.length} 商品</>,
+    right: gridCap(`\u524d\u4e00\u4ea4\u6613\u65e5\u6536\u76e4 \u00b7 \u8d70\u52e2\u70ba\u8fd130\u65e5\u65e5\u7dda` + (span ? ` \u00b7 ${span}` : '')),
+    pad: 0,
+    body,
+  }];
+  return (
+    <div style={GRID_BODY}>
+      <PanelGrid tab="watch" panels={panels} defaults={GRID_DEFAULTS.watch} grid={grid} />
+    </div>
+  );
+}
+
 // Top-level Chart tab (from the design): full-width candles + MA + RSI.
 // Desktop only — mobile keeps the K線 sub-tab inside Calc.
 function ChartWorkspace({ P, bars, barsLive, live, theme, light, barPeriodId, setBarPeriodId, barSession, setBarSession, cone = null, D, grid }) {

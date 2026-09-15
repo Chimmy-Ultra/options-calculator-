@@ -167,7 +167,11 @@ def build_product(cap: dict) -> dict | None:
                          "type": "monthly" if monthly else "weekly", "date": f"{d.month}/{d.day:02d}",
                          "month": u.get("contractMonth"), "tradingClass": e.get("tradingClass")})
         chains[eid] = {"rows": rows, "underlying": {"month": u.get("contractMonth"), "price": f, "prevClose": _num(u.get("priorClose"))}}
-    if not expiries:
+    # A watch-only capture asks for no expiries at all: the watchlist needs the
+    # price and the bars, not a chain, and `data-live.eod()` gates on `expiries`
+    # so such an entry stays invisible to the quote / chain / bars fallbacks. A
+    # capture that DID ask for expiries and kept none is still a failure.
+    if not expiries and (cap.get("expiries") or not bars):
         return None
     return {
         "product": pid, "source": "ib-eod", "symbol": cap.get("symbol"),
