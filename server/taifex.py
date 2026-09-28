@@ -1041,7 +1041,16 @@ def archive_minutes(out_dir: str, days_back: int = 20) -> list:
 
 def main(argv):
     if "--archive-minutes" in argv:
-        written = archive_minutes(argv[argv.index("--archive-minutes") + 1])
+        i = argv.index("--archive-minutes")
+        if i + 1 >= len(argv) or argv[i + 1].startswith("--"):
+            print("usage: taifex.py --archive-minutes DIR", file=sys.stderr)
+            return 2
+        try:  # before any download: a tick file is tens of MB
+            os.makedirs(argv[i + 1], exist_ok=True)
+        except OSError as e:
+            print(f"cannot create {argv[i + 1]}: {e}", file=sys.stderr)
+            return 2
+        written = archive_minutes(argv[i + 1])
         print("archived", written or "nothing new")
         return 0
     out = None
