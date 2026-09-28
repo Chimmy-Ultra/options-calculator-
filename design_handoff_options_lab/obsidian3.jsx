@@ -71,13 +71,18 @@ function aggBars(bars, unit) {
 const TXO_SPOT = 21850;
 const STRIKE_STEP = 50;
 // Default legs: a bull-call spread（ATM+1 檔 / ATM+5 檔），premium 用該商品的
-// 定價模型（TXO=BS、穀物=Black-76）在 default spot/iv 與預設到期日算出。
-function defaultLegsFor(P, dte) {
+// 定價模型（TXO=BS、穀物=Black-76）在給定的 spot/iv 與到期日算出。
+// `spot` defaults to the product's placeholder, but the caller passes the real
+// one once a snapshot or the proxy has answered — TXO's placeholder is 21,850
+// against an actual index near 45,800, which put the whole default spread ten
+// thousand points away and flattened the payoff chart.
+function defaultLegsFor(P, dte, spot) {
   const st = P.strikeStep;
-  const k1 = Math.round((P.defaultSpot + st) / st) * st;
+  const s0 = (spot > 0) ? spot : P.defaultSpot;
+  const k1 = Math.round((s0 + st) / st) * st;
   return [
-    _mkLeg('long',  'call', P.defaultSpot, k1, P.defaultIv, dte, P),
-    _mkLeg('short', 'call', P.defaultSpot, k1 + 4 * st, P.defaultIv, dte, P),
+    _mkLeg('long',  'call', s0, k1, P.defaultIv, dte, P),
+    _mkLeg('short', 'call', s0, k1 + 4 * st, P.defaultIv, dte, P),
   ];
 }
 // 商品的到期日清單：live（IB 真實到期日）> 商品 mock > TXO 週/月選。
@@ -174,6 +179,7 @@ function Eyebrow({ children, right, hk }) {
 function WorkspaceTabs({ value, onChange }) {
   // Desktop tabs, in the terminal's words; the active one carries a gold underline.
   const items = [
+    { id: 'watch',  label: '自選' },
     { id: 'levels', label: '關卡' },
     { id: 'chain',  label: '報價表' },
     { id: 'chart',  label: 'K線' },
@@ -199,7 +205,7 @@ function WorkspaceTabs({ value, onChange }) {
 
 // Product dropdown (design ⑥) — replaces the native select with a custom menu
 // listing each product's name + reference spot. Shows live IB / mock badge.
-function ProductDropdown({ productId, P, spot, chg, live, open, setOpen, onPick }) {
+function ProductDropdown({ productId, P, spot, chg, scenario, live, open, setOpen, onPick }) {
   const fmtSpot = (v) => v.toLocaleString(undefined, { maximumFractionDigits: v < 10 ? 2 : v < 1000 ? 2 : 0 });
   const col = chg == null ? 'var(--text)' : chg >= 0 ? '#ef5350' : '#26a69a';
   return (
@@ -209,6 +215,7 @@ function ProductDropdown({ productId, P, spot, chg, live, open, setOpen, onPick 
         <span style={{ fontSize: 12, color: 'var(--text2)' }}>{P.nameZh || P.name} {P.code} ▾</span>
         <span className="mono tnum" style={{ fontSize: 18, fontWeight: 700, color: col }}>{fmtSpot(spot)}</span>
         {chg != null && <span className="mono tnum" style={{ fontSize: 12, color: col, fontWeight: 600 }}>{chg >= 0 ? '▲' : '▼'}{fmtSpot(Math.abs(chg))}{chg.pct != null ? '' : ''}</span>}
+        {chg == null && scenario && <span style={{ fontSize: 11, color: 'var(--gold)', fontWeight: 600 }}>模擬</span>}
       </div>
       {open && (
         <div style={{
@@ -405,6 +412,7 @@ const GRID_DEFAULTS = {
     { i: 'twse',      x: 0, y: 58, w: 4, h: 9 },
   ],
   chart: [{ i: 'kline', x: 0, y: 0, w: 12, h: 19 }],
+  watch: [{ i: 'watch', x: 0, y: 0, w: 6, h: 21 }],
   chain: [
     { i: 'chain',   x: 0, y: 0,  w: 8, h: 24 },
     { i: 'whatif',  x: 8, y: 0,  w: 4, h: 6 },
@@ -439,7 +447,7 @@ function Obsidian3() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [workspace, setWorkspace] = uS(() => {
     const s = readSaved();
-    return (s && ['levels', 'chain', 'chart', 'calc', 'lab', 'iv', 'pricer'].includes(s.workspace)) ? s.workspace : 'levels';
+    return (s && ['watch', 'levels', 'chain', 'chart', 'calc', 'lab', 'iv', 'pricer'].includes(s.workspace)) ? s.workspace : 'levels';
   });
   // Lab sub-view: '3d' P&L surface | 'iv' IV surface. A workspace saved as the
   // old top-level 'iv' tab lands on the IV sub-view.
@@ -458,6 +466,7 @@ function Obsidian3() {
   const [liveBars, setLiveBars] = uS(null); // 近月期貨的 IB 歷史 K
   const [liveDayBars, setLiveDayBars] = uS(null); // daily 日盤 bars regardless of the K-line toggles — the 關卡價 input
   const [quoteNow, setQuoteNow] = uS(null); // latest live quote (last / open / high / low) — today's running range
+  const [spotUnderlying, setSpotUnderlying] = uS(null); // the expiry's own future when it last set spot — its prevClose prices the top-bar change
   const [barPeriodId, setBarPeriodId] = uS('D'); // K 線週期：D / 4H / 1H
   const [barSession, setBarSession] = uS('day'); // 'day' 日盤 | 'full' 全日盤（含夜盤）— sources with a night session only
   const [theme, setTheme] = uS(() => {
@@ -490,12 +499,18 @@ function Obsidian3() {
   const expiries = productExpiries(P, live && live.expiries);
   const expiry = expiries.find((e) => e.id === expiryId) || expiries[0];
 
+  // The exact array `defaultLegsFor` last produced. "The user has not touched
+  // the position" is then reference equality against it — no false positives if
+  // someone happens to build the same spread by hand.
+  const autoLegs = uR(null);
   const [legs, setLegs] = uS(() => {
     const s = readSaved();
     const pid = initialProductId();
     const P0 = window.getProduct(pid);
     const saved = s && s.legsByProduct && sanitizeLegs(s.legsByProduct[pid]);
-    return saved || defaultLegsFor(P0, defaultExpiryFor(P0).dte);
+    if (saved) return saved;
+    autoLegs.current = defaultLegsFor(P0, defaultExpiryFor(P0).dte);
+    return autoLegs.current;
   });
   const [spot, setSpot] = uS(() => {
     const s = readSaved();
@@ -548,9 +563,33 @@ function Obsidian3() {
     setLastLiveAt(null);
     setExpiryId(e0.id);
     setSpot(p.defaultSpot);
+    setSpotUnderlying(null);
     setIv(p.defaultIv);
-    setLegs(defaultLegsFor(p, e0.dte));
+    autoLegs.current = defaultLegsFor(p, e0.dte);
+    setLegs(autoLegs.current);
   }
+
+  // Re-centre the generated default spread on the first real spot. The product
+  // registry only carries a placeholder (TXO's is 21,850 against an index near
+  // 45,800), and the real one lands a moment later from the snapshot or the
+  // proxy — without this the opening position sits ten thousand points away and
+  // the payoff chart and P&L table read flat everywhere. Only ever touches legs
+  // this component generated itself; one edit and `legs` is a different array,
+  // so the guard stops matching for good.
+  uE(() => {
+    if (legs !== autoLegs.current || !legs.length) return;
+    // Stay armed while `spot` is still the registry placeholder — the effect
+    // runs on the very first render, and disarming there would spend the one
+    // shot before the snapshot has answered.
+    if (!(spot > 0) || spot === P.defaultSpot) return;
+    // Now it is a real spot: re-centre once, then never again. The What-if rail
+    // moves `spot` to test the position against a scenario, and a position that
+    // slid along with it would make that meaningless.
+    autoLegs.current = null;
+    const next = defaultLegsFor(P, legs[0].dte, spot);
+    if (next[0].strike === legs[0].strike) return;
+    setLegs(next);
+  }, [spot, P, legs]);
 
   // IB live：商品有 ib 設定且本機 proxy（server/）活著 → 抓期貨報價 + 真實到期日。
   // proxy 不在 / IB 沒連線 → 安靜留在 mock。
@@ -612,7 +651,7 @@ function Obsidian3() {
       const chain = await window.LiveData.chain(P.id, expiryId);
       if (dead || !chain || !chain.rows || !chain.rows.length) return;
       setLiveRows(chain.rows);
-      if (chain.underlying && chain.underlying.price > 0) setSpot(chain.underlying.price);
+      if (chain.underlying && chain.underlying.price > 0) { setSpot(chain.underlying.price); setSpotUnderlying(chain.underlying); }
       setLastLiveAt(Date.now());
     })();
     // Full-range open interest for the Levels walls (TAIFEX daily report — the
@@ -646,7 +685,7 @@ function Obsidian3() {
       const chain = await window.LiveData.chain(P.id, expiryId);
       if (dead || !chain || !chain.rows || !chain.rows.length) return;
       setLiveRows(chain.rows);
-      if (chain.underlying && chain.underlying.price > 0) setSpot(chain.underlying.price);
+      if (chain.underlying && chain.underlying.price > 0) { setSpot(chain.underlying.price); setSpotUnderlying(chain.underlying); }
       setLastLiveAt(Date.now());
     };
     const pullIntraday = async () => {
@@ -705,7 +744,7 @@ function Obsidian3() {
   // On phone/fold, Compare is the only desktop-exclusive workspace (it needs the
   // multi-card grid to be useful). IV Surface is now mobile-friendly so it stays.
   uE(() => {
-    if (vp.layout !== 'desk' && (workspace === 'compare' || workspace === 'chart' || workspace === 'levels' || workspace === 'lab')) setWorkspace('calc');
+    if (vp.layout !== 'desk' && (workspace === 'compare' || workspace === 'chart' || workspace === 'levels' || workspace === 'lab' || workspace === 'watch')) setWorkspace('calc');
   }, [vp.layout]);
   // Desktop: Pricer/Compare tabs removed — redirect stale state to Chain; the
   // old IV Surface tab lives in Lab now.
@@ -849,7 +888,13 @@ function Obsidian3() {
   const gridTab = workspace === 'lab' ? (labView === 'iv' ? 'lab-iv' : null) : workspace;
   const grid = { editing: layoutEdit && !!gridTab, resetToken: layoutReset };
   const qNow = quoteNow || (live && live.quote);
-  const spotChgTop = (qNow && qNow.last > 0 && qNow.close > 0) ? qNow.last - qNow.close : null;
+  // The change must describe the price the headline shows. spot is shared: the
+  // quote writes it, so does each expiry's own underlying future (IB prices each
+  // expiry off its own month — CL's Nov future beside an Oct quote), and so
+  // does the What-if rail. A scenario price belongs to no contract: no change.
+  const spotChgTop = (qNow && qNow.last > 0 && qNow.close > 0 && spot === qNow.last) ? qNow.last - qNow.close
+    : (spotUnderlying && spotUnderlying.price === spot && spotUnderlying.prevClose > 0) ? spot - spotUnderlying.prevClose : null;
+  const spotScenario = !!live && !(qNow && spot === qNow.last) && !(spotUnderlying && spot === spotUnderlying.price);
   return (
     <div style={{
       width: '100%', minHeight: '100vh', position: 'relative', overflow: 'hidden',
@@ -866,7 +911,7 @@ function Obsidian3() {
         <div style={{ flex: 1 }} />
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexShrink: 0 }}>
           <ProductDropdown
-            productId={productId} P={P} spot={spot} chg={spotChgTop} live={live}
+            productId={productId} P={P} spot={spot} chg={spotChgTop} scenario={spotScenario} live={live}
             open={prodMenuOpen} setOpen={setProdMenuOpen}
             onPick={(id) => { switchProduct(id); setProdMenuOpen(false); }}
           />
@@ -914,7 +959,7 @@ function Obsidian3() {
       {/* WORKSPACE BODY */}
       {workspace === 'levels' && (
         <LevelsWorkspace
-          P={P} theme={theme} light={light} spot={spot} expiry={expiry} levels={levels} live={live} market={marketData}
+          P={P} theme={theme} light={light} spot={spot} spotChg={spotChgTop} expiry={expiry} levels={levels} live={live} market={marketData}
           rangeLevels={rangeLevels} dayBarsLive={!!liveDayBars} gex={gex} grid={grid} top20={top20Data} intraday={intradayData} keyLevels={keyLevels} twse={twseData} premarket={premarketData}
           bars={bars} barsLive={!!liveBars} barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
           barSession={barSession} setBarSession={setBarSession}
@@ -955,6 +1000,9 @@ function Obsidian3() {
           accent={accent} t={t} D={D}
           quality={quality} grid={grid} hv20={hv20}
         />
+      )}
+      {workspace === 'watch' && (
+        <WatchWorkspace grid={grid} onPick={(pid) => { switchProduct(pid); setWorkspace('chart'); }} />
       )}
       {workspace === 'chart' && (
         <ChartWorkspace
@@ -1492,31 +1540,54 @@ function GexProfile({ P, spot, G, theme = 'dark', light = false, maxRows = 15 })
 // 三壘 / 全壘 / 場外, above and below). His public description: the app
 // "tracks daily volume and range, takes the largest and smallest range of the
 // last month, and derives the day's target levels" (CMoney product page).
-// What we could verify against TAIFEX history (docs/daytrade-redesign.md §6):
-//   一壘 below = today's high − the smallest daily range (day session) of the
-//   previous ~20 sessions. Exact on both dated screenshots (2023/06/09: 16888 −
-//   67 = 16821; 2024/08/28: 22211 − 170 = 22041); window anywhere in 14–26
-//   sessions reproduces them, 20 = "一個月".
-// The other four distances are this site's definition, chosen to match the one
-// screenshot that shows all five within a point where a natural statistic
-// does: 二壘 = 30th percentile (his own statistic: "二壘打出現的機率大約是
-// 70%"), 三壘 = mean (124 vs his 124), 全壘 = mean + 1σ (164 vs his 164),
-// 場外 = the largest range (244 vs his 260 — not his formula). Above-levels
-// mirror below: today's low + the same distances.
+// His own lesson (CMoney 投資小學堂, 2020) names the distances: 今低是低 +
+// 預估振幅 — 一壘 最小振幅, 二壘 小波動振幅, 三壘 平均振幅, 全壘 大波動振幅
+// (場外 came later). Checked against TAIFEX history (docs/daytrade-redesign.md §7),
+// the window is one calendar month — every session from the same day last month
+// through yesterday — and two of the names are exact on every dated screenshot:
+//   一壘 = the smallest day-session range: 2020/04/10 10030 + 99 = 10129 (above),
+//     2023/06/09 16888 − 67 = 16821, 2024/08/28 22211 − 170 = 22041 (below).
+//   三壘 = the mean: 2020/04/10 338.0 (21 sessions), 2023/06/09 123.65 (23).
+//     Twenty sessions gave 344 on 2020/04/10 — six points off.
+// The rest are this site's definition: 二壘 = 30th percentile (his "二壘打出現的
+// 機率大約是 70%"; nothing tested fits both of his 二壘 numbers), 全壘 = mean +
+// 1σ (matches his one sample, 164), 場外 = the largest range (244 vs his 260).
+// Above-levels mirror below: today's low + the same distances.
 // bars: daily OHLC in time order; today: { date, high, low } from the live
 // quote when the session is running, else the last completed bar stands in.
-const RANGE_LEVEL_N = 20;
 const RANGE_LEVEL_NAMES = ['一壘', '二壘', '三壘', '全壘', '場外'];
-function computeRangeLevels({ bars, today, N = RANGE_LEVEL_N }) {
-  if (!bars || bars.length < N + 1) return null;
+const RANGE_LEVEL_UNDATED_N = 21; // mock bars carry no dates: about one month of sessions
+// The same calendar day one month earlier, clamped to that month's last day.
+function monthBefore(ymd) {
+  const y = +ymd.slice(0, 4), m = +ymd.slice(4, 6), d = +ymd.slice(6, 8);
+  const py = m === 1 ? y - 1 : y, pm = m === 1 ? 12 : m - 1;
+  const dd = Math.min(d, new Date(py, pm, 0).getDate());
+  return `${py}${String(pm).padStart(2, '0')}${String(dd).padStart(2, '0')}`;
+}
+function computeRangeLevels({ bars, today }) {
+  if (!bars || bars.length < 2) return null;
   const last = bars[bars.length - 1];
+  const day = (b) => String(b.t).slice(0, 8);
   // A bar dated today is the running session: its own range is not history.
-  const lastIsToday = !!(today && today.date && String(last.t).slice(0, 8) === today.date);
+  const lastIsToday = !!(today && today.date && day(last) === today.date);
   const hist = lastIsToday ? bars.slice(0, -1) : bars;
-  if (hist.length < N) return null;
-  const win = hist.slice(-N);
+  let win;
+  if (/^\d{8}$/.test(day(last))) {
+    const utc = (s) => Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8));
+    // The session the levels are for: today — unless the bars are a snapshot
+    // more than a week old, then the day after its last bar.
+    const fresh = !!(today && today.date && today.date >= day(last) && utc(today.date) - utc(day(last)) <= 7 * 864e5);
+    const asof = fresh ? today.date : new Date(utc(day(last)) + 864e5).toISOString().slice(0, 10).replace(/-/g, '');
+    const start = monthBefore(asof);
+    // The window must be whole: the bars have to reach back to its first day.
+    if (!hist.length || day(hist[0]) > start) return null;
+    win = hist.filter((b) => day(b) >= start);
+  } else {
+    if (hist.length < RANGE_LEVEL_UNDATED_N) return null;
+    win = hist.slice(-RANGE_LEVEL_UNDATED_N);
+  }
   const ranges = win.map((b) => b.h - b.l).filter((r) => Number.isFinite(r) && r > 0);
-  if (ranges.length < N) return null;
+  if (ranges.length < 10) return null;
   const sorted = [...ranges].sort((a, b) => a - b);
   const mean = ranges.reduce((a, b) => a + b, 0) / ranges.length;
   const sd = Math.sqrt(ranges.reduce((a, b) => a + (b - mean) * (b - mean), 0) / ranges.length);
@@ -1584,7 +1655,7 @@ function KeyLevelsPanel({ K, P, spot, light = false }) {
   const dim = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
   if (!K) return <div className="mono" style={{ fontSize: 11, color: dim }}>日K不足，無法計算。</div>;
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
-  const rows = [...K.levels, { key: 'SPOT', name: `現價 ${P.code}`, price: spot, hit: null, group: 'spot' }].sort((a, b) => b.price - a.price);
+  const rows = [...K.levels, { key: 'SPOT', name: P.underlyingLabel || `現價 ${P.code}`, price: spot, hit: null, group: 'spot' }].sort((a, b) => b.price - a.price);
   const col = (r) => r.group === 'spot' ? LEVEL_COLORS.spot : r.group === 'profile' ? LEVEL_COLORS.band : r.price > spot ? LEVEL_COLORS.up : r.price < spot ? LEVEL_COLORS.down : 'var(--text)';
   return (
     <div>
@@ -1630,11 +1701,16 @@ function RangeLevelsPanel({ P, spot, R, light, sourceLabel }) {
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
   const dim = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
   const line = light ? 'rgba(25,40,70,0.18)' : 'rgba(255,255,255,0.12)';
-  if (!R) return <div className="mono" style={{ fontSize: 11, color: dim, padding: '6px 0' }}>需要 {RANGE_LEVEL_N + 1} 根以上的日K才能計算。</div>;
-  const nextUp = R.up.find((l) => l.price > spot);
-  const nextDown = [...R.down].find((l) => l.price < spot);
+  if (!R) return <div className="mono" style={{ fontSize: 11, color: dim, padding: '6px 0' }}>需要一個月以上的日K才能計算。</div>;
+  // Reached = inside the session's range so far, not merely on the far side of
+  // the current price: once the day's range passes 一壘's distance both 一壘
+  // lie between the high and the low, and past twice that distance they swap
+  // order. spot only widens it under the What-if rail.
+  const hi = Math.max(R.base.high, spot), lo = Math.min(R.base.low, spot);
+  const nextUp = R.up.find((l) => l.price > hi);
+  const nextDown = R.down.find((l) => l.price < lo);
   const Row = ({ l, side, hot }) => {
-    const reached = side === 'up' ? spot >= l.price : spot <= l.price;
+    const reached = side === 'up' ? hi >= l.price : lo <= l.price;
     const col = side === 'up' ? LEVEL_COLORS.up : LEVEL_COLORS.down;
     const d = l.price - spot;
     return (
@@ -1659,9 +1735,9 @@ function RangeLevelsPanel({ P, spot, R, light, sourceLabel }) {
         </div>
       </div>
       <div className="mono tnum" style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${line}`, fontSize: 9.5, color: dim, display: 'flex', flexWrap: 'wrap', gap: '2px 12px' }}>
-        <span>近{R.n}日日盤振幅：最小 {fmtP(R.min)} · 三成分位 {fmtP(R.up[1].dist)} · 平均 {fmtP(Math.round(R.mean))} · 平均＋1σ {fmtP(R.up[3].dist)} · 最大 {fmtP(R.max)}</span>
+        <span>近一個月（{R.n} 日）日盤振幅：最小 {fmtP(R.min)} · 三成分位 {fmtP(R.up[1].dist)} · 平均 {fmtP(Math.round(R.mean))} · 平均＋1σ {fmtP(R.up[3].dist)} · 最大 {fmtP(R.max)}</span>
         <span>{R.from.slice(4, 6)}/{R.from.slice(6)}–{R.to.slice(4, 6)}/{R.to.slice(6)} · {sourceLabel}</span>
-        <span>一壘＝驗證自由人公式；其餘為本站統計定義</span>
+        <span>一壘、三壘＝驗證自由人公式；二壘、全壘、場外為本站統計定義</span>
       </div>
     </div>
   );
@@ -1727,7 +1803,7 @@ function LevelsLadder({ P, spot, L, G, costLine = null, light }) {
     rows.push({ price: L.atm.strike + L.straddle, label: '價平＋價平和', detail: `${fmtP(L.atm.strike)} + ${window.fmtPx(L.straddle, P)}`, color: LEVEL_COLORS.band });
     rows.push({ price: L.atm.strike - L.straddle, label: '價平－價平和', detail: `${fmtP(L.atm.strike)} − ${window.fmtPx(L.straddle, P)}`, color: LEVEL_COLORS.band });
   }
-  rows.push({ price: spot, label: `現價 ${P.code}`, detail: L.straddle != null ? `價平和 ${window.fmtPx(L.straddle, P)} · 價平 ${fmtP(L.atm.strike)}` : '沒有價平權利金', color: LEVEL_COLORS.spot, isSpot: true });
+  rows.push({ price: spot, label: P.underlyingLabel || `現價 ${P.code}`, detail: L.straddle != null ? `價平和 ${window.fmtPx(L.straddle, P)} · 價平 ${fmtP(L.atm.strike)}` : '沒有價平權利金', color: LEVEL_COLORS.spot, isSpot: true });
   if (L.support) rows.push({ price: L.support.strike, label: '支撐', detail: `Put OI 最大 ${L.support.oi.toLocaleString()}${chg(L.support.oiChg)}`, color: LEVEL_COLORS.down });
   if (L.maxPain) rows.push({ price: L.maxPain.strike, label: '最大痛苦點', detail: '買方到期損失最大的結算價', color: LEVEL_COLORS.gex });
   if (costLine != null) rows.push({ price: costLine.price, label: '成本線', detail: `（${costLine.running ? '今' : '前'}高 + 低）÷ 2 · 上多下空`, color: LEVEL_COLORS.spot });
@@ -2002,7 +2078,7 @@ function TwseFlowsPanel({ W, light = false }) {
   );
 }
 
-function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, levels: L, live, market: M, rangeLevels: R, dayBarsLive, gex: G, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D, grid, top20: T, intraday: I, keyLevels: K, twse: W, premarket: PM }) {
+function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expiry, levels: L, live, market: M, rangeLevels: R, dayBarsLive, gex: G, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D, grid, top20: T, intraday: I, keyLevels: K, twse: W, premarket: PM }) {
   const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
   const chg = (v) => (v == null ? '' : `（${v > 0 ? '+' : ''}${v.toLocaleString()}）`);
@@ -2013,8 +2089,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
     : '○ 模擬資料';
   const straddleDelta = (L.straddle != null && L.prevStraddle != null) ? L.straddle - L.prevStraddle : null;
   const pcExpiry = L.totals.callOi > 0 ? L.totals.putOi / L.totals.callOi : null;
-  const q = live && live.quote;
-  const spotChg = (q && q.last > 0 && q.close > 0) ? q.last - q.close : null;
+  const spotPct = spotChg != null ? spotChg / (spot - spotChg) * 100 : null; // spotChg: the top bar's, same contract as spot
   // K-line overlays: the four option-derived levels (spot has its own tag).
   // Only the walls and 成本線 are drawn (plus the gold last price, which
   // PriceChart adds itself). Owner's call, 2026-09-14: eight lines buried the
@@ -2027,10 +2102,12 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
   if (L.resistance) chartLevels.push({ price: L.resistance.strike, label: '壓力 Call OI最大', color: LEVEL_COLORS.up });
   if (L.support) chartLevels.push({ price: L.support.strike, label: '支撐 Put OI最大', color: LEVEL_COLORS.down });
   // The nearer unreached 一壘 for the strip tile — his header's 「距一壘 … 差 N 點」.
+  // Unreached = outside the session's range so far (see RangeLevelsPanel).
   const near1B = (() => {
     if (!R) return null;
+    const hi = Math.max(R.base.high, spot), lo = Math.min(R.base.low, spot);
     const cands = [{ side: '上', price: R.up[0].price }, { side: '下', price: R.down[0].price }]
-      .filter((c) => (c.side === '上' ? c.price > spot : c.price < spot));
+      .filter((c) => (c.side === '上' ? c.price > hi : c.price < lo));
     if (!cands.length) return null;
     return cands.reduce((a, b) => (Math.abs(a.price - spot) <= Math.abs(b.price - spot) ? a : b));
   })();
@@ -2048,8 +2125,8 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
   const pc = M && M.pcRatio, fx = M && M.foreign, t10 = M && M.top10;
   const noMkt = isLive ? '期交所資料未載入' : '模擬模式沒有籌碼資料';
   const tiles = (<>
-        <LevelTile label={`現價 ${P.code}`} value={fmtP(spot)} color={spotChg == null ? LEVEL_COLORS.spot : spotChg >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down}
-          sub={spotChg != null ? <><Chg v={spotChg} fmt={(x) => fmtP(x)} /> {q.chgPct != null ? `（${q.chgPct >= 0 ? '+' : ''}${q.chgPct}%）` : ''}</> : (isLive ? liveLabel(live, P) : '模擬')} light={light} />
+        <LevelTile label={P.underlyingLabel || `現價 ${P.code}`} value={fmtP(spot)} color={spotChg == null ? LEVEL_COLORS.spot : spotChg >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down}
+          sub={spotChg != null ? <><Chg v={spotChg} fmt={(x) => fmtP(x)} /> {`（${spotPct >= 0 ? '+' : ''}${spotPct.toFixed(2)}%）`}</> : (isLive ? liveLabel(live, P) : '模擬')} light={light} />
         <LevelTile label="價平和" hk="straddle" color={LEVEL_COLORS.band}
           value={L.straddle != null ? window.fmtPx(L.straddle, P) : '—'}
           sub={L.atm ? <>價平 {fmtP(L.atm.strike)}{straddleDelta != null ? <> · 流失 <Chg v={straddleDelta} fmt={(x) => window.fmtPx(x, P)} /></> : ''}</> : '沒有鏈資料'} light={light} />
@@ -2093,7 +2170,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
           <span>權利金：{isLive ? `● ${liveLabel(live, P)}` : '○ 模擬'}</span>
         </div>
       </>) },
-    { i: 'range', title: '關卡價 · 振幅', hk: 'rangelevels', right: gridCap(`近${RANGE_LEVEL_N}日振幅`),
+    { i: 'range', title: '關卡價 · 振幅', hk: 'rangelevels', right: gridCap('近一個月振幅'),
       body: <RangeLevelsPanel P={P} spot={spot} R={R} light={light} sourceLabel={rangeSource} /> },
     { i: 'keylevels', title: '關鍵價位 · 歷史觸及率', hk: 'keylevels', right: gridCap(K ? `樣本 ${K.n} 日 · ${rangeSource}` : ''),
       body: <KeyLevelsPanel K={K} P={P} spot={spot} light={light} /> },
@@ -2132,6 +2209,79 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
 }
 
 // ───────────────────────────────────────────────── CHART WORKSPACE
+// ───────────────────────────────────────────────── WATCHLIST WORKSPACE
+// 自選 — the board modelled on moomoo's watchlist: name over code, a mini
+// price line, the close, and the move as a filled colour block.
+//
+// It is a PREVIOUS-SESSION board and says so. Every row's price is that
+// product's last daily close and the move is against the close before it, one
+// basis for the whole list, taken from the same bars the sparkline draws. The
+// captures did not all run on the same day, so each row carries its own date
+// rather than one heading implying they share one.
+//
+// moomoo's mini chart is the running intraday shape; only TXO has intraday in
+// the snapshot, so these are daily closes and the header says 近30日.
+function WatchWorkspace({ onPick, grid }) {
+  const rows = (window.PRODUCTS || []).map((P) => {
+    const r = (window.LiveData && window.LiveData.watchRow) ? window.LiveData.watchRow(P.id) : null;
+    return { P, r };
+  });
+  // Dates are YYYYMMDD strings — sort them, never Math.min, which coerces to a number.
+  const dated = rows.filter((x) => x.r).map((x) => x.r.date).sort();
+  const md = (d) => `${d.slice(4, 6)}/${d.slice(6)}`;
+  const span = dated.length ? (dated[0] === dated[dated.length - 1] ? md(dated[0]) : `${md(dated[0])}\u2013${md(dated[dated.length - 1])}`) : '';
+  const missing = rows.filter((x) => !x.r).length;
+  const body = (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {rows.map(({ P, r }) => {
+        const up = r && r.chgPct >= 0;
+        const col = up ? '#ef5350' : '#26a69a';
+        return (
+          <button key={P.id} onClick={() => r && r.hasChain && onPick(P.id)} disabled={!r || !r.hasChain}
+            title={r && !r.hasChain ? `${P.nameZh || P.name} \u53ea\u6293\u4e86\u5831\u50f9\u548c\u65e5\u7dda\uff0c\u9084\u6c92\u6709\u9078\u64c7\u6b0a\u93c8\uff1b\u9ede\u9032\u53bb\u6703\u662f\u6a21\u64ec\u8cc7\u6599\uff0c\u6240\u4ee5\u5148\u64cb\u4e0b\u4f86` : undefined}
+            style={{
+            display: 'grid', gridTemplateColumns: '1fr 96px 92px 76px', alignItems: 'center', gap: 10,
+            padding: '8px 10px', border: 'none', borderBottom: '1px solid var(--border)',
+            background: 'transparent', color: 'var(--text)', font: 'inherit', textAlign: 'left',
+            cursor: (r && r.hasChain) ? 'pointer' : 'default', opacity: r ? 1 : 0.45,
+          }}>
+            <span style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {P.nameZh || P.name}
+              </div>
+              <div className="tnum" style={{ fontSize: 9.5, color: 'var(--text2)', fontFamily: 'var(--font-mono)', marginTop: 1 }}>
+                {P.code}{r ? ` \u00b7 ${r.date.slice(4, 6)}/${r.date.slice(6)} \u00b7 ${r.source}${r.hasChain ? '' : ' \u00b7 \u50c5\u5831\u50f9'}` : ' \u00b7 \u5c1a\u7121\u5feb\u7167'}
+              </div>
+            </span>
+            {r ? <Sparkline series={r.series} /> : <span />}
+            <span className="tnum" style={{ fontSize: 13, fontFamily: 'var(--font-mono)', textAlign: 'right' }}>
+              {r ? window.fmtPx(r.close, P) : '\u2014'}
+            </span>
+            {r
+              ? <span className="tnum" style={{
+                  fontSize: 11.5, fontWeight: 700, fontFamily: 'var(--font-mono)', textAlign: 'center',
+                  background: col, color: '#fff', padding: '4px 0', borderRadius: 2,
+                }}>{(up ? '+' : '\u2212') + Math.abs(r.chgPct).toFixed(2)}%</span>
+              : <span style={{ fontSize: 10, color: 'var(--text2)', textAlign: 'center' }}>無資料</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+  const panels = [{
+    i: 'watch',
+    title: <>自選 · {rows.length - missing}/{rows.length} 商品</>,
+    right: gridCap(`\u524d\u4e00\u4ea4\u6613\u65e5\u6536\u76e4 \u00b7 \u8d70\u52e2\u70ba\u8fd130\u65e5\u65e5\u7dda` + (span ? ` \u00b7 ${span}` : '')),
+    pad: 0,
+    body,
+  }];
+  return (
+    <div style={GRID_BODY}>
+      <PanelGrid tab="watch" panels={panels} defaults={GRID_DEFAULTS.watch} grid={grid} />
+    </div>
+  );
+}
+
 // Top-level Chart tab (from the design): full-width candles + MA + RSI.
 // Desktop only — mobile keeps the K線 sub-tab inside Calc.
 function ChartWorkspace({ P, bars, barsLive, live, theme, light, barPeriodId, setBarPeriodId, barSession, setBarSession, cone = null, D, grid }) {

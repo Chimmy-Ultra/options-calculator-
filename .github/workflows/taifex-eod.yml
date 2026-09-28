@@ -4,6 +4,10 @@
 # session's data is published (TAIFEX posts the daily reports from ~15:00
 # Taipei; 08:30 UTC = 16:30 Taipei) and on demand. A weekend or holiday run
 # fetches the same last session and changes nothing, so it commits nothing.
+#
+# The same run archives TX 1-minute bars into data/tx-1m: TAIFEX deletes its
+# tick files after about two weeks, so any trading day this job misses is
+# picked up by the next run inside that window.
 name: TAIFEX end-of-day snapshot
 
 on:
@@ -22,17 +26,26 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Archive TX 1-minute bars
+        working-directory: server
+        continue-on-error: true   # never let the archive hold back the site's snapshot
+        run: python3 taifex.py --archive-minutes ../data/tx-1m
       - name: Build snapshot
         working-directory: server
         run: python3 taifex.py --write ../design_handoff_options_lab/taifex-eod.js
-      - name: Commit if the session changed
+      - name: Commit if anything changed
         run: |
-          if git diff --quiet -- design_handoff_options_lab/taifex-eod.js; then
-            echo "snapshot unchanged"; exit 0
+          git add design_handoff_options_lab/taifex-eod.js data/tx-1m
+          if git diff --cached --quiet; then
+            echo "nothing new"; exit 0
           fi
-          DATE=$(python3 -c "import re;print(re.search(r'\"date\":\"([^\"]+)\"', open('design_handoff_options_lab/taifex-eod.js').read()).group(1))")
+          if git diff --cached --quiet -- design_handoff_options_lab/taifex-eod.js; then
+            MSG="chore: TX 1-minute bars $(git diff --cached --name-only -- data/tx-1m | xargs -n1 basename | sed 's/\.csv$//' | tr '\n' ' ')"
+          else
+            DATE=$(python3 -c "import re;print(re.search(r'\"date\":\"([^\"]+)\"', open('design_handoff_options_lab/taifex-eod.js').read()).group(1))")
+            MSG="chore: TAIFEX snapshot $DATE"
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add design_handoff_options_lab/taifex-eod.js
-          git commit -m "chore: TAIFEX snapshot $DATE"
+          git commit -m "$MSG"
           git push

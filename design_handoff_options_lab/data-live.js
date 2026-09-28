@@ -48,6 +48,30 @@
     if (!s || !s.expiries) return null;
     return s.expiries.some((e) => dteOf(e.id) >= 1) ? s : null;
   }
+  // The watchlist needs only a price series, so it reads the snapshot directly
+  // rather than through eod(), which gates on a usable option chain: a
+  // quote-only product (GC) carries bars and a front future but no expiries.
+  // Returns the previous session's close and the move into it, both taken from
+  // the daily bars so every row on the board shares one basis and one date.
+  function snapshotOf(pid) {
+    return (window.TAIFEX_EOD && window.TAIFEX_EOD.product === pid) ? window.TAIFEX_EOD
+      : ((window.IB_EOD && window.IB_EOD[pid]) || null);
+  }
+  function watchRow(pid) {
+    const s = snapshotOf(pid);
+    const b = s && s.bars;
+    if (!b || b.length < 2) return null;
+    const last = b[b.length - 1], prev = b[b.length - 2];
+    if (!(last.c > 0) || !(prev.c > 0)) return null;
+    return { pid, date: last.t, close: last.c, prevClose: prev.c,
+      chgPct: (last.c / prev.c - 1) * 100,
+      series: b.slice(-30).map((x) => x.c),
+      source: s.source === 'taifex-eod' ? 'TAIFEX' : 'IB',
+      // Whether the rest of the app can actually open this product on real
+      // data. A quote-only snapshot has no chain, so every other tab would
+      // fall back to mock and contradict the price on this row.
+      hasChain: !!eod(pid) };
+  }
   function eodExpiries(s) {
     return s.expiries.map((e) => ({ id: e.id, label: e.label, dte: dteOf(e.id), type: e.type, date: e.date })).filter((e) => e.dte >= 1);
   }
@@ -142,6 +166,8 @@
 
   // Proxy first; the snapshot only answers when the proxy could not.
   window.LiveData = {};
+  // Snapshot-only, no proxy leg: the watchlist is a previous-session board.
+  window.LiveData.watchRow = watchRow;
   Object.keys(live).forEach((k) => {
     window.LiveData[k] = async (...args) => {
       const r = await live[k](...args);

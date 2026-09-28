@@ -384,6 +384,58 @@ screenshots (any day, both lists visible) would pin down the rest — the
 matching scripts live in the session scratchpad (`re/find_dates.py`,
 `re/consistent.py`).
 
+### 7.1 Update 2026-09-28 — his own names, a third sample, and 三壘
+
+Two finds on CMoney's 投資小學堂 course pages for 自由人 (`/learn/course/freeman/topic/3451`
+and `/topic/3453`):
+
+- **His own diagram** (lesson 3451, images dated 2020/01/22): 「今低是低＋預估振幅」
+  and its mirror 「今高是高－預估振幅」, with 一壘 ← **最小振幅**, 二壘 ← **小波動振幅**,
+  三壘 ← **平均振幅**, 全壘 ← **大波動振幅** (no 場外 yet). The same lesson's text:
+  "根據日振幅統計資料，二壘打出現的機率大約是 70%".
+- **A third dated screenshot** (lesson 3453, APP 使用說明-2, posted 2020/04/14 next to
+  "4/10 行情解析"): 今日振幅 110, 上方 三壘 10368 / 二壘 10265 / 一壘 10129 (the
+  一壘 row highlighted as reached), header 成交價 10133 ▲33 · 距二壘 10265, chart tags
+  開 10038 / 昨 10100 / high 10140. TAIFEX TX 202004 on **2020/04/10**: open 10038,
+  high 10140, low 10030, close 10133, previous settle 10100 ✓ (all five).
+
+What the new sample settles (TAIFEX TX history, front month by volume, day session):
+
+| Level | Rule | 2020/04/10 (above, low 10030) | 2023/06/09 (below, high 16888) | 2024/08/28 (below, high 22211) |
+|---|---|---|---|---|
+| 一壘 | min of the month's ranges | 99 → 10129 ✓ | 67 → 16821 ✓ | 170 → 22041 ✓ |
+| 三壘 | mean of the month's ranges | 338.0 → 10368 ✓ | 123.65 → 16764 ✓ | — |
+| 全壘 | mean + 1σ (population) | — | 163.58 → 16724 ✓ | — |
+| 二壘 | 30th percentile (this site) | 222 → 10252 (his 10265) | 96.6 → 16791 (his 16790) | — |
+| 場外 | max (this site) | — | 244 → 16644 (his 16628) | — |
+
+- **The window is one calendar month**: every session dated on or after the same day
+  last month, through yesterday (21 sessions for 2020/04/10, 23 for 2023/06/09, 22 for
+  2024/08/28). Twenty sessions gave a 三壘 of 344 on 2020/04/10 (six points off his
+  10368); the month window gives exactly 338.0. The window must start *on* the same
+  day — starting the day after (22 sessions on 2023/06/09) misses 三壘.
+- This is also the first sample of an **upper** 一壘, confirming the mirror (today's
+  low + the same distance) that had only been assumed.
+- **二壘 (小波動振幅) is still unknown.** Nothing in a brute-force space (day / night /
+  full-session / true range / body, windows of 3–25 sessions and 20–45 calendar days,
+  quantiles by every numpy method, mean ± k·σ, means of the k smallest / largest)
+  matches both 98 and 235 exactly. Inside the month window alone (~1,900 statistics)
+  it sits near mean − 0.62σ, but the coefficient differs between the two days (0.642 /
+  0.624 with population σ); in that same search, targets shifted by a few points found
+  an exact fit 15% of the time, so the absence is itself informative. It stays at the
+  30th percentile, labelled this site's.
+- Chance check for 三壘: restricted to day-session statistics over 20 sessions, shifting
+  both targets by up to ±6 / ±15 points produced an exact fit on only 1% of the shifted
+  pairs, and the month-window mean is his own label (平均振幅), not a statistic chosen
+  from a list.
+- Unrelated to the formula but visible on the same screenshots: rows like 「近1日 波動
+  壓縮 18/20」 rank recent ranges within twenty sessions (1-day: 18/20 on 2020/04/10
+  matches), and the PC panel has 今日 / 黃金I / 黃金II tabs that nothing here explains.
+
+The app label is now "一壘、三壘＝驗證自由人公式；二壘、全壘、場外為本站統計定義". Scripts:
+`re/named.py` (the named statistics per window), `re/null_test.py`, `re/null_2b.py`,
+`re/named3.py`; 2020 history in `re/tx_daily_2020.json`.
+
 ## 8. 成本線 / 多空差額 / 五大盤型 — what could be pinned down (2026-09-13)
 
 **成本線 = (當節最高 + 當節最低) ÷ 2.** 自由人's own Facebook post

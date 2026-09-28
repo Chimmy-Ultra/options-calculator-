@@ -131,15 +131,23 @@ def _option_contracts(spec: dict):
 
 
 def _underlying_contract(spec: dict):
-    """The index the options settle on (TAIEX), matching the frontend's spot
-    model — TXO is priced Black-Scholes on the index, not on the future."""
+    """The front TX future — what TXO is actually priced against (Black-76).
+    Put-call parity on the exchange's own settlement prices recovers the
+    futures price to within a point, while the index sits ~80 points above it
+    on the dividend basis. Falls back to the index only if the futures chain
+    is unavailable."""
+    fut = spec.get("underlyingFuture", "TXF")
+    try:
+        group = getattr(_api.Contracts.Futures, fut, None)
+        if group:
+            return group[0]
+    except Exception:
+        pass
     idx = spec.get("index", ("TSE", "001"))
     try:
         return _api.Contracts.Indexs[idx[0]][idx[1]]
     except Exception:
-        fut = spec.get("underlyingFuture", "TXF")
-        group = getattr(_api.Contracts.Futures, fut, None)
-        return group[0] if group else None
+        return None
 
 
 def _snapshot_map(contracts):
@@ -271,10 +279,15 @@ async def chain(spec: dict, expiry: str):
                 mid = (bid + ask) / 2 if bid and ask else None
                 last = _last_of(s) or 0.0
                 right = "C" if str(getattr(c.option_right, "value", c.option_right)) in ("C", "Call") else "P"
-                # Shioaji snapshots carry no greeks → invert IV from the premium
-                # with the same Black-Scholes the frontend prices TXO with.
-                iv = pricing.implied_vol(right, und_px, float(c.strike_price), mid or last, t_years, RISK_FREE, "bs") or 0.0
-                d = pricing.delta(right, und_px, float(c.strike_price), max(iv, 1e-4), t_years, RISK_FREE, "bs")
+                # Shioaji snapshots carry no greeks -> invert IV from the
+                # premium. `und_px` is the front TX future, so the model is
+                # Black-76, matching products.js and the EOD snapshot; pricing
+                # a futures quote with Black-Scholes would add the carry twice.
+                # One forward for the whole board: unlike the snapshot this
+                # path cannot take a per-expiry parity forward from settlement
+                # prices, so a far expiry is off by its dividend basis.
+                iv = pricing.implied_vol(right, und_px, float(c.strike_price), mid or last, t_years, RISK_FREE, "b76") or 0.0
+                d = pricing.delta(right, und_px, float(c.strike_price), max(iv, 1e-4), t_years, RISK_FREE, "b76")
                 return {
                     "bid": bid or 0.0, "ask": ask or 0.0, "last": last,
                     "iv": round(iv * 100, 2),
