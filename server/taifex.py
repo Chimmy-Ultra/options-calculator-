@@ -1000,7 +1000,50 @@ async def build_snapshot(product_id: str = "txo", n_expiries: int = 5, strike_pc
     }
 
 
+# ── 1-minute archive ────────────────────────────────────────────────────────
+# TAIFEX keeps its tick files for about two weeks, so an intraday history — the
+# only way to test whether a level stops price within the session, which daily
+# bars cannot show — has to be collected day by day. The daily workflow runs:
+#
+#     python3 taifex.py --archive-minutes ../data/tx-1m
+
+def archive_minutes(out_dir: str, days_back: int = 20) -> list:
+    """TX front-month 1-minute bars for every tick file the exchange still serves
+    that out_dir lacks, one CSV per trading date (out_dir/YYYY/YYYYMMDD.csv):
+    session (night = the session booked before that day, day = 08:45-13:45),
+    time (hhmm, the bar's minute), month, open, high, low, close, lots.
+    Returns the dates written."""
+    written = []
+    for back in range(days_back):
+        d = date.today() - timedelta(days=back)
+        path = os.path.join(out_dir, f"{d:%Y}", f"{d:%Y%m%d}.csv")
+        if d.weekday() >= 5 or os.path.exists(path):
+            continue
+        try:
+            raw = _fetch_tick_zip(d)
+        except Exception:
+            raw = None
+        if raw is None:
+            continue
+        p = _parse_ticks(raw)
+        if p["date"] != f"{d:%Y%m%d}":
+            raise ValueError(f"{d}: tick file holds trading date {p['date']}")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", newline="", encoding="ascii") as f:
+            w = csv.writer(f, lineterminator="\n")
+            w.writerow(["session", "time", "month", "open", "high", "low", "close", "lots"])
+            for session in ("night", "day"):
+                for b in _minute_series(p[session])["bars"] if p[session] else []:
+                    w.writerow([session, b[0], p["month"], *(f"{x:.10g}" for x in b[1:5]), b[5]])
+        written.append(p["date"])
+    return written
+
+
 def main(argv):
+    if "--archive-minutes" in argv:
+        written = archive_minutes(argv[argv.index("--archive-minutes") + 1])
+        print("archived", written or "nothing new")
+        return 0
     out = None
     if "--write" in argv:
         out = argv[argv.index("--write") + 1]
