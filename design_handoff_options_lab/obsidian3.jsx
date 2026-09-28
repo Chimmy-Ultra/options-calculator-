@@ -1693,10 +1693,15 @@ function RangeLevelsPanel({ P, spot, R, light, sourceLabel }) {
   const dim = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
   const line = light ? 'rgba(25,40,70,0.18)' : 'rgba(255,255,255,0.12)';
   if (!R) return <div className="mono" style={{ fontSize: 11, color: dim, padding: '6px 0' }}>需要一個月以上的日K才能計算。</div>;
-  const nextUp = R.up.find((l) => l.price > spot);
-  const nextDown = [...R.down].find((l) => l.price < spot);
+  // Reached = inside the session's range so far, not merely on the far side of
+  // the current price: once the day's range passes 一壘's distance both 一壘
+  // lie between the high and the low, and past twice that distance they swap
+  // order. spot only widens it under the What-if rail.
+  const hi = Math.max(R.base.high, spot), lo = Math.min(R.base.low, spot);
+  const nextUp = R.up.find((l) => l.price > hi);
+  const nextDown = R.down.find((l) => l.price < lo);
   const Row = ({ l, side, hot }) => {
-    const reached = side === 'up' ? spot >= l.price : spot <= l.price;
+    const reached = side === 'up' ? hi >= l.price : lo <= l.price;
     const col = side === 'up' ? LEVEL_COLORS.up : LEVEL_COLORS.down;
     const d = l.price - spot;
     return (
@@ -2089,10 +2094,12 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
   if (L.resistance) chartLevels.push({ price: L.resistance.strike, label: '壓力 Call OI最大', color: LEVEL_COLORS.up });
   if (L.support) chartLevels.push({ price: L.support.strike, label: '支撐 Put OI最大', color: LEVEL_COLORS.down });
   // The nearer unreached 一壘 for the strip tile — his header's 「距一壘 … 差 N 點」.
+  // Unreached = outside the session's range so far (see RangeLevelsPanel).
   const near1B = (() => {
     if (!R) return null;
+    const hi = Math.max(R.base.high, spot), lo = Math.min(R.base.low, spot);
     const cands = [{ side: '上', price: R.up[0].price }, { side: '下', price: R.down[0].price }]
-      .filter((c) => (c.side === '上' ? c.price > spot : c.price < spot));
+      .filter((c) => (c.side === '上' ? c.price > hi : c.price < lo));
     if (!cands.length) return null;
     return cands.reduce((a, b) => (Math.abs(a.price - spot) <= Math.abs(b.price - spot) ? a : b));
   })();
