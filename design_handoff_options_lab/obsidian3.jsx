@@ -1531,31 +1531,54 @@ function GexProfile({ P, spot, G, theme = 'dark', light = false, maxRows = 15 })
 // 三壘 / 全壘 / 場外, above and below). His public description: the app
 // "tracks daily volume and range, takes the largest and smallest range of the
 // last month, and derives the day's target levels" (CMoney product page).
-// What we could verify against TAIFEX history (docs/daytrade-redesign.md §6):
-//   一壘 below = today's high − the smallest daily range (day session) of the
-//   previous ~20 sessions. Exact on both dated screenshots (2023/06/09: 16888 −
-//   67 = 16821; 2024/08/28: 22211 − 170 = 22041); window anywhere in 14–26
-//   sessions reproduces them, 20 = "一個月".
-// The other four distances are this site's definition, chosen to match the one
-// screenshot that shows all five within a point where a natural statistic
-// does: 二壘 = 30th percentile (his own statistic: "二壘打出現的機率大約是
-// 70%"), 三壘 = mean (124 vs his 124), 全壘 = mean + 1σ (164 vs his 164),
-// 場外 = the largest range (244 vs his 260 — not his formula). Above-levels
-// mirror below: today's low + the same distances.
+// His own lesson (CMoney 投資小學堂, 2020) names the distances: 今低是低 +
+// 預估振幅 — 一壘 最小振幅, 二壘 小波動振幅, 三壘 平均振幅, 全壘 大波動振幅
+// (場外 came later). Checked against TAIFEX history (docs/daytrade-redesign.md §7),
+// the window is one calendar month — every session from the same day last month
+// through yesterday — and two of the names are exact on every dated screenshot:
+//   一壘 = the smallest day-session range: 2020/04/10 10030 + 99 = 10129 (above),
+//     2023/06/09 16888 − 67 = 16821, 2024/08/28 22211 − 170 = 22041 (below).
+//   三壘 = the mean: 2020/04/10 338.0 (21 sessions), 2023/06/09 123.65 (23).
+//     Twenty sessions gave 344 on 2020/04/10 — six points off.
+// The rest are this site's definition: 二壘 = 30th percentile (his "二壘打出現的
+// 機率大約是 70%"; nothing tested fits both of his 二壘 numbers), 全壘 = mean +
+// 1σ (matches his one sample, 164), 場外 = the largest range (244 vs his 260).
+// Above-levels mirror below: today's low + the same distances.
 // bars: daily OHLC in time order; today: { date, high, low } from the live
 // quote when the session is running, else the last completed bar stands in.
-const RANGE_LEVEL_N = 20;
 const RANGE_LEVEL_NAMES = ['一壘', '二壘', '三壘', '全壘', '場外'];
-function computeRangeLevels({ bars, today, N = RANGE_LEVEL_N }) {
-  if (!bars || bars.length < N + 1) return null;
+const RANGE_LEVEL_UNDATED_N = 21; // mock bars carry no dates: about one month of sessions
+// The same calendar day one month earlier, clamped to that month's last day.
+function monthBefore(ymd) {
+  const y = +ymd.slice(0, 4), m = +ymd.slice(4, 6), d = +ymd.slice(6, 8);
+  const py = m === 1 ? y - 1 : y, pm = m === 1 ? 12 : m - 1;
+  const dd = Math.min(d, new Date(py, pm, 0).getDate());
+  return `${py}${String(pm).padStart(2, '0')}${String(dd).padStart(2, '0')}`;
+}
+function computeRangeLevels({ bars, today }) {
+  if (!bars || bars.length < 2) return null;
   const last = bars[bars.length - 1];
+  const day = (b) => String(b.t).slice(0, 8);
   // A bar dated today is the running session: its own range is not history.
-  const lastIsToday = !!(today && today.date && String(last.t).slice(0, 8) === today.date);
+  const lastIsToday = !!(today && today.date && day(last) === today.date);
   const hist = lastIsToday ? bars.slice(0, -1) : bars;
-  if (hist.length < N) return null;
-  const win = hist.slice(-N);
+  let win;
+  if (/^\d{8}$/.test(day(last))) {
+    const utc = (s) => Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8));
+    // The session the levels are for: today — unless the bars are a snapshot
+    // more than a week old, then the day after its last bar.
+    const fresh = !!(today && today.date && today.date >= day(last) && utc(today.date) - utc(day(last)) <= 7 * 864e5);
+    const asof = fresh ? today.date : new Date(utc(day(last)) + 864e5).toISOString().slice(0, 10).replace(/-/g, '');
+    const start = monthBefore(asof);
+    // The window must be whole: the bars have to reach back to its first day.
+    if (!hist.length || day(hist[0]) > start) return null;
+    win = hist.filter((b) => day(b) >= start);
+  } else {
+    if (hist.length < RANGE_LEVEL_UNDATED_N) return null;
+    win = hist.slice(-RANGE_LEVEL_UNDATED_N);
+  }
   const ranges = win.map((b) => b.h - b.l).filter((r) => Number.isFinite(r) && r > 0);
-  if (ranges.length < N) return null;
+  if (ranges.length < 10) return null;
   const sorted = [...ranges].sort((a, b) => a - b);
   const mean = ranges.reduce((a, b) => a + b, 0) / ranges.length;
   const sd = Math.sqrt(ranges.reduce((a, b) => a + (b - mean) * (b - mean), 0) / ranges.length);
@@ -1669,7 +1692,7 @@ function RangeLevelsPanel({ P, spot, R, light, sourceLabel }) {
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
   const dim = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
   const line = light ? 'rgba(25,40,70,0.18)' : 'rgba(255,255,255,0.12)';
-  if (!R) return <div className="mono" style={{ fontSize: 11, color: dim, padding: '6px 0' }}>需要 {RANGE_LEVEL_N + 1} 根以上的日K才能計算。</div>;
+  if (!R) return <div className="mono" style={{ fontSize: 11, color: dim, padding: '6px 0' }}>需要一個月以上的日K才能計算。</div>;
   const nextUp = R.up.find((l) => l.price > spot);
   const nextDown = [...R.down].find((l) => l.price < spot);
   const Row = ({ l, side, hot }) => {
@@ -1698,9 +1721,9 @@ function RangeLevelsPanel({ P, spot, R, light, sourceLabel }) {
         </div>
       </div>
       <div className="mono tnum" style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${line}`, fontSize: 9.5, color: dim, display: 'flex', flexWrap: 'wrap', gap: '2px 12px' }}>
-        <span>近{R.n}日日盤振幅：最小 {fmtP(R.min)} · 三成分位 {fmtP(R.up[1].dist)} · 平均 {fmtP(Math.round(R.mean))} · 平均＋1σ {fmtP(R.up[3].dist)} · 最大 {fmtP(R.max)}</span>
+        <span>近一個月（{R.n} 日）日盤振幅：最小 {fmtP(R.min)} · 三成分位 {fmtP(R.up[1].dist)} · 平均 {fmtP(Math.round(R.mean))} · 平均＋1σ {fmtP(R.up[3].dist)} · 最大 {fmtP(R.max)}</span>
         <span>{R.from.slice(4, 6)}/{R.from.slice(6)}–{R.to.slice(4, 6)}/{R.to.slice(6)} · {sourceLabel}</span>
-        <span>一壘＝驗證自由人公式；其餘為本站統計定義</span>
+        <span>一壘、三壘＝驗證自由人公式；二壘、全壘、場外為本站統計定義</span>
       </div>
     </div>
   );
@@ -2132,7 +2155,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
           <span>權利金：{isLive ? `● ${liveLabel(live, P)}` : '○ 模擬'}</span>
         </div>
       </>) },
-    { i: 'range', title: '關卡價 · 振幅', hk: 'rangelevels', right: gridCap(`近${RANGE_LEVEL_N}日振幅`),
+    { i: 'range', title: '關卡價 · 振幅', hk: 'rangelevels', right: gridCap('近一個月振幅'),
       body: <RangeLevelsPanel P={P} spot={spot} R={R} light={light} sourceLabel={rangeSource} /> },
     { i: 'keylevels', title: '關鍵價位 · 歷史觸及率', hk: 'keylevels', right: gridCap(K ? `樣本 ${K.n} 日 · ${rangeSource}` : ''),
       body: <KeyLevelsPanel K={K} P={P} spot={spot} light={light} /> },
