@@ -600,9 +600,11 @@ def _fetch_tick_zip(day: date) -> bytes | None:
 def _parse_ticks(raw_zip: bytes, symbol: str = FUT_COMMODITY) -> dict:
     """Front-month ticks of `symbol` from the archive: {date, month,
     day: [(hhmmss, price, lots)], night: [...]} — the day session of the file's
-    trading date and the night session booked before it (dated the previous
-    calendar day). Lots = 成交數量(B+S) / 2. Front month = the outright month
-    with the most day-session lots."""
+    trading date and the night session booked before it, which runs 15:00 to
+    05:00: its ticks before midnight carry the previous calendar day's date
+    and those after midnight carry the trading date itself, so an hour before
+    08:45 on the trading date is night, not day. Lots = 成交數量(B+S) / 2.
+    Front month = the outright month with the most day-session lots."""
     import zipfile
     zf = zipfile.ZipFile(io.BytesIO(raw_zip))
     name = next(n for n in zf.namelist() if n.lower().endswith(".csv"))
@@ -622,7 +624,9 @@ def _parse_ticks(raw_zip: bytes, symbol: str = FUT_COMMODITY) -> dict:
         by_month[r[1]] = by_month.get(r[1], 0) + r[4]
     month = max(by_month, key=by_month.get)
     day = [(r[2], r[3], r[4]) for r in day_rows if r[1] == month]
-    night = [(r[2], r[3], r[4]) for r in rows if r[1] == month and r[0] != trade_date]
+    night = sorted((r for r in rows if r[1] == month and (r[0] != trade_date or r[2] < "084500")),
+                   key=lambda r: (r[0], r[2]))  # stable: same-second trades keep file order
+    night = [(r[2], r[3], r[4]) for r in night]
     return {"date": trade_date, "month": month, "day": day, "night": night}
 
 
