@@ -205,7 +205,7 @@ function WorkspaceTabs({ value, onChange }) {
 
 // Product dropdown (design ⑥) — replaces the native select with a custom menu
 // listing each product's name + reference spot. Shows live IB / mock badge.
-function ProductDropdown({ productId, P, spot, chg, live, open, setOpen, onPick }) {
+function ProductDropdown({ productId, P, spot, chg, scenario, live, open, setOpen, onPick }) {
   const fmtSpot = (v) => v.toLocaleString(undefined, { maximumFractionDigits: v < 10 ? 2 : v < 1000 ? 2 : 0 });
   const col = chg == null ? 'var(--text)' : chg >= 0 ? '#ef5350' : '#26a69a';
   return (
@@ -215,6 +215,7 @@ function ProductDropdown({ productId, P, spot, chg, live, open, setOpen, onPick 
         <span style={{ fontSize: 12, color: 'var(--text2)' }}>{P.nameZh || P.name} {P.code} ▾</span>
         <span className="mono tnum" style={{ fontSize: 18, fontWeight: 700, color: col }}>{fmtSpot(spot)}</span>
         {chg != null && <span className="mono tnum" style={{ fontSize: 12, color: col, fontWeight: 600 }}>{chg >= 0 ? '▲' : '▼'}{fmtSpot(Math.abs(chg))}{chg.pct != null ? '' : ''}</span>}
+        {chg == null && scenario && <span style={{ fontSize: 11, color: 'var(--gold)', fontWeight: 600 }}>模擬</span>}
       </div>
       {open && (
         <div style={{
@@ -465,6 +466,7 @@ function Obsidian3() {
   const [liveBars, setLiveBars] = uS(null); // 近月期貨的 IB 歷史 K
   const [liveDayBars, setLiveDayBars] = uS(null); // daily 日盤 bars regardless of the K-line toggles — the 關卡價 input
   const [quoteNow, setQuoteNow] = uS(null); // latest live quote (last / open / high / low) — today's running range
+  const [spotUnderlying, setSpotUnderlying] = uS(null); // the expiry's own future when it last set spot — its prevClose prices the top-bar change
   const [barPeriodId, setBarPeriodId] = uS('D'); // K 線週期：D / 4H / 1H
   const [barSession, setBarSession] = uS('day'); // 'day' 日盤 | 'full' 全日盤（含夜盤）— sources with a night session only
   const [theme, setTheme] = uS(() => {
@@ -561,6 +563,7 @@ function Obsidian3() {
     setLastLiveAt(null);
     setExpiryId(e0.id);
     setSpot(p.defaultSpot);
+    setSpotUnderlying(null);
     setIv(p.defaultIv);
     autoLegs.current = defaultLegsFor(p, e0.dte);
     setLegs(autoLegs.current);
@@ -648,7 +651,7 @@ function Obsidian3() {
       const chain = await window.LiveData.chain(P.id, expiryId);
       if (dead || !chain || !chain.rows || !chain.rows.length) return;
       setLiveRows(chain.rows);
-      if (chain.underlying && chain.underlying.price > 0) setSpot(chain.underlying.price);
+      if (chain.underlying && chain.underlying.price > 0) { setSpot(chain.underlying.price); setSpotUnderlying(chain.underlying); }
       setLastLiveAt(Date.now());
     })();
     // Full-range open interest for the Levels walls (TAIFEX daily report — the
@@ -682,7 +685,7 @@ function Obsidian3() {
       const chain = await window.LiveData.chain(P.id, expiryId);
       if (dead || !chain || !chain.rows || !chain.rows.length) return;
       setLiveRows(chain.rows);
-      if (chain.underlying && chain.underlying.price > 0) setSpot(chain.underlying.price);
+      if (chain.underlying && chain.underlying.price > 0) { setSpot(chain.underlying.price); setSpotUnderlying(chain.underlying); }
       setLastLiveAt(Date.now());
     };
     const pullIntraday = async () => {
@@ -885,7 +888,13 @@ function Obsidian3() {
   const gridTab = workspace === 'lab' ? (labView === 'iv' ? 'lab-iv' : null) : workspace;
   const grid = { editing: layoutEdit && !!gridTab, resetToken: layoutReset };
   const qNow = quoteNow || (live && live.quote);
-  const spotChgTop = (qNow && qNow.last > 0 && qNow.close > 0) ? qNow.last - qNow.close : null;
+  // The change must describe the price the headline shows. spot is shared: the
+  // quote writes it, so does each expiry's own underlying future (IB prices each
+  // expiry off its own month — CL's Nov future beside an Oct quote), and so
+  // does the What-if rail. A scenario price belongs to no contract: no change.
+  const spotChgTop = (qNow && qNow.last > 0 && qNow.close > 0 && spot === qNow.last) ? qNow.last - qNow.close
+    : (spotUnderlying && spotUnderlying.price === spot && spotUnderlying.prevClose > 0) ? spot - spotUnderlying.prevClose : null;
+  const spotScenario = !!live && !(qNow && spot === qNow.last) && !(spotUnderlying && spot === spotUnderlying.price);
   return (
     <div style={{
       width: '100%', minHeight: '100vh', position: 'relative', overflow: 'hidden',
@@ -902,7 +911,7 @@ function Obsidian3() {
         <div style={{ flex: 1 }} />
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexShrink: 0 }}>
           <ProductDropdown
-            productId={productId} P={P} spot={spot} chg={spotChgTop} live={live}
+            productId={productId} P={P} spot={spot} chg={spotChgTop} scenario={spotScenario} live={live}
             open={prodMenuOpen} setOpen={setProdMenuOpen}
             onPick={(id) => { switchProduct(id); setProdMenuOpen(false); }}
           />
@@ -950,7 +959,7 @@ function Obsidian3() {
       {/* WORKSPACE BODY */}
       {workspace === 'levels' && (
         <LevelsWorkspace
-          P={P} theme={theme} light={light} spot={spot} expiry={expiry} levels={levels} live={live} market={marketData}
+          P={P} theme={theme} light={light} spot={spot} spotChg={spotChgTop} expiry={expiry} levels={levels} live={live} market={marketData}
           rangeLevels={rangeLevels} dayBarsLive={!!liveDayBars} gex={gex} grid={grid} top20={top20Data} intraday={intradayData} keyLevels={keyLevels} twse={twseData} premarket={premarketData}
           bars={bars} barsLive={!!liveBars} barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
           barSession={barSession} setBarSession={setBarSession}
@@ -2069,7 +2078,7 @@ function TwseFlowsPanel({ W, light = false }) {
   );
 }
 
-function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, levels: L, live, market: M, rangeLevels: R, dayBarsLive, gex: G, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D, grid, top20: T, intraday: I, keyLevels: K, twse: W, premarket: PM }) {
+function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expiry, levels: L, live, market: M, rangeLevels: R, dayBarsLive, gex: G, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D, grid, top20: T, intraday: I, keyLevels: K, twse: W, premarket: PM }) {
   const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
   const chg = (v) => (v == null ? '' : `（${v > 0 ? '+' : ''}${v.toLocaleString()}）`);
@@ -2080,8 +2089,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
     : '○ 模擬資料';
   const straddleDelta = (L.straddle != null && L.prevStraddle != null) ? L.straddle - L.prevStraddle : null;
   const pcExpiry = L.totals.callOi > 0 ? L.totals.putOi / L.totals.callOi : null;
-  const q = live && live.quote;
-  const spotChg = (q && q.last > 0 && q.close > 0) ? q.last - q.close : null;
+  const spotPct = spotChg != null ? spotChg / (spot - spotChg) * 100 : null; // spotChg: the top bar's, same contract as spot
   // K-line overlays: the four option-derived levels (spot has its own tag).
   // Only the walls and 成本線 are drawn (plus the gold last price, which
   // PriceChart adds itself). Owner's call, 2026-09-14: eight lines buried the
@@ -2118,7 +2126,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, expiry, level
   const noMkt = isLive ? '期交所資料未載入' : '模擬模式沒有籌碼資料';
   const tiles = (<>
         <LevelTile label={P.underlyingLabel || `現價 ${P.code}`} value={fmtP(spot)} color={spotChg == null ? LEVEL_COLORS.spot : spotChg >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down}
-          sub={spotChg != null ? <><Chg v={spotChg} fmt={(x) => fmtP(x)} /> {q.chgPct != null ? `（${q.chgPct >= 0 ? '+' : ''}${q.chgPct}%）` : ''}</> : (isLive ? liveLabel(live, P) : '模擬')} light={light} />
+          sub={spotChg != null ? <><Chg v={spotChg} fmt={(x) => fmtP(x)} /> {`（${spotPct >= 0 ? '+' : ''}${spotPct.toFixed(2)}%）`}</> : (isLive ? liveLabel(live, P) : '模擬')} light={light} />
         <LevelTile label="價平和" hk="straddle" color={LEVEL_COLORS.band}
           value={L.straddle != null ? window.fmtPx(L.straddle, P) : '—'}
           sub={L.atm ? <>價平 {fmtP(L.atm.strike)}{straddleDelta != null ? <> · 流失 <Chg v={straddleDelta} fmt={(x) => window.fmtPx(x, P)} /></> : ''}</> : '沒有鏈資料'} light={light} />
