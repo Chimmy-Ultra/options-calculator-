@@ -540,3 +540,70 @@ Owner's direction: the site should analyse indices and commodities too, with the
 **Thin data is shown as thin.** BZ returned no bid or ask on any contract, so its chain prints 0.00/0.00 and the 理論價 difference falls back to the last trade — which is why its two sides disagree (36.5% call vs 74.9% put at the ATM). VIX's front expiry was one day out with frozen weekend quotes, so its put wing reads above 200%. Both are the market data being wide, not a pricing bug; nothing is smoothed or filled in.
 
 **Not verified.** The proxy's live path for NQ / ZM / ZL / LE / HE / BZ (trading-class guesses in `main.py` degrade gracefully through `_sec_def`'s most-expirations fallback).
+
+## 12. 自由人's own trading rules, and what the TX history says about them (2026-09-28 – 10-01)
+
+Owner's question: simple technical indicators look useless — how does 自由人 actually trade, and does it hold up? Sources are his own CMoney 投資小學堂 lessons (`/learn/course/freeman/topic/<id>`), quoted verbatim; second-hand write-ups are marked.
+
+### 12.1 His rules, in his words
+
+| Topic | Lesson | What it says |
+|---|---|---|
+| Entry | 3439 如何抓轉折 | 「一分K長黑K長紅K進場試多單」 (mirror for shorts) |
+| Entry | 3449 台指當沖交易的技巧 | 「多頭趨勢的第二隻腳(正N)」「站穩關卡價打V轉」「抄底(逆勢單)」, and the short-side mirrors (倒N / 「關卡價不破打A轉」 / 摸頭) — TX only, no options |
+| Entry filter | 3451 壘包 | 「大部分的權值股呈現日紅 K」 and 「目前的日振幅小、甚至少於 50 點」 |
+| Stop | 3439 | 「用觸價停損單守長黑K低點減5~10點」; 「停損必須明確而且點數小(停損金額明確且你可以忍受)」 |
+| Stop | 3451 | 「停損守今天的低點」 |
+| Levels | 3451 | 「抓第一根根紅K轉折，設定觸價停損單」 (sic)→「停損沒來，行情看的懂就加碼，看不懂就抱住賺錢單」→「一壘減碼」「底單留到二壘平倉」; 「跟著顏色，跟著 5MA 均線」; 「二壘打出現的機率大約是 70%」. The text says nothing about 三壘 / 全壘 (only the diagram names them, §7.1) |
+| Exit | note 149026 (日振幅停利法) | 「有了預期的今日目標價後，抱到預測的目標價才平倉」; 「會進場的是徒弟，會出場的才是師父」 |
+| Expectancy | 3444 | `E = W*P − L*(1−P) − A`; no position-size or daily-loss numbers |
+| Product by regime | 3445 (published 2020-01-17) | big moves → 台指當沖 + 周OP買方; bull → 現股當沖 / 隔日沖 / 「抱3~5天的小波段」; bear → 空股期 / 做多波動率 / 崩盤策略; 「(5) 在多頭的環境下，加權指數會常態性出現日振幅壓縮的狀況，這時候我們可以加入月選賣方的交易策略。」 |
+| Swing (stocks) | 3440 | entry 「昨日長黑（洗盤）今日長紅且吞噬昨日高點」, stop at the long black's low; no target |
+
+- **月選賣方** is that one sentence ("可以加入", not "I do"); no strike, side, size or stop anywhere in his public material. The owner reports a livestream in which he said he does not sell options — not found, so not checked.
+- Second-hand only: a talk write-up (cf995.tw/article/10/6) has him scaling out by time (9:30 / 9:45 / 10:00) and by range (30 / 50 points); a blog (blog.100w123.com, 2023-11-28) describes a 5-day-range variant (the app's numbers fit the month window instead, §7.1). A book-notes page quoting "10 contracts, 5–8 tick stops" sat behind a Cloudflare check and was not read, so it is not used.
+
+### 12.2 How the pieces fit
+
+- 「停損沒來，二壘就會來」 is an identity, not a forecast: a long with its stop under today's low that is never hit means that low is the day's low, and upper 二壘 (low + 小波動振幅) is then reached exactly when the day's range exceeds 小波動振幅 — about 70% of days by his statement, 68.1% for this site's q30 (一壘 94.5%, §7.1). The levels supply W in his expectancy; whether he makes money depends on how often his entry catches the day's extreme (P), and that is the part with no published thresholds (how long is 長紅K).
+- A small stop and a far target are not an edge by themselves: on a driftless path the chance of +W before −L is L / (W + L), so `E = −A`. A 10-point stop against a 100-point target needs better than 10 / 110 ≈ 9% to break even.
+- The 70% says nothing about direction.
+
+### 12.3 Regime numbers (`research/regime_study.py`)
+
+TX day session, front month by volume, price changes chained within one contract, 2019-01-02 .. 2026-09-24 (signal days 2020-01-14 .. 2026-08-27). "Bull" = above the 60-session mean; "comp" = the 20-session mean day range in the lowest third of the past year; σ = the last 20 sessions' realized vol over 20 sessions.
+
+| Next 20 sessions | all | MA60 bull | MA60 bull + comp | pivot bull (close > P) | pivot bear |
+|---|---|---|---|---|---|
+| days | 1,608 | 1,146 | 489 | 921 | 687 |
+| mean move | +1.92% | +2.30% | +2.75% | +2.05% | +1.75% |
+| above +1σ | 28.0% | 32.2% | 42.5% | 28.3% | 27.5% |
+| below −1σ | 10.4% | 7.9% | 8.4% | 9.4% | 11.6% |
+| above +2σ / below −2σ | 7.6 / 3.7% | 9.1 / 1.7% | 16.4 / 2.2% | 8.0 / 3.0% | 7.1 / 4.5% |
+
+- **Why the call side breaks in a calm bull.** σ measures the wiggle, not the trend. Compression shortens the ruler (20-session σ 3.61% vs 5.03% in a non-compressed bull) while the mean move stays (+2.75% vs +1.96%), so the trend is 0.76σ instead of 0.39σ. Black-76 prices options with no drift, so a seller of calls is paid for the wiggle and carries the trend too.
+- **Compression is followed by bigger moves:** |z| > 1 on 50.9% of bull + comp days (38.4% overall; 31.7% for a normal distribution) — selling both sides on a compression signal collects a thin premium into larger moves.
+- **The daily pivot is the wrong horizon for a month-long position:** above / below P barely separates the next 20 sessions (+2.05% vs +1.75%) and the label flips 8.8 times per 20 sessions (MA60: 1.1).
+- **Skew on the day.** 2026/09/24, October monthly, 3,000 points either side of the 48,129 forward: put 45100 closed 238 (IV 24.0%), call 51100 closed 180 (IV 19.9%).
+- **Multi-day ranges** (non-overlapping windows): 5 sessions = 3.11× one session's range, 20 sessions = 6.89× — more than √n (2.24, 4.47) because the day-session range leaves out the night session and gaps that a multi-day range includes. A swing target cannot be a scaled daily range.
+- **Buying those calls against past moves** (today's premium on history — an order of magnitude only): the 51100 call finished in the money 26.6% of the time but above strike + premium 22.7%, median payoff 0; on average the calls paid more than they cost, on all days as much as on bull + comp days — the 2020–2026 rally, not the compression filter.
+- **Caveats.** One long bull market (bull + comp days: 150 in 2023, 116 in 2025); 20-session windows overlap, so bull + comp is ~25 independent months. Nothing here says which side of a short-option trade paid: that needs TAIFEX's historical settlement prices month by month (not run).
+
+### 12.4 Backtest: buy back above a broken pivot support (`research/pivot_reclaim.py`)
+
+Owner's rule: when price breaks below the lowest pivot (S3, the bottom of the 關鍵價位 list) and gets back above it, buy one TX; sell at the next trading day's close. S1 / S2 / 前日低 and "buy every close" run alongside as controls. Costs per round trip: 1 point slippage each side, 期交稅 十萬分之二 each side, NT$50 commission each side; NT$200 a point.
+
+Daily bars, 2019-01-03 .. 2026-09-29 (signal: day low below the level, close above it; buy that close):
+
+| | trades | win | mean per trade | ±2 SE | avg net NT$ | total net NT$ | worst NT$ |
+|---|---|---|---|---|---|---|---|
+| every close | 1,878 | 56.0% | +0.108% | 0.062% | +3,666 | +6,883,861 | −595,854 |
+| S1 | 294 | 53.1% | +0.101% | 0.149% | +1,823 | +535,947 | −595,854 |
+| S2 | 205 | 56.1% | +0.176% | 0.166% | +8,967 | +1,838,295 | −225,272 |
+| **S3** | **124** | 54.8% | +0.152% | 0.242% | +5,245 | +650,335 | −217,466 |
+| 前日低 | 313 | 55.0% | +0.100% | 0.149% | +1,992 | +623,627 | −595,854 |
+
+- S3's mean (+0.152%) sits inside the noise of "buy any close" (+0.108%); its ±0.242% band covers zero. The profit is the bull market's overnight drift, which every close collected too. By year S3 lost NT$331,050 in 2024 and made NT$407,379 in 2025.
+- 1-minute version (`data/tx-1m`, day session, first 1-minute close back above the level after a trade below it): S3 fired twice in 2026/09/09 .. 09/30 — 9/11 at 12:02 (−377 points to the next close) and 9/14 at 09:00 (+205). Two trades say nothing; the archive needs months.
+
+Data: `research/data/tx_daily.csv` (all outright TX months, day session, TAIFEX's daily futures report), rebuilt by `research/fetch_tx_daily.py` — its September 2026 download matched the committed rows exactly.
