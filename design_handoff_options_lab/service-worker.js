@@ -1,8 +1,8 @@
 // Options Lab service worker.
 // Strategy: cache-first for the app shell + same-origin assets, network-first for HTML
-// and the daily data snapshots (taifex-eod.js / ib-eod.js).
+// and the daily data snapshots (taifex-eod.js / taifex-history.js / ib-eod.js).
 // Bumping CACHE_VERSION purges old caches.
-const CACHE_VERSION = 'options-lab-v36';
+const CACHE_VERSION = 'options-lab-v37';
 const APP_SHELL = [
   './',
   './index.html',
@@ -13,12 +13,14 @@ const APP_SHELL = [
   './obsidian3.jsx',
   './option-chain.jsx',
   './help.jsx',
+  './positioning.jsx',
   './tweaks-panel.jsx',
   './surface3d.js',
   './iv-surface.js',
   './products.js',
   './data-live.js',
   './taifex-eod.js',
+  './taifex-history.js',
   './ib-eod.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
@@ -63,7 +65,7 @@ self.addEventListener('fetch', (event) => {
   // Daily data snapshots: network-first too. The workflow rebuilds them every
   // trading day without touching CACHE_VERSION, so cache-first froze each
   // visitor on the snapshot from the day the worker installed.
-  if (/\/(taifex|ib)-eod\.js$/.test(url.pathname)) {
+  if (/\/(taifex-eod|taifex-history|ib-eod)\.js$/.test(url.pathname)) {
     event.respondWith(networkFirst(req));
     return;
   }
