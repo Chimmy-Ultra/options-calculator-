@@ -137,6 +137,10 @@ python3 -m http.server 8080
 | `GET /api/oi/txo?expiry=20260916` | 該到期日**全部履約價**的未平倉（期交所前一交易日）`{date, prevDate, rows: [{strike, call: {oi, oiChg, vol, settle}, put}], maxCallOi, maxPutOi, totals}`；只有 `PRODUCTS` 標了 `"oi": "taifex"` 的商品有，其他回 404 |
 | `GET /api/market/txo` | 籌碼（期交所前一交易日）`{pcRatio: {ratio, chg, series[23 日]}, foreign: {net, chg, byContract}, top10: {net, chg, specificNet, month}}`。外資淨未平倉是大台＋小台/4＋微台/20 的大台當量口數（期交所大額交易人表自己的換算） |
 | `GET /api/twse/txo` | 台股籌碼日報（證交所前一交易日）`{date, institutional: [{name, buy, sell, net}]（元）, margin: {項目: {prev, today}}}`：三大法人買賣超 + 融資融券餘額（`BFI82U` / `MI_MARGN`，證交所 307 限流會暫停重試） |
+| `GET /api/optpos/txo` | 臺指選擇權籌碼（期交所前一交易日）`{inst: {rows: {foreign/trust/dealer: {call/put: {netOi, netAmt(千元), chgOi…}}}, series}, large: {filters: {all/weekly/front: {call/put: {top5/top10/specific: {buy, sell, net, netPct, chg}}}}}}`（`callsAndPutsDateDown` / `largeTraderOptDown`） |
+| `GET /api/margin/txo` | 臺指選擇權風險保證金 A / B / C（結算 / 維持 / 原始）與更新日期（期交所 `indexMarging`） |
+| `GET /api/sessions/txo` | 台指期日夜盤拆解：夜盤對前日結算、日盤對夜盤收，各自 OHLC 與跳空（期交所期貨每日行情） |
+| `GET /api/dividends/txo` | 各契約除息點數（推算：證交所 `TWT48U` 現金股利 ÷ 前收 × 期交所成分股權重 × 加權指數；期交所沒有公布預估值） |
 | `GET /api/premarket/txo` | 盤前脈絡（走 IB）`{source, asOf, marketDataType, rows: [{key, symbol, localSymbol, exchange, last, prevClose, chg, chgPct, high, low, time, status}]}`：ES / NQ 近月、費半 SOX、VIX、台積電 ADR（TSM）與 2330、美元／台幣（SGX 期貨，報價為每美元台幣）。合約表在 `main.py` 的 `PREMARKET`；IB 沒連上回 503；每列 `status` = `ok` / `no-data`（有合約沒報價，通常是沒訂閱）/ `no-contract` |
 
 `/api/positions` 只回 secType == FOP 且 symbol / tradingClass 對得上的部位；premium 已換算成

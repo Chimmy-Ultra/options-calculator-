@@ -262,24 +262,34 @@ def _fetch_pc_ratio() -> list:
     return sorted(out, key=lambda x: x["date"])
 
 
-def _fetch_pc_ratio_csv(days: int = 30) -> list:
+def _fetch_pc_ratio_csv(days: int = 100) -> list:
     """The same rows from the website's Put/Call 比 download, which TAIFEX posts
     on the day; the OpenAPI copy above lags one session (30 snapshots from
     2026/09/15 to 11/02 showed it a session behind every time they were built
     on the day itself). Columns are matched by name, since only this download
     spells them in Chinese. The end date steps back like the institutional
-    download in case a non-trading day is rejected."""
+    download in case a non-trading day is rejected. The download refuses a
+    window much past a month (an 8/01-11/02 request answered an error page),
+    so `days` is walked in 30-day windows; an older window that fails ends the
+    walk and keeps what is newer."""
     rows, err = None, None
     for back in range(7):
         end = date.today() - timedelta(days=back)
         try:
-            rows = _post_csv(PC_CSV_URL, {"queryStartDate": (end - timedelta(days=days)).strftime("%Y/%m/%d"),
+            rows = _post_csv(PC_CSV_URL, {"queryStartDate": (end - timedelta(days=29)).strftime("%Y/%m/%d"),
                                           "queryEndDate": end.strftime("%Y/%m/%d")})
             break
         except ValueError as e:
             err = e
     if rows is None:
         raise err or ValueError("pcRatioDown failed")
+    while (date.today() - end).days + 30 < days:
+        end = end - timedelta(days=30)
+        try:
+            rows += _post_csv(PC_CSV_URL, {"queryStartDate": (end - timedelta(days=29)).strftime("%Y/%m/%d"),
+                                           "queryEndDate": end.strftime("%Y/%m/%d")})
+        except ValueError:
+            break
 
     def col(r, test):
         return next((v for k, v in r.items() if k and test(k)), None)
@@ -364,6 +374,159 @@ def _fetch_large_traders(days: int = 12) -> dict:
     return out
 
 
+def _post_csv_back(url: str, form: dict, days: int, tries: int = 7) -> list:
+    """_post_csv over [end - days, end], stepping the end date back while the
+    download rejects it (non-trading days answer with an error page)."""
+    err = None
+    for back in range(tries):
+        end = date.today() - timedelta(days=back)
+        try:
+            return _post_csv(url, {**form, "queryStartDate": (end - timedelta(days=days)).strftime("%Y/%m/%d"),
+                                   "queryEndDate": end.strftime("%Y/%m/%d")})
+        except ValueError as e:
+            err = e
+    raise err or ValueError(f"{url.rsplit('/', 1)[-1]} failed")
+
+
+# ── TXO positions by trader type and by large trader ───────────────────────
+# 選擇權買賣權分計 (callsAndPutsDateDown): 自營商 / 投信 / 外資及陸資 long, short
+# and net OI per call / put, in contracts and in 契約金額 (千元).
+# 選擇權大額交易人 (largeTraderOptDown): top-5 / top-10 long (買方) and short
+# (賣方) per call / put with the whole market's OI, for all contracts
+# (999999), the weeklies together (666666) and the front month (YYYYMM).
+# Trader type 0 = all top traders, 1 = the 特定法人 among them. This download
+# ignores its contract filter and answers every option product, so rows are
+# filtered on TXO here. Both formats verified against the live endpoints
+# on 2026/11/02.
+OPT_INST_CSV_URL = "https://www.taifex.com.tw/cht/3/callsAndPutsDateDown"
+LARGE_OPT_CSV_URL = "https://www.taifex.com.tw/cht/3/largeTraderOptDown"
+INST_NAMES = {"外資及陸資": "foreign", "投信": "trust", "自營商": "dealer"}
+
+
+def _fetch_inst_options(days: int = 20) -> dict:
+    """{date: {who: {call|put: {longOi, shortOi, netOi, longAmt, shortAmt, netAmt}}}}, amounts in 千元."""
+    rows = _post_csv_back(OPT_INST_CSV_URL, {"commodityId": "TXO"}, days)
+    out: dict = {}
+    for r in rows:
+        who = INST_NAMES.get(r.get("身份別", ""))
+        side = {"CALL": "call", "PUT": "put"}.get(r.get("買賣權別", "").upper())
+        if not who or not side or "選擇權" not in r.get("商品名稱", ""):
+            continue
+        v = {k: int(_num(r.get(c), 0) or 0) for k, c in (
+            ("longOi", "買方未平倉口數"), ("shortOi", "賣方未平倉口數"), ("netOi", "未平倉口數買賣淨額"),
+            ("longAmt", "買方未平倉契約金額(千元)"), ("shortAmt", "賣方未平倉契約金額(千元)"), ("netAmt", "未平倉契約金額買賣淨額(千元)"))}
+        out.setdefault(r["日期"], {}).setdefault(who, {})[side] = v
+    if not out:
+        raise ValueError("callsAndPutsDateDown had no TXO rows")
+    return out
+
+
+def _inst_options_block(raw: dict) -> dict:
+    days = sorted(raw)
+    cur, prev = days[-1], (days[-2] if len(days) > 1 else None)
+    rows = {}
+    for who in INST_NAMES.values():
+        c = raw[cur].get(who)
+        if not c:
+            continue
+        p = raw[prev].get(who) if prev else None
+        rows[who] = {side: {**c[side], "chgOi": (c[side]["netOi"] - p[side]["netOi"]) if p else None,
+                            "chgAmt": (c[side]["netAmt"] - p[side]["netAmt"]) if p else None}
+                     for side in ("call", "put") if side in c}
+    series = [{"date": d, **{who: [x.get("call", {}).get("netOi"), x.get("put", {}).get("netOi"),
+                                   x.get("call", {}).get("netAmt"), x.get("put", {}).get("netAmt")]
+                             for who, x in raw[d].items()}} for d in days[-10:]]
+    return {"source": "taifex", "date": cur, "prevDate": prev, "unitAmt": "NT$ thousand", "rows": rows,
+            # series rows: who -> [callNetOi, putNetOi, callNetAmt, putNetAmt]
+            "series": series}
+
+
+def _fetch_large_options(days: int = 10) -> dict:
+    """{date: {month: {call|put: {traderType: {top5Buy, top5Sell, top10Buy, top10Sell, marketOi}}}}} for TXO."""
+    rows = _post_csv_back(LARGE_OPT_CSV_URL, {"contractId": "TXO"}, days)
+    out: dict = {}
+    for r in rows:
+        if r.get("商品(契約)") != "TXO":
+            continue
+        side = {"買權": "call", "賣權": "put"}.get(r.get("買賣權"))
+        if not side or r.get("前五大交易人買方") in (None, "-"):
+            continue
+        out.setdefault(r["日期"], {}).setdefault(r["到期月份(週別)"], {}).setdefault(side, {})[r["交易人類別"]] = {
+            "top5Buy": int(_num(r["前五大交易人買方"], 0)), "top5Sell": int(_num(r["前五大交易人賣方"], 0)),
+            "top10Buy": int(_num(r["前十大交易人買方"], 0)), "top10Sell": int(_num(r["前十大交易人賣方"], 0)),
+            "marketOi": int(_num(r["全市場未沖銷部位數"], 0)),
+        }
+    if not out:
+        raise ValueError("largeTraderOptDown had no TXO rows")
+    return out
+
+
+def _large_options_block(raw: dict) -> dict:
+    """Per filter (all / weekly / front) and side: top5 / top10 / 特定法人 (top10's
+    type-1 rows) long, short, net and each as % of the market's OI."""
+    days = sorted(raw)
+    cur, prev = days[-1], (days[-2] if len(days) > 1 else None)
+
+    def front(day):
+        ms = [m for m in raw[day] if m.isdigit() and m not in ("999999", "666666")]
+        return min(ms) if ms else None
+
+    def view(day, month):
+        sides = (raw.get(day) or {}).get(month) if month else None
+        if not sides:
+            return None
+        out = {}
+        for side, by in sides.items():
+            a, sp = by.get("0") or {}, by.get("1") or {}
+            mkt = a.get("marketOi") or 0
+            pct = (lambda x: round(x / mkt * 100, 2) if mkt else None)
+            grp = {}
+            for name, src, key in (("top5", a, "top5"), ("top10", a, "top10"), ("specific", sp, "top10")):
+                b, s = src.get(key + "Buy"), src.get(key + "Sell")
+                if b is None:
+                    continue
+                grp[name] = {"buy": b, "sell": s, "net": b - s, "buyPct": pct(b), "sellPct": pct(s), "netPct": pct(b - s)}
+            out[side] = {**grp, "marketOi": mkt}
+        return out
+
+    filters = {}
+    for key, cm, pm in (("all", "999999", "999999"), ("weekly", "666666", "666666"),
+                        ("front", front(cur), front(prev) if prev else None)):
+        v = view(cur, cm)
+        if not v:
+            continue
+        pv = view(prev, pm) if prev and pm else None
+        for side in v:
+            for name in ("top5", "top10", "specific"):
+                if name in v[side]:
+                    pn = ((pv or {}).get(side) or {}).get(name)
+                    v[side][name]["chg"] = (v[side][name]["net"] - pn["net"]) if pn else None
+        filters[key] = {"month": cm, **v}
+    return {"source": "taifex", "date": cur, "prevDate": prev, "filters": filters}
+
+
+async def options_positioning():
+    """三大法人 TXO positions + options large traders. Each part independent; None when neither answered."""
+    hit = _cache.get("optpos")
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+
+    async def part(fn, shape):
+        try:
+            return shape(await asyncio.to_thread(fn))
+        except Exception as e:
+            print(f"{fn.__name__} unavailable: {e}", file=sys.stderr)
+            return None
+
+    inst, large = await asyncio.gather(part(_fetch_inst_options, _inst_options_block), part(_fetch_large_options, _large_options_block))
+    if not (inst or large):
+        return None
+    data = {"source": "taifex", "inst": inst, "large": large,
+            "date": max(x["date"] for x in (inst, large) if x)}
+    _cache["optpos"] = (time.monotonic() + CACHE_TTL_S, data)
+    return data
+
+
 def _tx_equiv(by_contract: dict, who) -> float:
     """Net position summed across TX / MTX / TMF in TX-equivalent contracts.
     `who` picks the 身份別 (a prefix match: 外資 also matches 外資及陸資)."""
@@ -375,13 +538,96 @@ def _tx_equiv(by_contract: dict, who) -> float:
     return total
 
 
+def _fetch_fut_rows(commodity: str, days: int = 8) -> list:
+    """Futures daily rows for one commodity over the last `days` calendar days:
+    [{date, month, session: day|night, o, h, l, c, v, settle, oi}] (outrights only)."""
+    today = date.today()
+    text = _fetch_csv(today - timedelta(days=days), today, url=FUT_CSV_URL, commodity=commodity)
+    rows = list(csv.reader(io.StringIO(text)))
+    if len(rows) < 2 or len(rows[0]) < 2 or rows[0][1].strip() != "契約":
+        raise ValueError(f"futures download for {commodity} answered without a table")
+    col = {h.strip(): i for i, h in enumerate(rows[0])}
+    out = []
+    for r in rows[1:]:
+        if len(r) < len(col) - 1 or r[col["契約"]].strip() != commodity or "/" in r[col["到期月份(週別)"]]:
+            continue
+        sess = {"一般": "day", "盤後": "night"}.get(r[col["交易時段"]].strip())
+        if not sess:
+            continue
+        out.append({"date": r[col["交易日期"]].strip(), "month": r[col["到期月份(週別)"]].strip(), "session": sess,
+                    **{k: _num(r[col[c]]) for k, c in (("o", "開盤價"), ("h", "最高價"), ("l", "最低價"), ("c", "收盤價"), ("settle", "結算價"))},
+                    "v": int(_num(r[col["成交量"]], 0) or 0), "oi": _num(r[col["未沖銷契約數"]])})
+    return out
+
+
+RETAIL_CONTRACTS = (("MTX", "小型臺指期貨", "小台"), ("TMF", "微型臺指期貨", "微台"))
+
+
+def _retail_block(inst: dict, fut: dict) -> dict | None:
+    """散戶多空比 = (retail long − retail short) ÷ market OI, retail = the whole
+    market less the three institutional categories. Since retail long = OI −
+    institutional long and retail short = OI − institutional short, the
+    numerator is −(institutional net), so the ratio is −Σ三大法人淨未平倉 ÷ OI.
+    OI = the exchange's 未沖銷契約數 summed over every listed month (weeklies
+    included) on the day-session rows."""
+    out = {}
+    for code, name, label in RETAIL_CONTRACTS:
+        rows = fut.get(code) or []
+        oi_by_day: dict = {}
+        for r in rows:
+            if r["session"] == "day" and r["oi"] is not None:
+                oi_by_day[r["date"]] = oi_by_day.get(r["date"], 0) + int(r["oi"])
+        days = [d for d in sorted(oi_by_day) if name in (inst.get(d) or {})]
+        if not days:
+            continue
+        series = []
+        for d in days:
+            inst_net = sum((inst[d].get(name) or {}).values())
+            series.append({"date": d, "oi": oi_by_day[d], "instNet": inst_net, "retailNet": -inst_net,
+                           "ratio": round(-inst_net / oi_by_day[d] * 100, 2) if oi_by_day[d] else None})
+        cur = series[-1]
+        prev = series[-2] if len(series) > 1 else None
+        out[code] = {**cur, "label": label, "name": name, "prevDate": prev["date"] if prev else None,
+                     "prevRatio": prev["ratio"] if prev else None,
+                     "chg": round(cur["ratio"] - prev["ratio"], 2) if prev and cur["ratio"] is not None and prev["ratio"] is not None else None,
+                     "series": series}
+    return out or None
+
+
+def _sessions_block(rows: list) -> dict | None:
+    """TX 日夜盤拆解 for the latest trading day D, front month (most day-session
+    volume on D): the night session TAIFEX books under D (15:00 on the
+    previous business day to 05:00) against the previous day session's
+    settlement, then D's day session against that night close."""
+    days = sorted({r["date"] for r in rows if r["session"] == "day"})
+    if len(days) < 2:
+        return None
+    d, p = days[-1], days[-2]
+    day_rows = [r for r in rows if r["date"] == d and r["session"] == "day"]
+    front = max(day_rows, key=lambda r: r["v"])
+    m = front["month"]
+    night = next((r for r in rows if r["date"] == d and r["session"] == "night" and r["month"] == m), None)
+    prev = next((r for r in rows if r["date"] == p and r["session"] == "day" and r["month"] == m), None)
+    if not prev or not night or None in (night["o"], night["c"], front["o"], front["c"]):
+        return None
+    pick = lambda r: {k: r[k] for k in ("o", "h", "l", "c", "v")}
+    ref = prev["settle"]
+    return {"source": "taifex", "symbol": FUT_COMMODITY, "date": d, "prevDate": p, "month": m,
+            "prevSettle": ref, "settle": front["settle"],
+            "night": {**pick(night), "chg": night["c"] - ref if ref is not None else None,
+                      "gap": night["o"] - ref if ref is not None else None},
+            "day": {**pick(front), "chg": front["c"] - night["c"], "gap": front["o"] - night["c"],
+                    "chgVsSettle": front["c"] - ref if ref is not None else None}}
+
+
 def _market_blocks(pc: list | None, inst: dict | None, large: dict | None) -> dict:
     out: dict = {"source": "taifex"}
     if pc:
         cur, prev = pc[-1], (pc[-2] if len(pc) > 1 else None)
         out["pcRatio"] = {**cur, "prevRatio": prev["ratio"] if prev else None,
                           "chg": round(cur["ratio"] - prev["ratio"], 4) if prev else None,
-                          "series": [{"date": x["date"], "ratio": x["ratio"]} for x in pc]}
+                          "series": [{"date": x["date"], "ratio": x["ratio"], "volRatio": x["volRatio"],
+                                      "putOi": x["putOi"], "callOi": x["callOi"]} for x in pc]}
     if inst:
         days = sorted(inst)
         cur, prev = days[-1], (days[-2] if len(days) > 1 else None)
@@ -435,12 +681,191 @@ async def market():
         except Exception:
             return None
 
-    pc, inst, large = await asyncio.gather(part(_pc_ratio), part(_fetch_institutional), part(_fetch_large_traders))
+    pc, inst, large, mtx, tmf = await asyncio.gather(part(_pc_ratio), part(_fetch_institutional), part(_fetch_large_traders),
+                                                     part(lambda: _fetch_fut_rows("MTX")), part(lambda: _fetch_fut_rows("TMF")))
     if not (pc or inst or large):
         return None
     data = _market_blocks(pc, inst, large)
+    if inst and (mtx or tmf):
+        retail = _retail_block(inst, {"MTX": mtx, "TMF": tmf})
+        if retail:
+            data["retail"] = retail
     _cache["market"] = (time.monotonic() + CACHE_TTL_S, data)
     return data
+
+
+async def sessions():
+    """TX 日夜盤拆解 (see _sessions_block). None when TAIFEX did not answer."""
+    hit = _cache.get("sessions")
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    try:
+        data = _sessions_block(await asyncio.to_thread(_fetch_fut_rows, FUT_COMMODITY))
+    except Exception as e:
+        print(f"sessions unavailable: {e}", file=sys.stderr)
+        return None
+    if data:
+        _cache["sessions"] = (time.monotonic() + CACHE_TTL_S, data)
+    return data
+
+
+# ── Option seller margin (TAIFEX's own table and rule) ──────────────────────
+# indexMarging lists 結算 / 維持 / 原始 保證金 per product, including the TXO
+# 風險保證金 A / B / C values, with 更新日期 under the table. The rule that turns
+# them into a short leg's margin is on margingReqIndexOpt (verified
+# 2026/11/02): short call / put = 權利金市值 + MAX(A − 價外值, B), 價外值 =
+# MAX((K − 標的指數) × 50, 0) for a call and MAX((標的指數 − K) × 50, 0) for a
+# put; a same-expiry credit vertical = 履約價差 × 50, a debit vertical none; a
+# short straddle / strangle = MAX(call margin, put margin) + the lower side's
+# 權利金市值 + C. The frontend applies those rules; this only reads the values.
+MARGIN_URL = "https://www.taifex.com.tw/cht/5/indexMarging"
+MARGIN_ROWS = {"臺指選擇權風險保證金(A)值": "A", "臺指選擇權風險保證金(B)值": "B", "臺指選擇權風險保證金(C)值": "C", "臺股期貨": "TX"}
+
+
+def _fetch_margin() -> dict:
+    import re
+    req = urllib.request.Request(MARGIN_URL, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=40) as r:
+        html = r.read().decode("utf-8", "replace")
+    if "結算保證金" not in html or "原始保證金" not in html:
+        raise ValueError("margin table not found")
+    vals = {}
+    for tr in re.findall(r"<tr>(.*?)</tr>", html, flags=re.S):
+        cells = [re.sub(r"<[^>]+>|\s+", "", c) for c in re.findall(r"<td[^>]*>(.*?)</td>", tr, flags=re.S)]
+        if len(cells) == 4 and cells[0] in MARGIN_ROWS:
+            nums = [_num(c) for c in cells[1:]]
+            if None not in nums:
+                vals[MARGIN_ROWS[cells[0]]] = {"clearing": int(nums[0]), "maintenance": int(nums[1]), "initial": int(nums[2])}
+    if not all(k in vals for k in ("A", "B")):
+        raise ValueError(f"TXO A / B values not found (have {sorted(vals)})")
+    m = re.search(r"更新日期[：:]\s*(\d{4}/\d{1,2}/\d{1,2})", html)
+    return {"source": "taifex", "url": MARGIN_URL, "date": m.group(1) if m else None, "unit": "NT$", "values": vals, "mult": 50}
+
+
+async def margin():
+    hit = _cache.get("margin")
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    try:
+        data = await asyncio.to_thread(_fetch_margin)
+    except Exception as e:
+        print(f"margin unavailable: {e}", file=sys.stderr)
+        return None
+    _cache["margin"] = (time.monotonic() + CACHE_TTL_S, data)
+    return data
+
+
+# ── Final settlement prices of expired TXO contracts ───────────────────────
+# optIndxFSP lists every expired contract's 最後結算日 / 契約月份 / 最後結算價
+# (about the last year). The share of OI that expired worthless is measured on
+# the contract's own last reported OI: the expiry day's 一般 rows in the
+# options download still carry the positions held into settlement (202610F5:
+# 98,551 call / 59,945 put OI on 2026/10/30, up from the session before).
+FSP_URL = "https://www.taifex.com.tw/cht/5/optIndxFSP"
+
+
+def _fetch_fsp() -> list:
+    """[{date: 'YYYY/MM/DD', month: '202610F5', fsp}] newest first, TXO only."""
+    import re
+    req = urllib.request.Request(FSP_URL, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=40) as r:
+        html = r.read().decode("utf-8", "replace")
+    out = []
+    # the page writes its rows in upper case (<TR> / <TD>)
+    for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", html, flags=re.S | re.I):
+        cells = [re.sub(r"<[^>]+>|\s+", "", c) for c in re.findall(r"<td[^>]*>(.*?)</td>", tr, flags=re.S | re.I)]
+        if len(cells) >= 3 and re.fullmatch(r"\d{4}/\d{2}/\d{2}", cells[0]) and re.fullmatch(r"\d{6}(W\d|F\d)?", cells[1]):
+            fsp = _num(cells[2])
+            if fsp is not None:
+                out.append({"date": cells[0], "month": cells[1], "fsp": fsp})
+    if not out:
+        raise ValueError("final settlement table not found")
+    return out
+
+
+def settlement_record(rec: dict) -> dict | None:
+    """One expired contract: FSP plus the OI-weighted share of calls and puts
+    that expired worthless (call K >= FSP, put K <= FSP), on the expiry day's
+    reported OI. None when the options download has no rows for it."""
+    d = datetime.strptime(rec["date"], "%Y/%m/%d").date()
+    tbl = _parse(_fetch_csv(d, d))
+    e = next((v for k, v in tbl.items() if v["month"] == rec["month"]), None)
+    if not e or rec["date"] not in e["dates"]:
+        return None
+    strikes = e["dates"][rec["date"]]
+    tot = {"call": 0, "put": 0}
+    dead = {"call": 0, "put": 0}
+    for k, sides in strikes.items():
+        for side in ("call", "put"):
+            oi = (sides.get(side) or {}).get("oi") or 0
+            tot[side] += oi
+            if (side == "call" and k >= rec["fsp"]) or (side == "put" and k <= rec["fsp"]):
+                dead[side] += oi
+    exp_id = next(k for k, v in tbl.items() if v is e)
+    return {"id": exp_id, "month": rec["month"], "date": rec["date"], "fsp": rec["fsp"],
+            "callOi": tot["call"], "putOi": tot["put"],
+            "callWorthless": round(dead["call"] / tot["call"] * 100, 1) if tot["call"] else None,
+            "putWorthless": round(dead["put"] / tot["put"] * 100, 1) if tot["put"] else None}
+
+
+# ── 除息點數 per contract month (derived) ───────────────────────────────────
+# TAIFEX publishes no dividend-point estimate as data (searched 2026/11/02), so
+# this is derived from two exchange tables: TWSE's 除權除息預告表 (TWT48U: ex
+# date and cash dividend per share) × TAIFEX's TAIEX constituent weights, with
+# the previous close from TWSE's daily table:
+#     points = Σ cash dividend ÷ previous close × weight × TAIEX
+# summed over the constituents whose ex date falls on or before each
+# contract's last trading day. Rows whose amount is still 待公告 are counted,
+# not guessed; ETFs and other non-constituents drop out on the weight join.
+TWSE_EXDIV_URL = "https://www.twse.com.tw/rwd/zh/exRight/TWT48U"
+
+
+def _roc_date(s: str) -> str | None:
+    import re
+    m = re.match(r"(\d{2,3})年(\d{1,2})月(\d{1,2})日", s or "")
+    return f"{int(m.group(1)) + 1911:04d}{int(m.group(2)):02d}{int(m.group(3)):02d}" if m else None
+
+
+def _fetch_exdiv() -> list:
+    j = _twse_json(TWSE_EXDIV_URL, {"response": "json"})
+    if j.get("stat") != "OK":
+        raise ValueError(f"TWT48U stat {j.get('stat')}")
+    f = j.get("fields") or []
+    ix = {k: i for i, k in enumerate(f)}
+    out = []
+    for r in j.get("data") or []:
+        ex = _roc_date(str(r[ix["除權除息日期"]]))
+        if not ex or "息" not in str(r[ix["除權息"]]):
+            continue
+        cash = _num(str(r[ix["現金股利"]]))
+        out.append({"date": ex, "code": str(r[ix["股票代號"]]).strip(), "name": str(r[ix["名稱"]]).strip(), "cash": cash})
+    return out
+
+
+def dividend_points(weights: dict, daily: dict, exdiv: list, index_px: float, expiries: list, asof: str) -> dict:
+    w = {r["code"]: r for r in weights["rows"]}
+    items, pending = [], []
+    for x in exdiv:
+        if x["date"] <= asof or x["code"] not in w:
+            continue
+        if not x["cash"]:
+            pending.append({"date": x["date"], "code": x["code"], "name": x["name"]})
+            continue
+        close = (daily["stocks"].get(x["code"]) or {}).get("close")
+        if not close:
+            pending.append({"date": x["date"], "code": x["code"], "name": x["name"]})
+            continue
+        pts = x["cash"] / close * w[x["code"]]["weight"] / 100 * index_px
+        items.append({**x, "close": close, "weight": w[x["code"]]["weight"], "points": round(pts, 2)})
+    items.sort(key=lambda x: x["date"])
+    by_month = []
+    for e in expiries:
+        by_month.append({"id": e["id"], "label": e["label"], "month": e["month"],
+                         "points": round(sum(i["points"] for i in items if i["date"] <= e["id"]), 2),
+                         "pending": sum(1 for i in pending if i["date"] <= e["id"])})
+    return {"source": "twse+taifex", "method": "cash / prevClose x weight x TAIEX", "asOf": asof,
+            "weightsDate": weights.get("date"), "closeDate": daily.get("date"), "index": index_px,
+            "items": items, "pending": pending, "byExpiry": by_month}
 
 
 # ── 權值股 TOP20 ────────────────────────────────────────────────────────────
@@ -547,6 +972,8 @@ async def top20(n: int = 20):
             return None
 
     w, q = await asyncio.gather(part(_fetch_weights), part(_fetch_twse_daily))
+    if w and q:
+        _cache["twse_raw"] = (time.monotonic() + CACHE_TTL_S, (w, q))  # reused by dividend points
     if not w or not q:
         return None
     rows = []
@@ -959,6 +1386,9 @@ async def build_snapshot(product_id: str = "txo", n_expiries: int = 5, strike_pc
         intra = await intraday()
     except Exception:
         intra = None
+    optpos = await options_positioning()
+    mrg = await margin()
+    sess = await sessions()
     # TXO is priced off the TX future, not the index. Put-call parity on the
     # 2026/09/14 chain implies a forward of 45,780.6 against a futures
     # settlement of 45,780.0 and an index of 45,862.5 — the options quote the
@@ -1035,6 +1465,9 @@ async def build_snapshot(product_id: str = "txo", n_expiries: int = 5, strike_pc
                           r["put"]["oi"], r["put"]["oiChg"], r["put"]["settle"], prev.get(r["strike"], {}).get("put", {}).get("settle")]
                          for r in summ["rows"]]
 
+    term = term_structure(tbl, data_date, spot, asof_d)
+    divs = await dividends(idx.get("price"))
+
     return {
         "product": product_id, "source": "taifex-eod",
         "date": data_date, "prevDate": next(iter(oi.values()))["prevDate"] if oi else None,
@@ -1056,7 +1489,247 @@ async def build_snapshot(product_id: str = "txo", n_expiries: int = 5, strike_pc
         "twse": twse,
         "premarket": premarket,
         "intraday": intra,
+        "optPositions": optpos,
+        "margin": mrg,
+        "sessions": sess,
+        "term": term,
+        "dividends": divs,
     }
+
+
+async def dividends(index_px: float | None = None):
+    """除息點數 per listed contract (see dividend_points). None when TWSE's
+    schedule, the weights, the daily closes or the index did not answer."""
+    hit = _cache.get("dividends")
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    tbl = await table()
+    if tbl is None or await top20() is None or not _cache.get("twse_raw"):
+        return None
+    try:
+        if index_px is None:
+            index_px = (await asyncio.to_thread(_fetch_index))["price"]
+        asof = max(d for e in tbl.values() for d in e["dates"]).replace("/", "")
+        w, q = _cache["twse_raw"][1]
+        data = dividend_points(w, q, await asyncio.to_thread(_fetch_exdiv), index_px, term_expiries(tbl, asof), asof)
+    except Exception as e:
+        print(f"dividend points unavailable: {e}", file=sys.stderr)
+        return None
+    _cache["dividends"] = (time.monotonic() + CACHE_TTL_S, data)
+    return data
+
+
+def term_expiries(tbl: dict, asof: str) -> list:
+    """Every listed expiry after `asof` with the strip's label vocabulary."""
+    out = []
+    for e in sorted(x for x in tbl if x > asof):
+        label, _ = _expiry_label(tbl[e]["month"], e)
+        out.append({"id": e, "label": label, "month": tbl[e]["month"]})
+    return out
+
+
+# ── Daily history (taifex-history.js) ────────────────────────────────────────
+# The snapshot holds one session; the history file keeps what a single
+# session cannot show: P/C and 外資 net by date, per-expiry max pain / walls /
+# ATM IV, the 30-day constant-maturity IV, per-strike OI for the last few
+# sessions and every expired contract's final settlement. `--history PATH`
+# merges the new snapshot into it on each run; server/history_backfill.py
+# rebuilt the start of it from the git history of taifex-eod.js.
+
+HISTORY_OI_SESSIONS = 8
+HISTORY_OI_EXPIRIES = 3
+HISTORY_OI_BAND = 0.06      # strikes within ±6% of spot
+HISTORY_SETTLE_FROM = "2026/08/01"
+
+
+def max_pain(rows: list) -> float | None:
+    """rows [(strike, callOi, putOi)] ascending. Same definition as the
+    frontend's computeLevels: the strike minimising Σ call OI·max(0, S−K) +
+    Σ put OI·max(0, K−S); ties keep the lower strike."""
+    best = None
+    for k, _, _ in rows:
+        pain = sum(c * (k - ki) for ki, c, _ in rows if k > ki) + sum(p * (ki - k) for ki, _, p in rows if k < ki)
+        if best is None or pain < best[1]:
+            best = (k, pain)
+    return best[0] if best and best[1] > 0 else None
+
+
+def term_structure(tbl: dict, data_date: str, spot: float, asof_d: date, r: float = RISK_FREE_TW) -> list:
+    """ATM IV of every listed expiry, inverted from 結算價 against that expiry's
+    parity forward — the same inputs as the chains, but for the whole board,
+    so the 30-day point can usually be bracketed by the monthly contracts."""
+    import pricing
+    out = []
+    for e in sorted(tbl):
+        cur = tbl[e]["dates"].get(data_date)
+        if not cur or e <= asof_d.strftime("%Y%m%d"):
+            continue
+        dte = (datetime.strptime(e, "%Y%m%d").date() - asof_d).days
+        t = max(dte, 0.5) / 365.0
+        fwd = _parity_forward(cur, spot, t, r)
+        if fwd is None:
+            continue
+        k = min(cur, key=lambda x: abs(x - fwd))
+        ivs = []
+        for side, right in (("call", "C"), ("put", "P")):
+            st = (cur[k].get(side) or {}).get("settle")
+            if st:
+                iv = pricing.implied_vol(right, fwd, k, st, t, r, "b76")
+                if iv:
+                    ivs.append(iv)
+        if ivs:
+            out.append({"id": e, "month": tbl[e]["month"], "dte": dte, "fwd": round(fwd, 1), "atmK": k,
+                        "iv": round(sum(ivs) / len(ivs) * 100, 2)})
+    return out
+
+
+def cm30(term: list) -> dict | None:
+    """30-calendar-day constant-maturity ATM IV: total variance σ²·t linear in t
+    between the listed expiries that bracket 30 days. None (with no guess)
+    when nothing listed reaches past 30 days or nothing is inside it."""
+    lo = [x for x in term if x["dte"] <= 30]
+    hi = [x for x in term if x["dte"] >= 30]
+    if not lo or not hi:
+        return None
+    a, b = max(lo, key=lambda x: x["dte"]), min(hi, key=lambda x: x["dte"])
+    if a["id"] == b["id"]:
+        return {"iv": a["iv"], "pair": [a["id"], b["id"]]}
+    wa, wb = (a["iv"] / 100) ** 2 * a["dte"], (b["iv"] / 100) ** 2 * b["dte"]
+    w = wa + (wb - wa) * (30 - a["dte"]) / (b["dte"] - a["dte"])
+    return {"iv": round(math.sqrt(w / 30) * 100, 2), "pair": [a["id"], b["id"]]}
+
+
+def history_day(snap: dict) -> dict:
+    """The per-session record the history keeps, from one snapshot."""
+    spot = snap["spot"]["price"]
+    exp = []
+    for e in snap.get("expiries") or []:
+        o = (snap.get("oi") or {}).get(e["id"])
+        if not o:
+            continue
+        rows = sorted((r[0], r[1] or 0, r[5] or 0) for r in o["rows"])
+        ch = (snap.get("chains") or {}).get(e["id"]) or {}
+        atm = next((r for r in ch.get("rows") or [] if r.get("atm")), None)
+        iv = None
+        if atm and atm["call"].get("iv") and atm["put"].get("iv"):
+            iv = round((atm["call"]["iv"] + atm["put"]["iv"]) / 2, 2)
+        cw = max(rows, key=lambda r: r[1]) if rows else None
+        pw = max(rows, key=lambda r: r[2]) if rows else None
+        exp.append({"id": e["id"], "label": e["label"], "mp": max_pain(rows),
+                    "cw": cw[0] if cw and cw[1] else None, "pw": pw[0] if pw and pw[2] else None,
+                    "iv": iv, "fwd": ch.get("forward")})
+    rec = {"date": snap["date"], "spot": spot, "exp": exp}
+    term = snap.get("term")
+    if term:
+        rec["term"] = [[x["id"], x["dte"], x["iv"]] for x in term]
+        c = cm30(term)
+        rec["cm30"] = c["iv"] if c else None
+        rec["cm30Pair"] = c["pair"] if c else None
+    return rec
+
+
+def history_oi(snap: dict) -> dict:
+    spot = snap["spot"]["price"]
+    out = {}
+    for e in (snap.get("expiries") or [])[:HISTORY_OI_EXPIRIES]:
+        o = (snap.get("oi") or {}).get(e["id"])
+        if o:
+            out[e["id"]] = [[r[0], r[1] or 0, r[5] or 0] for r in sorted(o["rows"]) if abs(r[0] - spot) / spot <= HISTORY_OI_BAND]
+    return out
+
+
+def history_oi_from_table(h: dict, tbl: dict, snap: dict) -> dict:
+    """Per-strike OI for every session the options download holds (about a
+    week), for the snapshot's near expiries — fills sessions no snapshot was
+    committed for. The download is the source of the snapshot's own OI, so
+    the overlapping sessions read the same."""
+    spot = snap["spot"]["price"]
+    oi = dict(h.get("oi", {}))
+    for e in (snap.get("expiries") or [])[:HISTORY_OI_EXPIRIES]:
+        for d, strikes in (tbl.get(e["id"]) or {}).get("dates", {}).items():
+            oi.setdefault(d, {})[e["id"]] = [[k, (v.get("call") or {}).get("oi", 0), (v.get("put") or {}).get("oi", 0)]
+                                             for k, v in sorted(strikes.items()) if abs(k - spot) / spot <= HISTORY_OI_BAND]
+    h["oi"] = {d: oi[d] for d in sorted(oi)[-HISTORY_OI_SESSIONS:]}
+    return h
+
+
+def history_merge(h: dict | None, snap: dict) -> dict:
+    """Fold one snapshot into the history. Later snapshots of the same session
+    replace earlier ones; nothing older is rewritten except by its own date."""
+    h = h or {}
+    h.setdefault("version", 1)
+    days = {d["date"]: d for d in h.get("days", [])}
+    days[snap["date"]] = history_day(snap)
+    h["days"] = [days[d] for d in sorted(days)]
+    mk = snap.get("market") or {}
+    pc = {r[0]: r for r in h.get("pc", [])}
+    pcr = mk.get("pcRatio")
+    if pcr:
+        for x in pcr.get("series") or []:
+            if "volRatio" in x:
+                pc[x["date"]] = [x["date"], x["ratio"], x["volRatio"], x.get("putOi"), x.get("callOi")]
+            elif x["date"] not in pc:
+                pc[x["date"]] = [x["date"], x["ratio"], None, None, None]
+        pc[pcr["date"]] = [pcr["date"], pcr["ratio"], pcr.get("volRatio"), pcr.get("putOi"), pcr.get("callOi")]
+    h["pc"] = [pc[d] for d in sorted(pc)]
+    fx = {r[0]: r for r in h.get("fx", [])}
+    f = mk.get("foreign")
+    if f:
+        fx[f["date"]] = [f["date"], f["net"]]
+        if f.get("prevDate") and f.get("prevNet") is not None and f["prevDate"] not in fx:
+            fx[f["prevDate"]] = [f["prevDate"], f["prevNet"]]
+    h["fx"] = [fx[d] for d in sorted(fx)]
+    oi = dict(h.get("oi", {}))
+    oi[snap["date"]] = history_oi(snap)
+    h["oi"] = {d: oi[d] for d in sorted(oi)[-HISTORY_OI_SESSIONS:]}
+    h["settle"] = sorted(h.get("settle", []), key=lambda x: x["date"])
+    h["from"] = h["days"][0]["date"] if h["days"] else None
+    h["to"] = h["days"][-1]["date"] if h["days"] else None
+    return h
+
+
+def history_settlements(h: dict) -> dict:
+    """Add every expired contract on TAIFEX's final-settlement list (since
+    HISTORY_SETTLE_FROM) that the history lacks. A contract whose download
+    fails is left for the next run."""
+    have = {x["month"] for x in h.get("settle", [])}
+    try:
+        fsp = _fetch_fsp()
+    except Exception as e:
+        print(f"final settlement list unavailable: {e}", file=sys.stderr)
+        return h
+    new = []
+    for rec in fsp:
+        if rec["date"] < HISTORY_SETTLE_FROM or rec["month"] in have:
+            continue
+        try:
+            r = settlement_record(rec)
+        except Exception as e:
+            print(f"settlement {rec['month']} unavailable: {e}", file=sys.stderr)
+            r = None
+        if r:
+            new.append(r)
+        time.sleep(0.5)
+    h["settle"] = sorted(h.get("settle", []) + new, key=lambda x: x["date"])
+    return h
+
+
+def read_history(path: str) -> dict | None:
+    try:
+        text = open(path, encoding="utf-8").read()
+    except FileNotFoundError:
+        return None
+    return json.loads(text[text.index("=") + 1:].strip().rstrip(";"))
+
+
+def write_history(path: str, h: dict) -> int:
+    h.pop("builtAt", None)  # no timestamp: a run that adds nothing leaves the file byte-identical
+    text = ("// Generated by server/taifex.py --history: TAIFEX daily history for the deployed app.\n"
+            "// Do not edit; each run merges the new session in.\n"
+            "window.TAIFEX_HISTORY = " + json.dumps(h, separators=(",", ":")) + ";\n")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    return len(text)
 
 
 # ── 1-minute archive ────────────────────────────────────────────────────────
@@ -1133,6 +1806,15 @@ def main(argv):
         with open(out, "w", encoding="utf-8") as f:
             f.write(text)
         print("wrote", out)
+    if "--history" in argv:
+        hpath = argv[argv.index("--history") + 1]
+        h = history_merge(read_history(hpath), snap)
+        if _cache.get("table"):
+            h = history_oi_from_table(h, _cache["table"][1], snap)
+        h = history_settlements(h)
+        n = write_history(hpath, h)
+        print(f"history {h['from']} -> {h['to']}: {len(h['days'])} days, pc {len(h['pc'])}, fx {len(h['fx'])}, "
+              f"oi {len(h['oi'])} sessions, settle {len(h['settle'])} -> {n // 1024} KB; wrote {hpath}")
     return 0
 
 
