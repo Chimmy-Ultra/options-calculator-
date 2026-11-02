@@ -292,7 +292,8 @@ def _fetch_pc_ratio_csv(days: int = 30) -> list:
         ratio = _num(col(r, lambda k: "未平倉" in k and "比" in k))
         put_oi = _num(col(r, lambda k: k.startswith("賣權未平倉")))
         call_oi = _num(col(r, lambda k: k.startswith("買權未平倉")))
-        if ratio is None or put_oi is None or call_oi is None:
+        # The ratio must be put OI / call OI; a row that disagrees means a column was misread.
+        if ratio is None or not put_oi or not call_oi or abs(put_oi / call_oi * 100 - ratio) > 0.5:
             continue
         vol = _num(col(r, lambda k: "成交量" in k and "比" in k), 0) or 0
         out.append({"date": f"{int(parts[0]):04d}/{int(parts[1]):02d}/{int(parts[2]):02d}", "putOi": int(put_oi), "callOi": int(call_oi),
