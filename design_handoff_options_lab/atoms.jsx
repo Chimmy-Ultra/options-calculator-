@@ -88,7 +88,7 @@ function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, i
   const xs = useMemo(() => {
     let lo, hi;
     if (legs && legs.length > 0) {
-      const strikes = legs.map((l) => l.strike);
+      const strikes = legs.map((l) => (isFutLeg(l) ? l.premium : l.strike)); // a future anchors on its entry price
       const sLo = Math.min.apply(null, strikes);
       const sHi = Math.max.apply(null, strikes);
       const spread = sHi - sLo;
@@ -267,9 +267,17 @@ function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, i
   );
 }
 
+// Futures legs (type 'future') are a linear position in the product's
+// future: `premium` holds the entry price in points and `ratio` the contract's
+// point value in units of the product multiplier (TXO 大台 ×200 → 4). No
+// strike, no expiry, no IV — value is ratio × S, delta is ratio, every other Greek is 0.
+function isFutLeg(l) { return !!l && l.type === 'future'; }
+function legUnits(l) { return isFutLeg(l) ? (l.ratio > 0 ? l.ratio : 1) : 1; }
+
 function legPayoff(leg, S) {
   const { type, side, strike, premium, qty } = leg;
   const sign = side === 'long' ? 1 : -1;
+  if (isFutLeg(leg)) return sign * qty * legUnits(leg) * (S - premium);
   const intrinsic = type === 'call' ? Math.max(S - strike, 0) : Math.max(strike - S, 0);
   return sign * qty * (intrinsic - premium);
 }
@@ -355,6 +363,7 @@ function bsGreeks(type, S, K, ivPct, dte, r = 0.015, model = 'bs') {
 function legGreeks(leg, S, ivPct, dte, r = 0.015, model = 'bs') {
   const { type, side, strike: K, qty } = leg;
   const sign = side === 'long' ? 1 : -1;
+  if (isFutLeg(leg)) return { delta: sign * qty * legUnits(leg), gamma: 0, theta: 0, vega: 0 };
   const g = bsGreeks(type, S, K, ivPct, dte, r, model);
   return {
     delta: sign * qty * g.delta,
@@ -381,8 +390,9 @@ function portfolioGreeks(legs, S, ivPct, dte, r = 0.015, model = 'bs') {
 // the horizon at which "at expiry" curves and metrics are evaluated — later
 // legs still carry time value there. Legs without dte use the workspace dte.
 function frontDte(legs, dte) {
-  if (!legs || !legs.length) return dte;
-  return Math.min.apply(null, legs.map((l) => (l.dte != null ? l.dte : dte)));
+  const opts = (legs || []).filter((l) => !isFutLeg(l)); // futures do not expire here
+  if (!opts.length) return dte;
+  return Math.min.apply(null, opts.map((l) => (l.dte != null ? l.dte : dte)));
 }
 
 // Mark-to-model portfolio VALUE in points, `daysElapsed` days from now.
@@ -393,6 +403,7 @@ function frontDte(legs, dte) {
 function portfolioValuePts(legs, S, ivPct, daysElapsed, dte, r = 0.015, model = 'bs') {
   return legs.reduce((acc, l) => {
     const sign = l.side === 'long' ? 1 : -1;
+    if (isFutLeg(l)) return acc + sign * l.qty * legUnits(l) * S;
     const legDte = l.dte != null ? l.dte : dte;
     const T = Math.max(legDte - daysElapsed, 0);
     const v = T <= 0
@@ -403,21 +414,32 @@ function portfolioValuePts(legs, S, ivPct, daysElapsed, dte, r = 0.015, model = 
 }
 // Entry cost of a portfolio in points (Σ sign·qty·premium). P&L = value − cost.
 function portfolioCostPts(legs) {
-  return legs.reduce((a, l) => a + (l.side === 'long' ? 1 : -1) * l.qty * l.premium, 0);
+  return legs.reduce((a, l) => a + (l.side === 'long' ? 1 : -1) * l.qty * legUnits(l) * l.premium, 0);
+}
+// Net option premium in points: + credit received, − debit paid. Futures legs
+// carry an entry price, not a premium, so they are left out.
+function netPremiumPts(legs) {
+  return legs.reduce((a, l) => a + (isFutLeg(l) ? 0 : (l.side === 'long' ? -1 : 1) * l.premium * l.qty), 0);
 }
 
 // Estimated round-trip transaction cost (commission + tax) for a portfolio, in
 // the product's currency. Per contract per side: a fixed `perSide` brokerage
 // fee plus `taxRate` of the premium notional (premium × mult). Both entry and
 // exit are charged (×2); the exit tax is approximated with the entry premium.
-// Fees are broker-dependent — the defaults live in products.js.
+// Fees are broker-dependent — the defaults live in products.js. A futures leg
+// pays the same commission and `futTaxRate` on its contract value
+// (price × mult × ratio) instead of the option tax on premium.
 function estFees(legs, P) {
   if (!P || !P.fees || !legs || !legs.length) return 0;
   const perSide = P.fees.perSide || 0;
   const taxRate = P.fees.taxRate || 0;
   const mult = P.mult || 1;
-  return legs.reduce((a, l) =>
-    a + Math.abs(l.qty) * (2 * perSide + 2 * taxRate * Math.abs(l.premium) * mult), 0);
+  return legs.reduce((a, l) => {
+    const tax = isFutLeg(l)
+      ? (P.futTaxRate || 0) * Math.abs(l.premium) * mult * legUnits(l)
+      : taxRate * Math.abs(l.premium) * mult;
+    return a + Math.abs(l.qty) * (2 * perSide + 2 * tax);
+  }, 0);
 }
 
 // Lognormal P&L distribution at expiry: integrate over standard normal grid.
@@ -487,6 +509,7 @@ function pnlDistribution(legs, spot, ivPct, dte, opts = {}) {
 // snapshots carry volume but not OI), so judging on OI would flag every leg as
 // thin. Spread is then the only liquidity signal.
 function legLiquidity(leg, rows, hasOI = true) {
+  if (isFutLeg(leg)) return { level: 'good', reason: 'futures' }; // not judged on the option chain
   const r = rows.find((rr) => rr.strike === leg.strike);
   if (!r) return { level: 'bad', reason: 'strike not listed' };
   const side = leg.type === 'call' ? r.call : r.put;
@@ -755,6 +778,7 @@ Object.assign(window, {
   STRATEGIES, DEFAULT_LEGS,
   legPayoff, normalPdf, normalCdf, legGreeks, portfolioGreeks, pnlDistribution,
   portfolioValuePts, portfolioCostPts, frontDte, estFees,
+  isFutLeg, legUnits, netPremiumPts,
   bsPrice, bsGreeks,
   legLiquidity, dataQuality,
   useViewport,
