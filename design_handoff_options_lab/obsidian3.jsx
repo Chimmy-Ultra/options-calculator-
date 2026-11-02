@@ -2082,8 +2082,17 @@ function TwseFlowsPanel({ W, light = false }) {
       dText: money ? yi(d * 1e3) : `${d < 0 ? '−' : d > 0 ? '+' : ''}${Math.abs(d).toLocaleString()} 張` };
   });
   const cell = { fontFamily: 'var(--font-mono)', textAlign: 'right', whiteSpace: 'nowrap' };
+  // Lead sentence: 外資, the total, and the margin-balance change, each in the exchange's own figures.
+  const fxRow = rows.find((r) => r.name.startsWith('外資及陸資')), tot = rows.find((r) => r.name === '合計');
+  const bs = (v) => (v > 0 ? '買超' : v < 0 ? '賣超' : '持平');
+  const fin = margin.find((x) => x.k === '融資(交易單位)');
   return (
     <div>
+      {(fxRow || tot) && <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.4, marginBottom: 8 }}>
+        {fxRow && <>外資{bs(fxRow.net)} <span style={{ color: col(fxRow.net) }}>{(Math.abs(fxRow.net) / 1e8).toFixed(1)} 億</span></>}
+        {tot && <>{fxRow ? '，' : ''}三大法人合計{bs(tot.net)} <span style={{ color: col(tot.net) }}>{(Math.abs(tot.net) / 1e8).toFixed(1)} 億</span></>}
+        {fin && fin.d !== 0 && <>；融資餘額{fin.d > 0 ? '增' : '減'} {Math.abs(fin.d).toLocaleString()} 張</>}
+      </div>}
       <div className="mono" style={{ fontSize: 9.5, color: dim, marginBottom: 3 }}>三大法人買賣超（億元）</div>
       {rows.map((r) => {
         const total = r.name === '合計';
