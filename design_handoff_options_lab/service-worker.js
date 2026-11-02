@@ -1,7 +1,8 @@
 // Options Lab service worker.
-// Strategy: cache-first for the app shell + same-origin assets, network-first for HTML.
+// Strategy: cache-first for the app shell + same-origin assets, network-first for HTML
+// and the daily data snapshots (taifex-eod.js / ib-eod.js).
 // Bumping CACHE_VERSION purges old caches.
-const CACHE_VERSION = 'options-lab-v35';
+const CACHE_VERSION = 'options-lab-v36';
 const APP_SHELL = [
   './',
   './index.html',
@@ -56,6 +57,14 @@ self.addEventListener('fetch', (event) => {
   // Cross-origin (CDN React/Three.js etc.): pass through, but also stash in cache.
   if (url.origin !== self.location.origin) {
     event.respondWith(staleWhileRevalidate(req));
+    return;
+  }
+
+  // Daily data snapshots: network-first too. The workflow rebuilds them every
+  // trading day without touching CACHE_VERSION, so cache-first froze each
+  // visitor on the snapshot from the day the worker installed.
+  if (/\/(taifex|ib)-eod\.js$/.test(url.pathname)) {
+    event.respondWith(networkFirst(req));
     return;
   }
 
