@@ -20,6 +20,17 @@
       // transaction tax on the premium notional (premium × mult). Broker-dependent
       // — tune to your own account.
       fees: { perSide: 20, taxRate: 0.001 },
+      // Futures that can sit in a position beside the options. `ratio` = the
+      // future's point value in units of this product's ×50: 大台 ×200, 小台 ×50,
+      // 微台 ×10. Taiwan's futures transaction tax on stock-index futures is
+      // 0.002% of contract value (vs 0.1% of premium on options); commission
+      // reuses perSide above.
+      futures: [
+        { id: 'TX', label: '大台', ratio: 4 },
+        { id: 'MTX', label: '小台', ratio: 1 },
+        { id: 'TMF', label: '微台', ratio: 0.2 },
+      ],
+      futTaxRate: 0.00002,
       settleNote: '13:30',
       ivBase: { weekly: 22, monthly: 24 },
       // 即時資料源：'sinopac' = 永豐金 Shioaji（見 server/sinopac.py）。
@@ -227,6 +238,8 @@
       settleNote: '週三 SOQ',
       ivBase: { std: 90 },
       fees: { perSide: 2.5, taxRate: 0 },
+      // VX future (×US$1,000) is ten option multipliers (×US$100).
+      futures: [{ id: 'VX', label: 'VX', ratio: 10 }],
       live: 'ib', livePositions: false,
       ib: null,
       mockExpiries: [
@@ -315,6 +328,11 @@
   ];
 
   window.PRODUCTS = PRODUCTS;
+  // The futures a position can hold for a product. Futures options are
+  // one future per option at the same multiplier, so the default is ratio 1.
+  window.futuresOf = function (P) {
+    return (P && P.futures) || [{ id: P ? P.code : 'FUT', label: P ? P.code : '期貨', ratio: 1 }];
+  };
   window.getProduct = function (id) {
     return PRODUCTS.find((p) => p.id === id) || PRODUCTS[0];
   };
