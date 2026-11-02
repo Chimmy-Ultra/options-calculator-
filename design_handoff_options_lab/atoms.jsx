@@ -547,22 +547,41 @@ function dataQuality(legs, rows) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Cross-section: P&L vs spot at fixed DTE
-function CrossSection({ theme = 'light', height = 110, width = 320, dte = 30 }) {
+// P&L of the position today (no time passed) across underlying prices, ±8%
+// around spot. It used to draw the stylised demo surface's curve
+// (OptionsSurface.pnlValue), which ignored the position entirely.
+function CrossSection({ legs = [], spot, iv = 24, dte = 30, r = 0.015, model = 'bs', mult = 1, cur = '', theme = 'light', height = 110, width = 320 }) {
   const W = width, H = height, pad = 12;
   const N = 60;
-  const pts = [];
-  for (let i = 0; i <= N; i++) {
-    const x = -1 + (2 * i) / N;
-    const y = window.OptionsSurface.pnlValue(x, 1 - dte / 60);
-    pts.push([pad + (i / N) * (W - pad * 2), H / 2 - y * (H / 2 - pad) * 1.6]);
+  const dark = theme === 'dark';
+  const axis = dark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.10)';
+  const stroke = dark ? '#cdd3df' : '#1d1d22';
+  const muted = dark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)';
+  if (!legs.length || !(spot > 0)) {
+    return <div style={{ height: H, display: 'grid', placeItems: 'center', fontSize: 11, color: muted }}>沒有部位</div>;
   }
-  const path = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
-  const axis = theme === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.10)';
-  const stroke = theme === 'dark' ? '#cdd3df' : '#1d1d22';
+  const lo = spot * 0.92, hi = spot * 1.08;
+  const cost = portfolioCostPts(legs);
+  const xs = [], ys = [];
+  for (let i = 0; i <= N; i++) {
+    const S = lo + ((hi - lo) * i) / N;
+    xs.push(S);
+    ys.push(portfolioValuePts(legs, S, iv, 0, dte, r, model) - cost);
+  }
+  const maxAbs = Math.max(1e-9, ...ys.map(Math.abs));
+  const px = (i) => pad + (i / N) * (W - pad * 2);
+  const py = (v) => H / 2 - (v / maxAbs) * (H / 2 - pad);
+  const path = ys.map((v, i) => `${i === 0 ? 'M' : 'L'}${px(i).toFixed(1)},${py(v).toFixed(1)}`).join(' ');
+  const sx = pad + ((spot - lo) / (hi - lo)) * (W - pad * 2);
+  const fmt = (v) => `${v >= 0 ? '+' : '−'}${cur}${Math.round(Math.abs(v * mult)).toLocaleString()}`;
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} style={{ display: 'block' }}>
       <line x1={pad} x2={W - pad} y1={H / 2} y2={H / 2} stroke={axis} strokeDasharray="2 3" />
+      <line x1={sx} x2={sx} y1={pad} y2={H - pad} stroke={axis} />
       <path d={path} fill="none" stroke={stroke} strokeWidth="1.5" />
+      <text x={pad} y={H - 2} fontSize="9" fill={muted} style={{ fontFamily: 'var(--font-mono)' }}>{Math.round(lo).toLocaleString()}</text>
+      <text x={W - pad} y={H - 2} fontSize="9" fill={muted} textAnchor="end" style={{ fontFamily: 'var(--font-mono)' }}>{Math.round(hi).toLocaleString()}</text>
+      <text x={W - pad} y={pad} fontSize="9" fill={muted} textAnchor="end" style={{ fontFamily: 'var(--font-mono)' }}>今天 · 現價處 {fmt(portfolioValuePts(legs, spot, iv, 0, dte, r, model) - cost)}</text>
     </svg>
   );
 }

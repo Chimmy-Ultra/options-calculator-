@@ -1190,7 +1190,7 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
         <div className="seg" style={{ display: 'flex', marginBottom: 8 }}>
           {analysisTabs.map((tab) => <button key={tab.id} className={rv === tab.id ? 'on' : ''} style={{ flex: 1 }} onClick={() => setView(tab.id)}>{tab.label}</button>)}
         </div>
-        {rv === 'cross' && <CrossSection theme={theme} dte={dte} height={140} width={304} />}
+        {rv === 'cross' && <CrossSection legs={legs} spot={spot} iv={iv} dte={dte} r={P.r / 100} model={P.model} mult={P.mult} cur={P.cur} theme={theme} height={140} width={304} />}
         {rv === 'greeks' && <GreeksProfile legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={140} width={304} model={P.model} r={P.r / 100} />}
         {rv === 'dist' && <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={140} width={304} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />}
         {rv === 'attr' && <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={150} width={304} baseSpot={P.defaultSpot} baseIv={P.defaultIv} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />}
