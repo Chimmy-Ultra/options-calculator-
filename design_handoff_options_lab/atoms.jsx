@@ -602,7 +602,7 @@ function Slider({ label, value, min, max, step = 1, onChange, suffix = '', theme
 // a per-leg expiry <select> so calendars / diagonals can be built; `defaultDte`
 // is the workspace expiry a dte-less leg falls back to. Mobile omits both props,
 // keeping its narrower layout unchanged.
-function LegEditor({ legs, onChange, theme = 'light', expiries, defaultDte }) {
+function LegEditor({ legs, onChange, theme = 'light', expiries, defaultDte, futures }) {
   const dark = theme === 'dark';
   const headerColor = dark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.55)';
   const rowBg = dark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.55)';
@@ -646,6 +646,28 @@ function LegEditor({ legs, onChange, theme = 'light', expiries, defaultDte }) {
                 : (dark ? '#5fa3d4' : '#2a5e8c'),
             }}
           >{leg.side === 'long' ? '＋買' : '－賣'}</button>
+          {isFutLeg(leg) ? (() => {
+            // Futures row: the type button cycles the product's contracts
+            // (大台 → 小台 → 微台), the strike cell is empty and the price cell
+            // is the entry price.
+            const list = futures && futures.length ? futures : [{ id: leg.fut, label: '期貨', ratio: legUnits(leg) }];
+            const k = Math.max(0, list.findIndex((f) => f.id === leg.fut));
+            const cur = list[k], next = list[(k + 1) % list.length];
+            return (<>
+              <button
+                onClick={() => list.length > 1 && update(i, { fut: next.id, ratio: next.ratio })}
+                title={list.length > 1 ? `期貨 · 點一下換成${next.label}` : '期貨'}
+                style={{
+                  fontSize: 10.5, fontWeight: 700,
+                  padding: '4px 2px', borderRadius: 0, border: `1px solid ${rowBorder}`, cursor: list.length > 1 ? 'pointer' : 'default', fontFamily: 'inherit',
+                  background: dark ? 'rgba(240,192,104,0.10)' : 'rgba(217,154,44,0.10)', color: dark ? '#e8eaef' : '#1d1d22',
+                }}
+              >{cur.label}</button>
+              <span style={{ fontSize: 11, color: headerColor, fontFamily: 'var(--font-mono)' }}>期貨</span>
+              <NumField value={leg.premium} step={1} onChange={(v) => update(i, { premium: v })} dark={dark} />
+              {withExp && <span style={{ fontSize: 10, color: headerColor, textAlign: 'center' }}>—</span>}
+            </>);
+          })() : (<>
           <button
             onClick={() => update(i, { type: leg.type === 'call' ? 'put' : 'call' })}
             style={{
@@ -666,6 +688,7 @@ function LegEditor({ legs, onChange, theme = 'light', expiries, defaultDte }) {
               </select>
             );
           })()}
+          </>)}
           <NumField value={leg.qty} step={1} onChange={(v) => update(i, { qty: v })} dark={dark} align="right" />
           <button
             onClick={() => remove(i)}
@@ -683,6 +706,11 @@ function LegEditor({ legs, onChange, theme = 'light', expiries, defaultDte }) {
           >×</button>
         </div>
       ))}
+      {legs.some(isFutLeg) && (
+        <div style={{ fontSize: 10, color: headerColor, padding: '0 4px', lineHeight: 1.5 }}>
+          期貨列的價格欄是成交價。{(futures || []).filter((f) => f.ratio !== 1).map((f) => `${f.label} 1 口的點值是選擇權的 ${f.ratio} 倍`).join('，')}
+        </div>
+      )}
     </div>
   );
 }
