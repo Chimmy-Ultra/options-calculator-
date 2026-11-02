@@ -2124,6 +2124,8 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expi
   const dim = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
   const pc = M && M.pcRatio, fx = M && M.foreign, t10 = M && M.top10;
   const noMkt = isLive ? '期交所資料未載入' : '模擬模式沒有籌碼資料';
+  // A source that lags the others names its own date (TAIFEX's OpenAPI P/C feed ran a session behind, 2026-09/10).
+  const asOf = (x) => (x && x.date && M && M.date && x.date !== M.date ? ` · ${x.date.slice(5)}` : '');
   const tiles = (<>
         <LevelTile label={P.underlyingLabel || `現價 ${P.code}`} value={fmtP(spot)} color={spotChg == null ? LEVEL_COLORS.spot : spotChg >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down}
           sub={spotChg != null ? <><Chg v={spotChg} fmt={(x) => fmtP(x)} /> {`（${spotPct >= 0 ? '+' : ''}${spotPct.toFixed(2)}%）`}</> : (isLive ? liveLabel(live, P) : '模擬')} light={light} />
@@ -2139,11 +2141,11 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expi
         <LevelTile label="外資期貨淨部位" hk="foreign"
           value={fx ? `${fx.net > 0 ? '+' : ''}${fx.net.toLocaleString()}` : '—'}
           color={fx ? (fx.net >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down) : undefined}
-          sub={fx ? <>較前日 <Chg v={fx.chg} /></> : noMkt} light={light} />
+          sub={fx ? <>較前日 <Chg v={fx.chg} />{asOf(fx)}</> : noMkt} light={light} />
         <LevelTile label="十大交易人淨部位" hk="top10"
           value={t10 ? `${t10.net > 0 ? '+' : ''}${t10.net.toLocaleString()}` : '—'}
           color={t10 ? (t10.net >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down) : undefined}
-          sub={t10 ? <>較前日 <Chg v={t10.chg} /></> : noMkt} light={light} />
+          sub={t10 ? <>較前日 <Chg v={t10.chg} />{asOf(t10)}</> : noMkt} light={light} />
         <LevelTile label="預期波動 ±1σ" hk="expmove" color={LEVEL_COLORS.band}
           value={L.sigma1 != null ? `±${fmtP(Math.round(L.sigma1))}` : '—'}
           sub={L.sigma1 != null ? <>{fmtP(Math.round(spot - L.sigma1))}–{fmtP(Math.round(spot + L.sigma1))} · IV {L.atmIv.toFixed(1)}% · {expiry.dte} 天{L.straddle != null ? ` · 價平和×0.85 ${window.fmtPx(L.straddle * 0.85, P)}` : ''}</> : '沒有 IV'} light={light} />
@@ -2156,7 +2158,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expi
         <LevelTile label="P/C 比（全市場）" hk="pcratio"
           value={pc ? pc.ratio.toFixed(2) : '—'}
           color={pc ? (pc.ratio >= 1 ? LEVEL_COLORS.down : LEVEL_COLORS.up) : undefined}
-          sub={pc ? <>較前日 <Chg v={pc.chg} fmt={(x) => x.toFixed(2)} /></> : noMkt}
+          sub={pc ? <>較前日 <Chg v={pc.chg} fmt={(x) => x.toFixed(2)} />{asOf(pc)}</> : noMkt}
           right={pc ? <Spark series={pc.series} w={64} light={light} /> : null} light={light} />
   </>);
   const panels = [
