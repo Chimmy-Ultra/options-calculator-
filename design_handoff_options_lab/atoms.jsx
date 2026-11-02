@@ -416,6 +416,12 @@ function portfolioValuePts(legs, S, ivPct, daysElapsed, dte, r = 0.015, model = 
 function portfolioCostPts(legs) {
   return legs.reduce((a, l) => a + (l.side === 'long' ? 1 : -1) * l.qty * legUnits(l) * l.premium, 0);
 }
+// Expiry P&L slope as the underlying rises without bound: +1 per long call,
+// +ratio per long future, 0 for puts. Non-zero means max profit (slope > 0) or
+// max loss (slope < 0) has no cap — a scan over a finite range would invent one.
+function upsideSlope(legs) {
+  return legs.reduce((a, l) => a + (l.side === 'long' ? 1 : -1) * l.qty * (isFutLeg(l) ? legUnits(l) : l.type === 'call' ? 1 : 0), 0);
+}
 // Net option premium in points: + credit received, − debit paid. Futures legs
 // carry an entry price, not a premium, so they are left out.
 function netPremiumPts(legs) {
@@ -806,7 +812,7 @@ Object.assign(window, {
   STRATEGIES, DEFAULT_LEGS,
   legPayoff, normalPdf, normalCdf, legGreeks, portfolioGreeks, pnlDistribution,
   portfolioValuePts, portfolioCostPts, frontDte, estFees,
-  isFutLeg, legUnits, netPremiumPts,
+  isFutLeg, legUnits, netPremiumPts, upsideSlope,
   bsPrice, bsGreeks,
   legLiquidity, dataQuality,
   useViewport,

@@ -450,6 +450,8 @@ const GRID_DEFAULTS = {
   ],
 };
 const gridCap = (txt) => <span className="mono" style={{ fontSize: 9, opacity: 0.6 }}>{txt}</span>;
+// Max profit / loss text: an unbounded side reads 無上限 rather than a number.
+const fmtCap = (v, P, plus = false) => (Number.isFinite(v) ? `${plus ? '+' : ''}${P.cur}${Math.round(v).toLocaleString()}` : '無上限');
 const expCap = (e) => `${e.date} ${e.type === 'monthly' ? '月選' : e.label} · ${e.dte} 天`;
 const GRID_BODY = { position: 'absolute', top: 90, left: 12, right: 12, bottom: 12, zIndex: 5, overflowY: 'auto', overflowX: 'hidden' };
 
@@ -784,13 +786,17 @@ function Obsidian3() {
   const pnlNTD = pnlPts * P.mult;
   // Max profit / loss scanned at the front expiry (T0): near legs at intrinsic,
   // later legs keep time value. Single-expiry portfolios = Σ legPayoff as before.
+  // A position still rising (falling) as the underlying goes up has no cap:
+  // ±Infinity, shown as 無上限 (e.g. a long future, a naked short call).
   const maxProfit = uM(() => {
+    if (upsideSlope(legs) > 1e-9) return Infinity;
     const T0 = frontDte(legs, dte), cost = portfolioCostPts(legs);
     let m = -Infinity;
     for (let s = spot * 0.7; s <= spot * 1.3; s += P.strikeStep / 2) m = Math.max(m, portfolioValuePts(legs, s, iv, T0, dte, P.r / 100, P.model) - cost);
     return m * P.mult;
   }, [legs, spot, iv, dte, productId]);
   const maxLoss = uM(() => {
+    if (upsideSlope(legs) < -1e-9) return -Infinity;
     const T0 = frontDte(legs, dte), cost = portfolioCostPts(legs);
     let m = Infinity;
     for (let s = spot * 0.7; s <= spot * 1.3; s += P.strikeStep / 2) m = Math.min(m, portfolioValuePts(legs, s, iv, T0, dte, P.r / 100, P.model) - cost);
@@ -1168,9 +1174,9 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
               {pnlPts >= 0 ? '+' : ''}{pnlPts.toFixed(1)} 點 {P.unitLabel}
             </div>
             <div className="tnum" style={{ fontSize: 11, opacity: 0.6, marginTop: 8, whiteSpace: 'nowrap' }}>
-              最大獲利 <span style={{ color: '#f0c068' }}>+{P.cur}{Math.round(netMaxProfit).toLocaleString()}</span>
+              最大獲利 <span style={{ color: '#f0c068' }}>{fmtCap(netMaxProfit, P, true)}</span>
               <span style={{ opacity: 0.4 }}> · </span>
-              最大虧損 <span style={{ color: '#5fa3d4' }}>{P.cur}{Math.round(netMaxLoss).toLocaleString()}</span>
+              最大虧損 <span style={{ color: '#5fa3d4' }}>{fmtCap(netMaxLoss, P)}</span>
             </div>
           </div>
           <div style={{ width: 96, flexShrink: 0 }}>
@@ -1309,11 +1315,11 @@ function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, fees = 0,
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
         <div className="lt-tile" style={tile}>
           <div style={{ fontSize: 9, opacity: 0.6 }}>最大獲利</div>
-          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'var(--font-mono)', color: '#f0c068' }}>+{P.cur}{Math.round(netMaxProfit).toLocaleString()}</div>
+          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'var(--font-mono)', color: '#f0c068' }}>{fmtCap(netMaxProfit, P, true)}</div>
         </div>
         <div className="lt-tile" style={tile}>
           <div style={{ fontSize: 9, opacity: 0.6 }}>最大虧損</div>
-          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'var(--font-mono)', color: '#5fa3d4' }}>{P.cur}{Math.round(netMaxLoss).toLocaleString()}</div>
+          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'var(--font-mono)', color: '#5fa3d4' }}>{fmtCap(netMaxLoss, P)}</div>
         </div>
       </div>
   </>);
@@ -3136,9 +3142,9 @@ function MobileCalc({
               {netPnl >= 0 ? '+' : ''}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
             </div>
             <div className="tnum" style={{ fontSize: 10, opacity: 0.55, marginTop: 4 }}>
-              Max <span style={{ color: light ? '#8a6410' : '#f0c068' }}>+{P.cur}{Math.round(maxProfit - fees).toLocaleString()}</span>
+              Max <span style={{ color: light ? '#8a6410' : '#f0c068' }}>{fmtCap(maxProfit - fees, P, true)}</span>
               <span style={{ opacity: 0.4 }}> · </span>
-              Min <span style={{ color: light ? '#2b6a99' : '#5fa3d4' }}>{P.cur}{Math.round(maxLoss - fees).toLocaleString()}</span>
+              Min <span style={{ color: light ? '#2b6a99' : '#5fa3d4' }}>{fmtCap(maxLoss - fees, P)}</span>
             </div>
             {fees > 0 && (
               <div className="tnum" style={{ fontSize: 9, opacity: 0.42, marginTop: 2 }}>
