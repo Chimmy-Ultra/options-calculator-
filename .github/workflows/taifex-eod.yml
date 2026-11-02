@@ -5,6 +5,9 @@
 # Taipei; 08:30 UTC = 16:30 Taipei) and on demand. A weekend or holiday run
 # fetches the same last session and changes nothing, so it commits nothing.
 #
+# The same run merges the session into taifex-history.js (P/C, 外資 net,
+# per-expiry max pain / walls / IV, recent per-strike OI, final settlements).
+#
 # The same run archives TX 1-minute bars into data/tx-1m: TAIFEX deletes its
 # tick files after about two weeks, so any trading day this job misses is
 # picked up by the next run inside that window.
@@ -32,14 +35,14 @@ jobs:
         run: python3 taifex.py --archive-minutes ../data/tx-1m
       - name: Build snapshot
         working-directory: server
-        run: python3 taifex.py --write ../design_handoff_options_lab/taifex-eod.js
+        run: python3 taifex.py --write ../design_handoff_options_lab/taifex-eod.js --history ../design_handoff_options_lab/taifex-history.js
       - name: Commit if anything changed
         run: |
-          git add design_handoff_options_lab/taifex-eod.js data/tx-1m
+          git add design_handoff_options_lab/taifex-eod.js design_handoff_options_lab/taifex-history.js data/tx-1m
           if git diff --cached --quiet; then
             echo "nothing new"; exit 0
           fi
-          if git diff --cached --quiet -- design_handoff_options_lab/taifex-eod.js; then
+          if git diff --cached --quiet -- design_handoff_options_lab/taifex-eod.js design_handoff_options_lab/taifex-history.js; then
             MSG="chore: TX 1-minute bars $(git diff --cached --name-only -- data/tx-1m | xargs -n1 basename | sed 's/\.csv$//' | tr '\n' ' ')"
           else
             DATE=$(python3 -c "import re;print(re.search(r'\"date\":\"([^\"]+)\"', open('design_handoff_options_lab/taifex-eod.js').read()).group(1))")
