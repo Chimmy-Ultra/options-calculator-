@@ -220,6 +220,7 @@ def merge_into_chain(chain: dict, oi: dict | None) -> dict:
 # ── Daily positioning (籌碼) ──────────────────────────────────────────────────
 # Three more public TAIFEX sources, all published after the close:
 #   PutCallRatio (OpenAPI)        — market-wide TXO put/call OI + volume ratio, ~23 sessions
+#   pcRatioDown (CSV)             — the same ratio, posted on the day (OpenAPI lags a session)
 #   futContractsDateDown (CSV)    — 三大法人 futures positions by contract, by date
 #   largeTraderFutDown (CSV)      — 大額交易人 top-5 / top-10 positions, by date
 # 外資 net position is reported in TX-equivalent contracts using the exchange's
@@ -228,6 +229,7 @@ def merge_into_chain(chain: dict, oi: dict | None) -> dict:
 OPENAPI = "https://openapi.taifex.com.tw/v1/"
 INST_CSV_URL = "https://www.taifex.com.tw/cht/3/futContractsDateDown"
 LARGE_CSV_URL = "https://www.taifex.com.tw/cht/3/largeTraderFutDown"
+PC_CSV_URL = "https://www.taifex.com.tw/cht/3/pcRatioDown"
 TX_EQUIV = {"臺股期貨": 1.0, "小型臺指期貨": 0.25, "微型臺指期貨": 0.05}
 INST_IDS = ("TXF", "MXF", "TMF")
 FOREIGN = "外資"
@@ -258,6 +260,63 @@ def _fetch_pc_ratio() -> list:
         out.append({"date": f"{d[:4]}/{d[4:6]}/{d[6:]}", "putOi": int(_num(r.get("PutOI"), 0)), "callOi": int(_num(r.get("CallOI"), 0)),
                     "ratio": round((_num(r.get("PutCallOIRatio%"), 0) or 0) / 100, 4), "volRatio": round((_num(r.get("PutCallVolumeRatio%"), 0) or 0) / 100, 4)})
     return sorted(out, key=lambda x: x["date"])
+
+
+def _fetch_pc_ratio_csv(days: int = 30) -> list:
+    """The same rows from the website's Put/Call 比 download, which TAIFEX posts
+    on the day; the OpenAPI copy above lags one session (30 snapshots from
+    2026/09/15 to 11/02 showed it a session behind every time they were built
+    on the day itself). Columns are matched by name, since only this download
+    spells them in Chinese. The end date steps back like the institutional
+    download in case a non-trading day is rejected."""
+    rows, err = None, None
+    for back in range(7):
+        end = date.today() - timedelta(days=back)
+        try:
+            rows = _post_csv(PC_CSV_URL, {"queryStartDate": (end - timedelta(days=days)).strftime("%Y/%m/%d"),
+                                          "queryEndDate": end.strftime("%Y/%m/%d")})
+            break
+        except ValueError as e:
+            err = e
+    if rows is None:
+        raise err or ValueError("pcRatioDown failed")
+
+    def col(r, test):
+        return next((v for k, v in r.items() if k and test(k)), None)
+
+    out = []
+    for r in rows:
+        parts = (col(r, lambda k: k.startswith("日期")) or "").split("/")
+        if len(parts) != 3 or not all(x.isdigit() for x in parts):
+            continue
+        ratio = _num(col(r, lambda k: "未平倉" in k and "比" in k))
+        put_oi = _num(col(r, lambda k: k.startswith("賣權未平倉")))
+        call_oi = _num(col(r, lambda k: k.startswith("買權未平倉")))
+        # The ratio must be put OI / call OI; a row that disagrees means a column was misread.
+        if ratio is None or not put_oi or not call_oi or abs(put_oi / call_oi * 100 - ratio) > 0.5:
+            continue
+        vol = _num(col(r, lambda k: "成交量" in k and "比" in k), 0) or 0
+        out.append({"date": f"{int(parts[0]):04d}/{int(parts[1]):02d}/{int(parts[2]):02d}", "putOi": int(put_oi), "callOi": int(call_oi),
+                    "ratio": round(ratio / 100, 4), "volRatio": round(vol / 100, 4)})
+    if not out:
+        raise ValueError(f"pcRatioDown table has no usable rows (columns: {list(rows[0])})")
+    return sorted(out, key=lambda x: x["date"])
+
+
+def _pc_ratio() -> list:
+    """OpenAPI history with the website download laid over it by date, so the
+    newest session comes from the download and either source alone still
+    fills the tile."""
+    by_date, err = {}, None
+    for fn in (_fetch_pc_ratio, _fetch_pc_ratio_csv):
+        try:
+            for r in fn():
+                by_date[r["date"]] = r
+        except Exception as e:
+            err = e
+    if not by_date:
+        raise err or ValueError("no put/call ratio source answered")
+    return [by_date[d] for d in sorted(by_date)]
 
 
 def _fetch_institutional(days: int = 12) -> dict:
@@ -376,7 +435,7 @@ async def market():
         except Exception:
             return None
 
-    pc, inst, large = await asyncio.gather(part(_fetch_pc_ratio), part(_fetch_institutional), part(_fetch_large_traders))
+    pc, inst, large = await asyncio.gather(part(_pc_ratio), part(_fetch_institutional), part(_fetch_large_traders))
     if not (pc or inst or large):
         return None
     data = _market_blocks(pc, inst, large)
