@@ -68,14 +68,14 @@ function aggBars(bars, unit) {
 }
 
 // TXO market state（其他商品的合約規格在 products.js 的 window.PRODUCTS）
-const TXO_SPOT = 21850;
+const TXO_SPOT = 44000;
 const STRIKE_STEP = 50;
 // Default legs: a bull-call spread（ATM+1 檔 / ATM+5 檔），premium 用該商品的
 // 定價模型（TXO=BS、穀物=Black-76）在給定的 spot/iv 與到期日算出。
 // `spot` defaults to the product's placeholder, but the caller passes the real
-// one once a snapshot or the proxy has answered — TXO's placeholder is 21,850
-// against an actual index near 45,800, which put the whole default spread ten
-// thousand points away and flattened the payoff chart.
+// one once a snapshot or the proxy has answered — a placeholder far from the
+// market (TXO's was once 21,850 against an index near 45,800) put the whole
+// default spread thousands of points away and flattened the payoff chart.
 function defaultLegsFor(P, dte, spot) {
   const st = P.strikeStep;
   const s0 = (spot > 0) ? spot : P.defaultSpot;
@@ -584,8 +584,8 @@ function Obsidian3() {
   }
 
   // Re-centre the generated default spread on the first real spot. The product
-  // registry only carries a placeholder (TXO's is 21,850 against an index near
-  // 45,800), and the real one lands a moment later from the snapshot or the
+  // registry only carries a placeholder (TXO's once sat at 21,850 against an
+  // index near 45,800), and the real one lands a moment later from the snapshot or the
   // proxy — without this the opening position sits ten thousand points away and
   // the payoff chart and P&L table read flat everywhere. Only ever touches legs
   // this component generated itself; one edit and `legs` is a different array,
