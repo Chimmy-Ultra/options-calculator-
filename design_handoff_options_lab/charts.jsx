@@ -400,14 +400,14 @@ function DataQualityPill({ quality }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // P&L Attribution — first-order decomposition of current P&L vs. a baseline
-// (default baseline: spot=21850, iv=24%) into spot / IV / theta-per-day buckets.
+// (baseline: the market spot and the product's default IV) into spot / IV / theta-per-day buckets.
 //
 //   spot impact ≈ Δ * (currentSpot - baseSpot)        (× 50 NTD/pt)
 //   iv impact   ≈ V * (currentIV - baseIV)            (V is per-vol-pt, × 50)
 //   theta /day  ≈ Θ                                   (Θ is per-day, × 50)
 //
 // Renders 3 horizontal diverging bars centered on a 0-line; red = profit, teal = loss.
-function PnLAttribution({ legs, spot, iv, dte, theme = 'dark', height = 150, width = 304, baseSpot = 21850, baseIv = 24, ntdMult = 50, cur = 'NT$', model = 'bs', r = 0.015 }) {
+function PnLAttribution({ legs, spot, iv, dte, theme = 'dark', height = 150, width = 304, baseSpot = 44000, baseIv = 24, ntdMult = 50, cur = 'NT$', model = 'bs', r = 0.015 }) {
   const W = width, H = height, pad = 14;
   const pg = useMemoM(() => window.portfolioGreeks
     ? window.portfolioGreeks(legs, spot, iv, dte, r, model)

@@ -896,6 +896,12 @@ function Obsidian3() {
   }
 
   // ── Mobile / foldable layout — completely different shell.
+  // The market's own price, untouched by the What-if rail: the selected expiry's
+  // underlying future, else the quote, else the product's placeholder. Stress
+  // buttons and P&L attribution measure from here — they used P.defaultSpot,
+  // so on TXO a "−5%" button set spot to 20,757 against an index near 45,000.
+  const marketSpot = (spotUnderlying && spotUnderlying.price > 0) ? spotUnderlying.price
+    : ((quoteNow || (live && live.quote)) && (quoteNow || live.quote).last > 0) ? (quoteNow || live.quote).last : P.defaultSpot;
   if (vp.layout !== 'desk') {
     return (
       <MobileApp
@@ -911,7 +917,7 @@ function Obsidian3() {
         spotMin={spotMin} spotMax={spotMax}
         expiryId={expiryId} setExpiryId={setExpiryId} expiry={expiry}
         legs={legs} setLegs={setLegs} addLegFromChain={addLegFromChain}
-        spot={spot} setSpot={setSpot}
+        spot={spot} setSpot={setSpot} marketSpot={marketSpot}
         iv={iv} setIv={setIv}
         dte={dte}
         view={view} setView={setView}
@@ -1019,7 +1025,7 @@ function Obsidian3() {
           maxProfit={maxProfit} maxLoss={maxLoss} fees={fees}
           accent={accent} D={D} t={t}
           portfolioG={portfolioG} popValue={popValue} quality={quality} grid={grid}
-          margin={taifexExtra.margin} marginIdx={marginIdx}
+          margin={taifexExtra.margin} marginIdx={marginIdx} marketSpot={marketSpot}
         />
       )}
       {workspace === 'lab' && labView === '3d' && (
@@ -1038,7 +1044,7 @@ function Obsidian3() {
           pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss} fees={fees}
           popValue={popValue} portfolioG={portfolioG}
           accent={accent} t={t} D={D}
-          quality={quality} grid={grid} hv20={hv20} probFwd={probFwd}
+          quality={quality} grid={grid} hv20={hv20} probFwd={probFwd} marketSpot={marketSpot}
         />
       )}
       {workspace === 'watch' && (
@@ -1093,7 +1099,7 @@ function Obsidian3() {
 }
 
 // ───────────────────────────────────────────────── CALCULATOR WORKSPACE
-function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, accent, D, t, portfolioG, popValue, quality, grid, margin = null, marginIdx = null }) {
+function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs, spot, setSpot, marketSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, accent, D, t, portfolioG, popValue, quality, grid, margin = null, marginIdx = null }) {
   const light = theme === 'light';
   // Net of estimated round-trip fees (⑤). Charts stay gross.
   const netPnl = pnlNTD - fees;
@@ -1196,7 +1202,7 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
         {rv === 'cross' && <CrossSection legs={legs} spot={spot} iv={iv} dte={dte} r={P.r / 100} model={P.model} mult={P.mult} cur={P.cur} theme={theme} height={140} width={304} />}
         {rv === 'greeks' && <GreeksProfile legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={140} width={304} model={P.model} r={P.r / 100} />}
         {rv === 'dist' && <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={140} width={304} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />}
-        {rv === 'attr' && <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={150} width={304} baseSpot={P.defaultSpot} baseIv={P.defaultIv} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />}
+        {rv === 'attr' && <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={150} width={304} baseSpot={marketSpot || P.defaultSpot} baseIv={P.defaultIv} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />}
         {rv === 'theta' && (<>
           <ThetaDecay theme={theme} dte={dte} height={140} width={304} />
           <div style={{ marginTop: 6, fontSize: 11, opacity: 0.6 }}>目前到期天數下每日約 −{P.cur}{(0.12 * P.mult * 100).toFixed(0)}</div>
@@ -1340,7 +1346,7 @@ function LayoutToggle({ value, onChange }) {
   return <Seg items={Object.keys(CHAIN_LAYOUTS).map((k) => ({ id: k, label: CHAIN_LAYOUTS[k].label }))} value={value} onChange={onChange} />;
 }
 
-function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiries, onAddLeg, legs, setLegs,
+function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, marketSpot, expiry, expiries, onAddLeg, legs, setLegs,
   iv, setIv, dte, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, popValue, portfolioG, accent, t, D, quality, grid, hv20 = null, probFwd = null }) {
   const light = theme === 'light';
   const credit = netPremiumPts(legs);
@@ -1385,7 +1391,7 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiri
             { label: '崩跌 10%', spot: -10, iv: 21 },
           ].map((sc, i) => (
             <button key={i} onClick={() => {
-              setSpot(Math.round(P.defaultSpot * (1 + sc.spot / 100) / P.spotStep) * P.spotStep);
+              setSpot(Math.round((marketSpot || P.defaultSpot) * (1 + sc.spot / 100) / P.spotStep) * P.spotStep);
               setIv(Math.max(P.ivMin, Math.min(P.ivMax, P.defaultIv + sc.iv)));
             }} style={{ ...miniBtn, padding: '7px 6px' }}>{sc.label}</button>
           ))}
@@ -2913,7 +2919,7 @@ function MobileApp({
   spotMin, spotMax,
   expiryId, setExpiryId, expiry,
   legs, setLegs, addLegFromChain,
-  spot, setSpot, iv, setIv, dte,
+  spot, setSpot, marketSpot, iv, setIv, dte,
   view, setView, sliceFrac, setSliceFrac,
   pnlPts, pnlNTD, maxProfit, maxLoss,
   portfolioG, popValue, quality,
@@ -3037,7 +3043,7 @@ function MobileApp({
             P={P} bars={bars} barsLive={barsLive} expiries={expiries} fees={fees}
             barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
             legs={legs} setLegs={setLegs}
-            spot={spot} setSpot={setSpot}
+            spot={spot} setSpot={setSpot} marketSpot={marketSpot}
             iv={iv} setIv={setIv} dte={dte}
             view={view} setView={setView}
             sliceFrac={sliceFrac} setSliceFrac={setSliceFrac}
@@ -3119,7 +3125,7 @@ function MobileLiveBadge({ live, P, lastLiveAt, light }) {
 function MobileCalc({
   isFold, chartW, theme = 'dark',
   P, bars, barsLive, barPeriodId, setBarPeriodId, expiries,
-  legs, setLegs, spot, setSpot, iv, setIv, dte,
+  legs, setLegs, spot, setSpot, marketSpot, iv, setIv, dte,
   view, setView, sliceFrac, setSliceFrac,
   pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0,
   portfolioG, popValue, quality,
@@ -3219,7 +3225,7 @@ function MobileCalc({
         </>)}
         {view === 'attr' && (<>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>vs baseline</span>}>P&L attribution</Eyebrow>
-          <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={155} width={chartW} baseSpot={P.defaultSpot} baseIv={P.defaultIv} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />
+          <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={155} width={chartW} baseSpot={marketSpot || P.defaultSpot} baseIv={P.defaultIv} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />
         </>)}
         {view === 'theta' && (<>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>θ decay</span>}>Time decay</Eyebrow>
@@ -3299,8 +3305,9 @@ function MobileCalc({
             { label: 'Reset',        spot: 0, iv: 0, reset: true },
           ].map((s, i) => (
             <button key={i} onClick={() => {
-              if (s.reset) { setSpot(P.defaultSpot); setIv(P.defaultIv); return; }
-              setSpot(Math.round(P.defaultSpot * (1 + s.spot / 100)));
+              const base = marketSpot || P.defaultSpot;
+              if (s.reset) { setSpot(base); setIv(P.defaultIv); return; }
+              setSpot(Math.round(base * (1 + s.spot / 100) / P.spotStep) * P.spotStep);
               setIv(Math.max(P.ivMin, Math.min(P.ivMax, P.defaultIv + s.iv)));
             }} style={{
               padding: '10px 6px', borderRadius: 8, fontSize: 11, fontWeight: 600,
