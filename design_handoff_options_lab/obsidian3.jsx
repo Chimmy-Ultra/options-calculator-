@@ -1168,7 +1168,7 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
               color: netPnl >= 0 ? (light ? 'oklch(0.60 0.13 75)' : 'oklch(0.84 0.14 75)') : (light ? 'oklch(0.50 0.10 220)' : 'oklch(0.74 0.12 220)'),
               fontFamily: 'var(--font-mono)', lineHeight: 1,
             }}>
-              {netPnl >= 0 ? '+' : ''}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
+              {netPnl >= 0 ? '+' : '−'}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
             </div>
             <div className="tnum" style={{ fontSize: 10, opacity: 0.55, marginTop: 4 }}>
               {pnlPts >= 0 ? '+' : ''}{pnlPts.toFixed(1)} 點 {P.unitLabel}
@@ -1302,7 +1302,7 @@ function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, fees = 0,
         <div style={{ minWidth: 0 }}>
           {!bare && <Eyebrow hk="pnlwhatif">部位損益試算 · {P.code}</Eyebrow>}
           <div className="tnum" style={{ fontSize: 24, fontWeight: 600, letterSpacing: -0.4, lineHeight: 1.05, marginTop: 3, fontFamily: 'var(--font-mono)', color: heroColor }}>
-            {profit ? '+' : ''}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
+            {profit ? '+' : '−'}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
           </div>
           <div className="tnum" style={{ fontSize: 9, opacity: 0.5, marginTop: 3 }}>{pnlPts >= 0 ? '+' : ''}{pnlPts.toFixed(1)} 點 {P.unitLabel}{fees > 0 ? ` · 已扣估計手續費 ${P.cur}${Math.round(fees).toLocaleString()}` : ''}</div>
         </div>
@@ -3139,7 +3139,7 @@ function MobileCalc({
                 : (light ? 'oklch(0.50 0.10 220)' : 'oklch(0.74 0.12 220)'),
               fontFamily: 'var(--font-mono)', lineHeight: 1.05,
             }}>
-              {netPnl >= 0 ? '+' : ''}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
+              {netPnl >= 0 ? '+' : '−'}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
             </div>
             <div className="tnum" style={{ fontSize: 10, opacity: 0.55, marginTop: 4 }}>
               Max <span style={{ color: light ? '#8a6410' : '#f0c068' }}>{fmtCap(maxProfit - fees, P, true)}</span>
