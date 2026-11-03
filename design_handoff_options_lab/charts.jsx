@@ -907,7 +907,10 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
   const levelTags = lv.map((l) => ({ ...l, pinned: !inScale.includes(l), y: inScale.includes(l) ? y(l.price) : (l.price > pMax ? pTop + 4 : pBot - 4) }));
   const xw = plotW / (nv + coneSlots);
   const cx = (i) => (i - from) * xw + xw / 2;   // i indexes the whole series
-  const bw = Math.min(7, Math.max(2, xw * 0.62));
+  // Candle body ~72% of its slot, as TradingView / moomoo draw them. The old
+  // 7px cap left 30 bars at about a third of the slot and a gap twice the
+  // candle; the 24 cap only bites at the deepest zoom.
+  const bw = Math.max(1.5, Math.min(24, xw * 0.72));
   const vMax = Math.max(...vis.map((b) => b.v), 1);
   const up = '#ef5350', down = '#26a69a';
   const txt = dark ? 'rgba(255,255,255,0.55)' : 'rgba(20,30,50,0.55)';
