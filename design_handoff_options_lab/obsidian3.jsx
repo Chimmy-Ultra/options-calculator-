@@ -85,13 +85,31 @@ function defaultLegsFor(P, dte, spot) {
     _mkLeg('short', 'call', s0, k1 + 4 * st, P.defaultIv, dte, P),
   ];
 }
+// Mock expiries are written as days-to-expiry; their printed dates (and month
+// codes such as JUL) were fixed when written, so in November the strip read
+// "7/18 JUL 35天". Date them from today instead — once per product per load,
+// so the arrays stay stable across renders.
+const _MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+const _datedMock = {};
+function mockExpiriesFor(P) {
+  if (_datedMock[P.id]) return _datedMock[P.id];
+  const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+  const out = (P.mockExpiries || TXO_EXPIRIES).map((e) => {
+    const d = new Date(t0.getFullYear(), t0.getMonth(), t0.getDate() + e.dte);
+    const x = { ...e, date: `${d.getMonth() + 1}/${String(d.getDate()).padStart(2, '0')}` };
+    if (/^[A-Z]{3}$/.test(e.label)) x.label = _MON[d.getMonth()];
+    return x;
+  });
+  _datedMock[P.id] = out;
+  return out;
+}
 // 商品的到期日清單：live（IB 真實到期日）> 商品 mock > TXO 週/月選。
 function productExpiries(P, liveExpiries) {
   if (liveExpiries && liveExpiries.length) return liveExpiries;
-  return P.mockExpiries || TXO_EXPIRIES;
+  return mockExpiriesFor(P);
 }
 function defaultExpiryFor(P) {
-  const exps = P.mockExpiries || TXO_EXPIRIES;
+  const exps = mockExpiriesFor(P);
   return (P.id === 'txo' && exps.find((e) => e.id === 'm')) || exps[0];
 }
 
