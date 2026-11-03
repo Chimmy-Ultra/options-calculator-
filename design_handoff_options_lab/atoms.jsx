@@ -88,7 +88,7 @@ function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, i
   const xs = useMemo(() => {
     let lo, hi;
     if (legs && legs.length > 0) {
-      const strikes = legs.map((l) => l.strike);
+      const strikes = legs.map((l) => (isFutLeg(l) ? l.premium : l.strike)); // a future anchors on its entry price
       const sLo = Math.min.apply(null, strikes);
       const sHi = Math.max.apply(null, strikes);
       const spread = sHi - sLo;
@@ -267,9 +267,17 @@ function PayoffChart({ legs, spot, theme = 'light', height = 160, width = 420, i
   );
 }
 
+// Futures legs (type 'future') are a linear position in the product's
+// future: `premium` holds the entry price in points and `ratio` the contract's
+// point value in units of the product multiplier (TXO 大台 ×200 → 4). No
+// strike, no expiry, no IV — value is ratio × S, delta is ratio, every other Greek is 0.
+function isFutLeg(l) { return !!l && l.type === 'future'; }
+function legUnits(l) { return isFutLeg(l) ? (l.ratio > 0 ? l.ratio : 1) : 1; }
+
 function legPayoff(leg, S) {
   const { type, side, strike, premium, qty } = leg;
   const sign = side === 'long' ? 1 : -1;
+  if (isFutLeg(leg)) return sign * qty * legUnits(leg) * (S - premium);
   const intrinsic = type === 'call' ? Math.max(S - strike, 0) : Math.max(strike - S, 0);
   return sign * qty * (intrinsic - premium);
 }
@@ -355,6 +363,7 @@ function bsGreeks(type, S, K, ivPct, dte, r = 0.015, model = 'bs') {
 function legGreeks(leg, S, ivPct, dte, r = 0.015, model = 'bs') {
   const { type, side, strike: K, qty } = leg;
   const sign = side === 'long' ? 1 : -1;
+  if (isFutLeg(leg)) return { delta: sign * qty * legUnits(leg), gamma: 0, theta: 0, vega: 0 };
   const g = bsGreeks(type, S, K, ivPct, dte, r, model);
   return {
     delta: sign * qty * g.delta,
@@ -381,8 +390,9 @@ function portfolioGreeks(legs, S, ivPct, dte, r = 0.015, model = 'bs') {
 // the horizon at which "at expiry" curves and metrics are evaluated — later
 // legs still carry time value there. Legs without dte use the workspace dte.
 function frontDte(legs, dte) {
-  if (!legs || !legs.length) return dte;
-  return Math.min.apply(null, legs.map((l) => (l.dte != null ? l.dte : dte)));
+  const opts = (legs || []).filter((l) => !isFutLeg(l)); // futures do not expire here
+  if (!opts.length) return dte;
+  return Math.min.apply(null, opts.map((l) => (l.dte != null ? l.dte : dte)));
 }
 
 // Mark-to-model portfolio VALUE in points, `daysElapsed` days from now.
@@ -393,6 +403,7 @@ function frontDte(legs, dte) {
 function portfolioValuePts(legs, S, ivPct, daysElapsed, dte, r = 0.015, model = 'bs') {
   return legs.reduce((acc, l) => {
     const sign = l.side === 'long' ? 1 : -1;
+    if (isFutLeg(l)) return acc + sign * l.qty * legUnits(l) * S;
     const legDte = l.dte != null ? l.dte : dte;
     const T = Math.max(legDte - daysElapsed, 0);
     const v = T <= 0
@@ -403,21 +414,38 @@ function portfolioValuePts(legs, S, ivPct, daysElapsed, dte, r = 0.015, model = 
 }
 // Entry cost of a portfolio in points (Σ sign·qty·premium). P&L = value − cost.
 function portfolioCostPts(legs) {
-  return legs.reduce((a, l) => a + (l.side === 'long' ? 1 : -1) * l.qty * l.premium, 0);
+  return legs.reduce((a, l) => a + (l.side === 'long' ? 1 : -1) * l.qty * legUnits(l) * l.premium, 0);
+}
+// Expiry P&L slope as the underlying rises without bound: +1 per long call,
+// +ratio per long future, 0 for puts. Non-zero means max profit (slope > 0) or
+// max loss (slope < 0) has no cap — a scan over a finite range would invent one.
+function upsideSlope(legs) {
+  return legs.reduce((a, l) => a + (l.side === 'long' ? 1 : -1) * l.qty * (isFutLeg(l) ? legUnits(l) : l.type === 'call' ? 1 : 0), 0);
+}
+// Net option premium in points: + credit received, − debit paid. Futures legs
+// carry an entry price, not a premium, so they are left out.
+function netPremiumPts(legs) {
+  return legs.reduce((a, l) => a + (isFutLeg(l) ? 0 : (l.side === 'long' ? -1 : 1) * l.premium * l.qty), 0);
 }
 
 // Estimated round-trip transaction cost (commission + tax) for a portfolio, in
 // the product's currency. Per contract per side: a fixed `perSide` brokerage
 // fee plus `taxRate` of the premium notional (premium × mult). Both entry and
 // exit are charged (×2); the exit tax is approximated with the entry premium.
-// Fees are broker-dependent — the defaults live in products.js.
+// Fees are broker-dependent — the defaults live in products.js. A futures leg
+// pays the same commission and `futTaxRate` on its contract value
+// (price × mult × ratio) instead of the option tax on premium.
 function estFees(legs, P) {
   if (!P || !P.fees || !legs || !legs.length) return 0;
   const perSide = P.fees.perSide || 0;
   const taxRate = P.fees.taxRate || 0;
   const mult = P.mult || 1;
-  return legs.reduce((a, l) =>
-    a + Math.abs(l.qty) * (2 * perSide + 2 * taxRate * Math.abs(l.premium) * mult), 0);
+  return legs.reduce((a, l) => {
+    const tax = isFutLeg(l)
+      ? (P.futTaxRate || 0) * Math.abs(l.premium) * mult * legUnits(l)
+      : taxRate * Math.abs(l.premium) * mult;
+    return a + Math.abs(l.qty) * (2 * perSide + 2 * tax);
+  }, 0);
 }
 
 // Lognormal P&L distribution at expiry: integrate over standard normal grid.
@@ -487,6 +515,7 @@ function pnlDistribution(legs, spot, ivPct, dte, opts = {}) {
 // snapshots carry volume but not OI), so judging on OI would flag every leg as
 // thin. Spread is then the only liquidity signal.
 function legLiquidity(leg, rows, hasOI = true) {
+  if (isFutLeg(leg)) return { level: 'good', reason: 'futures' }; // not judged on the option chain
   const r = rows.find((rr) => rr.strike === leg.strike);
   if (!r) return { level: 'bad', reason: 'strike not listed' };
   const side = leg.type === 'call' ? r.call : r.put;
@@ -518,22 +547,41 @@ function dataQuality(legs, rows) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Cross-section: P&L vs spot at fixed DTE
-function CrossSection({ theme = 'light', height = 110, width = 320, dte = 30 }) {
+// P&L of the position today (no time passed) across underlying prices, ±8%
+// around spot. It used to draw the stylised demo surface's curve
+// (OptionsSurface.pnlValue), which ignored the position entirely.
+function CrossSection({ legs = [], spot, iv = 24, dte = 30, r = 0.015, model = 'bs', mult = 1, cur = '', theme = 'light', height = 110, width = 320 }) {
   const W = width, H = height, pad = 12;
   const N = 60;
-  const pts = [];
-  for (let i = 0; i <= N; i++) {
-    const x = -1 + (2 * i) / N;
-    const y = window.OptionsSurface.pnlValue(x, 1 - dte / 60);
-    pts.push([pad + (i / N) * (W - pad * 2), H / 2 - y * (H / 2 - pad) * 1.6]);
+  const dark = theme === 'dark';
+  const axis = dark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.10)';
+  const stroke = dark ? '#cdd3df' : '#1d1d22';
+  const muted = dark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)';
+  if (!legs.length || !(spot > 0)) {
+    return <div style={{ height: H, display: 'grid', placeItems: 'center', fontSize: 11, color: muted }}>沒有部位</div>;
   }
-  const path = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
-  const axis = theme === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.10)';
-  const stroke = theme === 'dark' ? '#cdd3df' : '#1d1d22';
+  const lo = spot * 0.92, hi = spot * 1.08;
+  const cost = portfolioCostPts(legs);
+  const xs = [], ys = [];
+  for (let i = 0; i <= N; i++) {
+    const S = lo + ((hi - lo) * i) / N;
+    xs.push(S);
+    ys.push(portfolioValuePts(legs, S, iv, 0, dte, r, model) - cost);
+  }
+  const maxAbs = Math.max(1e-9, ...ys.map(Math.abs));
+  const px = (i) => pad + (i / N) * (W - pad * 2);
+  const py = (v) => H / 2 - (v / maxAbs) * (H / 2 - pad);
+  const path = ys.map((v, i) => `${i === 0 ? 'M' : 'L'}${px(i).toFixed(1)},${py(v).toFixed(1)}`).join(' ');
+  const sx = pad + ((spot - lo) / (hi - lo)) * (W - pad * 2);
+  const fmt = (v) => `${v >= 0 ? '+' : '−'}${cur}${Math.round(Math.abs(v * mult)).toLocaleString()}`;
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} style={{ display: 'block' }}>
       <line x1={pad} x2={W - pad} y1={H / 2} y2={H / 2} stroke={axis} strokeDasharray="2 3" />
+      <line x1={sx} x2={sx} y1={pad} y2={H - pad} stroke={axis} />
       <path d={path} fill="none" stroke={stroke} strokeWidth="1.5" />
+      <text x={pad} y={H - 2} fontSize="9" fill={muted} style={{ fontFamily: 'var(--font-mono)' }}>{Math.round(lo).toLocaleString()}</text>
+      <text x={W - pad} y={H - 2} fontSize="9" fill={muted} textAnchor="end" style={{ fontFamily: 'var(--font-mono)' }}>{Math.round(hi).toLocaleString()}</text>
+      <text x={W - pad} y={pad} fontSize="9" fill={muted} textAnchor="end" style={{ fontFamily: 'var(--font-mono)' }}>今天 · 現價處 {fmt(portfolioValuePts(legs, spot, iv, 0, dte, r, model) - cost)}</text>
     </svg>
   );
 }
@@ -579,7 +627,7 @@ function Slider({ label, value, min, max, step = 1, onChange, suffix = '', theme
 // a per-leg expiry <select> so calendars / diagonals can be built; `defaultDte`
 // is the workspace expiry a dte-less leg falls back to. Mobile omits both props,
 // keeping its narrower layout unchanged.
-function LegEditor({ legs, onChange, theme = 'light', expiries, defaultDte }) {
+function LegEditor({ legs, onChange, theme = 'light', expiries, defaultDte, futures }) {
   const dark = theme === 'dark';
   const headerColor = dark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.55)';
   const rowBg = dark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.55)';
@@ -623,6 +671,28 @@ function LegEditor({ legs, onChange, theme = 'light', expiries, defaultDte }) {
                 : (dark ? '#5fa3d4' : '#2a5e8c'),
             }}
           >{leg.side === 'long' ? '＋買' : '－賣'}</button>
+          {isFutLeg(leg) ? (() => {
+            // Futures row: the type button cycles the product's contracts
+            // (大台 → 小台 → 微台), the strike cell is empty and the price cell
+            // is the entry price.
+            const list = futures && futures.length ? futures : [{ id: leg.fut, label: '期貨', ratio: legUnits(leg) }];
+            const k = Math.max(0, list.findIndex((f) => f.id === leg.fut));
+            const cur = list[k], next = list[(k + 1) % list.length];
+            return (<>
+              <button
+                onClick={() => list.length > 1 && update(i, { fut: next.id, ratio: next.ratio })}
+                title={list.length > 1 ? `期貨 · 點一下換成${next.label}` : '期貨'}
+                style={{
+                  fontSize: 10.5, fontWeight: 700,
+                  padding: '4px 2px', borderRadius: 0, border: `1px solid ${rowBorder}`, cursor: list.length > 1 ? 'pointer' : 'default', fontFamily: 'inherit',
+                  background: dark ? 'rgba(240,192,104,0.10)' : 'rgba(217,154,44,0.10)', color: dark ? '#e8eaef' : '#1d1d22',
+                }}
+              >{cur.label}</button>
+              <span style={{ fontSize: 11, color: headerColor, fontFamily: 'var(--font-mono)' }}>期貨</span>
+              <NumField value={leg.premium} step={1} onChange={(v) => update(i, { premium: v })} dark={dark} />
+              {withExp && <span style={{ fontSize: 10, color: headerColor, textAlign: 'center' }}>—</span>}
+            </>);
+          })() : (<>
           <button
             onClick={() => update(i, { type: leg.type === 'call' ? 'put' : 'call' })}
             style={{
@@ -643,6 +713,7 @@ function LegEditor({ legs, onChange, theme = 'light', expiries, defaultDte }) {
               </select>
             );
           })()}
+          </>)}
           <NumField value={leg.qty} step={1} onChange={(v) => update(i, { qty: v })} dark={dark} align="right" />
           <button
             onClick={() => remove(i)}
@@ -660,6 +731,11 @@ function LegEditor({ legs, onChange, theme = 'light', expiries, defaultDte }) {
           >×</button>
         </div>
       ))}
+      {legs.some(isFutLeg) && (
+        <div style={{ fontSize: 10, color: headerColor, padding: '0 4px', lineHeight: 1.5 }}>
+          期貨列的價格欄是成交價。{(futures || []).filter((f) => f.ratio !== 1).map((f) => `${f.label} 1 口的點值是選擇權的 ${f.ratio} 倍`).join('，')}
+        </div>
+      )}
     </div>
   );
 }
@@ -755,6 +831,7 @@ Object.assign(window, {
   STRATEGIES, DEFAULT_LEGS,
   legPayoff, normalPdf, normalCdf, legGreeks, portfolioGreeks, pnlDistribution,
   portfolioValuePts, portfolioCostPts, frontDte, estFees,
+  isFutLeg, legUnits, netPremiumPts, upsideSlope,
   bsPrice, bsGreeks,
   legLiquidity, dataQuality,
   useViewport,

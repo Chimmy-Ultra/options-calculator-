@@ -122,14 +122,14 @@ function readSaved() {
   return _savedCache;
 }
 function validLeg(l) {
-  return l && (l.side === 'long' || l.side === 'short')
-    && (l.type === 'call' || l.type === 'put')
-    && Number.isFinite(l.strike) && Number.isFinite(l.premium)
-    && Number.isFinite(l.qty) && l.qty >= 1;
+  if (!l || !(l.side === 'long' || l.side === 'short') || !Number.isFinite(l.premium) || !Number.isFinite(l.qty) || l.qty < 1) return false;
+  if (l.type === 'future') return typeof l.fut === 'string' && Number.isFinite(l.ratio) && l.ratio > 0;
+  return (l.type === 'call' || l.type === 'put') && Number.isFinite(l.strike);
 }
 function sanitizeLegs(arr) {
   if (!Array.isArray(arr)) return null;
   const clean = arr.filter(validLeg).map((l) => {
+    if (l.type === 'future') return { side: l.side, type: 'future', fut: l.fut, ratio: l.ratio, premium: l.premium, qty: l.qty };
     const out = { side: l.side, type: l.type, strike: l.strike, premium: l.premium, qty: l.qty };
     if (Number.isFinite(l.dte)) out.dte = l.dte;
     return out;
@@ -450,6 +450,8 @@ const GRID_DEFAULTS = {
   ],
 };
 const gridCap = (txt) => <span className="mono" style={{ fontSize: 9, opacity: 0.6 }}>{txt}</span>;
+// Max profit / loss text: an unbounded side reads 無上限 rather than a number.
+const fmtCap = (v, P, plus = false) => (Number.isFinite(v) ? `${plus ? '+' : ''}${P.cur}${Math.round(v).toLocaleString()}` : '無上限');
 const expCap = (e) => `${e.date} ${e.type === 'monthly' ? '月選' : e.label} · ${e.dte} 天`;
 const GRID_BODY = { position: 'absolute', top: 90, left: 12, right: 12, bottom: 12, zIndex: 5, overflowY: 'auto', overflowX: 'hidden' };
 
@@ -784,13 +786,17 @@ function Obsidian3() {
   const pnlNTD = pnlPts * P.mult;
   // Max profit / loss scanned at the front expiry (T0): near legs at intrinsic,
   // later legs keep time value. Single-expiry portfolios = Σ legPayoff as before.
+  // A position still rising (falling) as the underlying goes up has no cap:
+  // ±Infinity, shown as 無上限 (e.g. a long future, a naked short call).
   const maxProfit = uM(() => {
+    if (upsideSlope(legs) > 1e-9) return Infinity;
     const T0 = frontDte(legs, dte), cost = portfolioCostPts(legs);
     let m = -Infinity;
     for (let s = spot * 0.7; s <= spot * 1.3; s += P.strikeStep / 2) m = Math.max(m, portfolioValuePts(legs, s, iv, T0, dte, P.r / 100, P.model) - cost);
     return m * P.mult;
   }, [legs, spot, iv, dte, productId]);
   const maxLoss = uM(() => {
+    if (upsideSlope(legs) < -1e-9) return -Infinity;
     const T0 = frontDte(legs, dte), cost = portfolioCostPts(legs);
     let m = Infinity;
     for (let s = spot * 0.7; s <= spot * 1.3; s += P.strikeStep / 2) m = Math.min(m, portfolioValuePts(legs, s, iv, T0, dte, P.r / 100, P.model) - cost);
@@ -1129,10 +1135,11 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
           {canImport && <button style={miniBtn} disabled={importing} onClick={importPositions} title={`載入 ${BROKER[P.live]} 帳戶的真實部位`}>{importing ? '…' : `⟳ ${BROKER[P.live]}`}</button>}
           <StrategyMenu P={P} spot={spot} iv={iv} dte={dte} onPick={setLegs} light={light} />
           <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 2 * P.strikeStep) / P.strikeStep) * P.strikeStep, iv, dte, P)])}>＋ 新增</button>
+          <button style={miniBtn} onClick={() => setLegs([...legs, _mkFutLeg(P, spot)])} title="加一口期貨（以目前價格成交）">＋ 期貨</button>
         </div>
       ),
       body: (<>
-        <LegEditor legs={legs} onChange={setLegs} theme={theme} expiries={expiries} defaultDte={dte} />
+        <LegEditor legs={legs} onChange={setLegs} theme={theme} expiries={expiries} defaultDte={dte} futures={window.futuresOf(P)} />
         {importNote && <div style={{ fontSize: 10, opacity: 0.6, marginTop: 6, fontFamily: 'var(--font-mono)' }}>{importNote}</div>}
       </>) },
     { i: 'pricer', title: '理論價試算', hk: 'pricer', right: gridCap(P.model === 'b76' ? 'Black-76' : 'Black-Scholes'),
@@ -1167,9 +1174,9 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
               {pnlPts >= 0 ? '+' : ''}{pnlPts.toFixed(1)} 點 {P.unitLabel}
             </div>
             <div className="tnum" style={{ fontSize: 11, opacity: 0.6, marginTop: 8, whiteSpace: 'nowrap' }}>
-              最大獲利 <span style={{ color: '#f0c068' }}>+{P.cur}{Math.round(netMaxProfit).toLocaleString()}</span>
+              最大獲利 <span style={{ color: '#f0c068' }}>{fmtCap(netMaxProfit, P, true)}</span>
               <span style={{ opacity: 0.4 }}> · </span>
-              最大虧損 <span style={{ color: '#5fa3d4' }}>{P.cur}{Math.round(netMaxLoss).toLocaleString()}</span>
+              最大虧損 <span style={{ color: '#5fa3d4' }}>{fmtCap(netMaxLoss, P)}</span>
             </div>
           </div>
           <div style={{ width: 96, flexShrink: 0 }}>
@@ -1183,7 +1190,7 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
         <div className="seg" style={{ display: 'flex', marginBottom: 8 }}>
           {analysisTabs.map((tab) => <button key={tab.id} className={rv === tab.id ? 'on' : ''} style={{ flex: 1 }} onClick={() => setView(tab.id)}>{tab.label}</button>)}
         </div>
-        {rv === 'cross' && <CrossSection theme={theme} dte={dte} height={140} width={304} />}
+        {rv === 'cross' && <CrossSection legs={legs} spot={spot} iv={iv} dte={dte} r={P.r / 100} model={P.model} mult={P.mult} cur={P.cur} theme={theme} height={140} width={304} />}
         {rv === 'greeks' && <GreeksProfile legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={140} width={304} model={P.model} r={P.r / 100} />}
         {rv === 'dist' && <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={140} width={304} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />}
         {rv === 'attr' && <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={150} width={304} baseSpot={P.defaultSpot} baseIv={P.defaultIv} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />}
@@ -1308,11 +1315,11 @@ function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, fees = 0,
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
         <div className="lt-tile" style={tile}>
           <div style={{ fontSize: 9, opacity: 0.6 }}>最大獲利</div>
-          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'var(--font-mono)', color: '#f0c068' }}>+{P.cur}{Math.round(netMaxProfit).toLocaleString()}</div>
+          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'var(--font-mono)', color: '#f0c068' }}>{fmtCap(netMaxProfit, P, true)}</div>
         </div>
         <div className="lt-tile" style={tile}>
           <div style={{ fontSize: 9, opacity: 0.6 }}>最大虧損</div>
-          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'var(--font-mono)', color: '#5fa3d4' }}>{P.cur}{Math.round(netMaxLoss).toLocaleString()}</div>
+          <div className="tnum" style={{ fontSize: 14, fontWeight: 600, marginTop: 2, fontFamily: 'var(--font-mono)', color: '#5fa3d4' }}>{fmtCap(netMaxLoss, P)}</div>
         </div>
       </div>
   </>);
@@ -1333,7 +1340,7 @@ function LayoutToggle({ value, onChange }) {
 function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiries, onAddLeg, legs, setLegs,
   iv, setIv, dte, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, popValue, portfolioG, accent, t, D, quality, grid, hv20 = null, probFwd = null }) {
   const light = theme === 'light';
-  const credit = legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0);
+  const credit = netPremiumPts(legs);
   const greekGrid = (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(120px,1fr))', gap: 8 }}>
       <GreekChip label="Delta · Δ" helpKey="delta" value={(portfolioG.delta >= 0 ? '+' : '') + portfolioG.delta.toFixed(2)} theme={theme} emphasis={portfolioG.delta >= 0 ? 'up' : 'down'} />
@@ -1355,6 +1362,7 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiri
         <div style={{ display: 'flex', gap: 4 }}>
           <StrategyMenu P={P} spot={spot} iv={iv} dte={dte} onPick={setLegs} light={light} />
           <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 2 * P.strikeStep) / P.strikeStep) * P.strikeStep, iv, dte, P)])}>＋ 新增</button>
+          <button style={miniBtn} onClick={() => setLegs([...legs, _mkFutLeg(P, spot)])} title="加一口期貨（以目前價格成交）">＋ 期貨</button>
           {legs.length > 0 && <button style={miniBtn} onClick={() => setLegs([])}>清空</button>}
         </div>
       ),
@@ -1362,7 +1370,7 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiri
         {legs.length === 0 ? (
           <div style={{ padding: '20px 0', textAlign: 'center', fontSize: 11, opacity: 0.5 }}>點報價表任一列加入部位</div>
         ) : (
-          <LegEditor legs={legs} onChange={setLegs} theme={theme} expiries={expiries} defaultDte={dte} />
+          <LegEditor legs={legs} onChange={setLegs} theme={theme} expiries={expiries} defaultDte={dte} futures={window.futuresOf(P)} />
         )}
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, opacity: 0.6, marginTop: 8, fontFamily: 'var(--font-mono)' }}>
           <span>{credit >= 0 ? '淨收入' : '淨支出'}</span>
@@ -2626,6 +2634,12 @@ function _mkLeg(side, type, S, K, iv, dte, P, qty = 1) {
   // expiry. Single-expiry portfolios all carry the same dte → unchanged output.
   return { side, type, strike: K, premium: _bs(type, S, K, iv, dte, r, model), qty, dte };
 }
+// A futures leg opened at the current underlying price, in the product's first
+// listed contract (TXO: 大台).
+function _mkFutLeg(P, S) {
+  const f = window.futuresOf(P)[0];
+  return { side: 'long', type: 'future', fut: f.id, ratio: f.ratio, premium: Math.round(S * 100) / 100, qty: 1 };
+}
 const STRATEGY_LIBRARY = [
   { id: 'bull-call', nameZh: '買權多頭價差',  name: 'Bull Call Spread',  bias: 'bullish', tag: '看小漲',
     build: (s, iv, dte, P, st = P.strikeStep) => [_mkLeg('long','call',s,s,iv,dte,P), _mkLeg('short','call',s,s+4*st,iv,dte,P)] },
@@ -3128,9 +3142,9 @@ function MobileCalc({
               {netPnl >= 0 ? '+' : ''}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
             </div>
             <div className="tnum" style={{ fontSize: 10, opacity: 0.55, marginTop: 4 }}>
-              Max <span style={{ color: light ? '#8a6410' : '#f0c068' }}>+{P.cur}{Math.round(maxProfit - fees).toLocaleString()}</span>
+              Max <span style={{ color: light ? '#8a6410' : '#f0c068' }}>{fmtCap(maxProfit - fees, P, true)}</span>
               <span style={{ opacity: 0.4 }}> · </span>
-              Min <span style={{ color: light ? '#2b6a99' : '#5fa3d4' }}>{P.cur}{Math.round(maxLoss - fees).toLocaleString()}</span>
+              Min <span style={{ color: light ? '#2b6a99' : '#5fa3d4' }}>{fmtCap(maxLoss - fees, P)}</span>
             </div>
             {fees > 0 && (
               <div className="tnum" style={{ fontSize: 9, opacity: 0.42, marginTop: 2 }}>
@@ -3230,6 +3244,7 @@ function MobileCalc({
         <Eyebrow right={
           <div style={{ display: 'flex', gap: 4 }}>
             <button style={miniBtn} onClick={() => setLegs([...legs, _mkLeg('long', 'call', spot, Math.round((spot + 2 * P.strikeStep) / P.strikeStep) * P.strikeStep, iv, dte, P)])}>+ leg</button>
+            <button style={miniBtn} onClick={() => setLegs([...legs, _mkFutLeg(P, spot)])}>+ 期貨</button>
             {legs.length > 0 && <button style={miniBtn} onClick={() => setLegs([])}>clear</button>}
           </div>
         }>Legs · {legs.length}</Eyebrow>
@@ -3266,7 +3281,7 @@ function MobileCalc({
             No legs yet · pick a strategy above or go to Chain
           </div>
         ) : (
-          <LegEditor legs={legs} onChange={setLegs} theme={theme} expiries={expiries} defaultDte={dte} />
+          <LegEditor legs={legs} onChange={setLegs} theme={theme} expiries={expiries} defaultDte={dte} futures={window.futuresOf(P)} />
         )}
       </Glass2>
 
@@ -3373,10 +3388,10 @@ function MobileChain({ isFold, chartW, P, rows, spot, expiry, expiries, legs, se
           <div>
             <Eyebrow right={<DataQualityPill quality={quality} />}>Net premium</Eyebrow>
             <div className="tnum" style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--font-mono)', letterSpacing: -0.3 }}>
-              {P.cur}{Math.round(legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0) * P.mult).toLocaleString()}
+              {P.cur}{Math.round(netPremiumPts(legs) * P.mult).toLocaleString()}
             </div>
             <div style={{ fontSize: 10, opacity: 0.55, marginTop: 3 }}>
-              {legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0) >= 0 ? 'credit received' : 'debit paid'}
+              {netPremiumPts(legs) >= 0 ? 'credit received' : 'debit paid'}
               <span style={{ opacity: 0.4 }}> · </span>
               {legs.length} leg{legs.length === 1 ? '' : 's'}
               {fees > 0 && <><span style={{ opacity: 0.4 }}> · </span>est. fees {P.cur}{Math.round(fees).toLocaleString()}</>}
@@ -3429,7 +3444,7 @@ function MobileChain({ isFold, chartW, P, rows, spot, expiry, expiries, legs, se
       {legs.length > 0 && (
         <Glass2 tone="panel" padding={12}>
           <Eyebrow>Current legs</Eyebrow>
-          <LegEditor legs={legs} onChange={setLegs} theme={theme} expiries={expiries} defaultDte={expiry.dte} />
+          <LegEditor legs={legs} onChange={setLegs} theme={theme} expiries={expiries} defaultDte={expiry.dte} futures={window.futuresOf(P)} />
         </Glass2>
       )}
     </>

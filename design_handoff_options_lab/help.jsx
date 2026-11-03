@@ -91,6 +91,10 @@ const HELP_SECTIONS = [
     'The histogram weights each outcome by its probability at expiry (lognormal). Red bars = profit, teal = loss.',
     'POP (probability of profit) is the total chance of finishing at or above break-even.',
   ] },
+  { id: 'futures', tabs: ['calc', 'chain'], title: 'Futures legs', paras: [
+    '＋ 期貨 adds a future at the current underlying price; the price column is its entry price and the type button switches contract (TXO: 大台 ×200, 小台 ×50, 微台 ×10 NT$ per point). A future has delta 1 per point value and no gamma, theta or vega, so it combines with options into covered calls, protective puts and collars.',
+    'Fees for a future use the same commission plus Taiwan’s 0.002% futures tax on contract value. A position that keeps gaining (or losing) as the underlying rises shows 無上限 for its max profit (or loss).',
+  ] },
   { id: 'whatif', tabs: ['calc', 'chain', 'chart', 'lab'], title: 'What-if rail', paras: [
     'The collapsible rail at the bottom-right re-prices everything at a hypothetical spot and IV without touching your real position — a quick stress test. Click it to expand.',
   ] },
