@@ -563,6 +563,13 @@ function OptionPricer({ spot, iv, dte, defaultR = 1.5, theme = 'dark', accent = 
 
   const kMin = (rows && rows.length) ? rows[0].strike : atm - 8 * step;
   const kMax = (rows && rows.length) ? rows[rows.length - 1].strike : atm + 8 * step;
+  // The first render sees the product's placeholder spot before the
+  // real one lands, so the strike started thousands of points off the chain.
+  // Re-centre on ATM whenever the strike sits outside the listed range; a strike
+  // the user picked inside the chain is left alone.
+  React.useEffect(() => {
+    if (strike < kMin || strike > kMax) setStrike(Math.min(Math.max(atm, kMin), kMax));
+  }, [kMin, kMax, atm]);
 
   // IV at the chosen strike, pulled from the smile (nearest chain row); the chain
   // already carries the real (or mock) per-strike IV. Falls back to the ATM iv.
