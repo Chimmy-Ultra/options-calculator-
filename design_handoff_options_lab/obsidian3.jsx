@@ -68,14 +68,14 @@ function aggBars(bars, unit) {
 }
 
 // TXO market state（其他商品的合約規格在 products.js 的 window.PRODUCTS）
-const TXO_SPOT = 21850;
+const TXO_SPOT = 44000;
 const STRIKE_STEP = 50;
 // Default legs: a bull-call spread（ATM+1 檔 / ATM+5 檔），premium 用該商品的
 // 定價模型（TXO=BS、穀物=Black-76）在給定的 spot/iv 與到期日算出。
 // `spot` defaults to the product's placeholder, but the caller passes the real
-// one once a snapshot or the proxy has answered — TXO's placeholder is 21,850
-// against an actual index near 45,800, which put the whole default spread ten
-// thousand points away and flattened the payoff chart.
+// one once a snapshot or the proxy has answered — a placeholder far from the
+// market (TXO's was once 21,850 against an index near 45,800) put the whole
+// default spread thousands of points away and flattened the payoff chart.
 function defaultLegsFor(P, dte, spot) {
   const st = P.strikeStep;
   const s0 = (spot > 0) ? spot : P.defaultSpot;
@@ -85,13 +85,31 @@ function defaultLegsFor(P, dte, spot) {
     _mkLeg('short', 'call', s0, k1 + 4 * st, P.defaultIv, dte, P),
   ];
 }
+// Mock expiries are written as days-to-expiry; their printed dates (and month
+// codes such as JUL) were fixed when written, so in November the strip read
+// "7/18 JUL 35天". Date them from today instead — once per product per load,
+// so the arrays stay stable across renders.
+const _MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+const _datedMock = {};
+function mockExpiriesFor(P) {
+  if (_datedMock[P.id]) return _datedMock[P.id];
+  const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+  const out = (P.mockExpiries || TXO_EXPIRIES).map((e) => {
+    const d = new Date(t0.getFullYear(), t0.getMonth(), t0.getDate() + e.dte);
+    const x = { ...e, date: `${d.getMonth() + 1}/${String(d.getDate()).padStart(2, '0')}` };
+    if (/^[A-Z]{3}$/.test(e.label)) x.label = _MON[d.getMonth()];
+    return x;
+  });
+  _datedMock[P.id] = out;
+  return out;
+}
 // 商品的到期日清單：live（IB 真實到期日）> 商品 mock > TXO 週/月選。
 function productExpiries(P, liveExpiries) {
   if (liveExpiries && liveExpiries.length) return liveExpiries;
-  return P.mockExpiries || TXO_EXPIRIES;
+  return mockExpiriesFor(P);
 }
 function defaultExpiryFor(P) {
-  const exps = P.mockExpiries || TXO_EXPIRIES;
+  const exps = mockExpiriesFor(P);
   return (P.id === 'txo' && exps.find((e) => e.id === 'm')) || exps[0];
 }
 
@@ -584,8 +602,8 @@ function Obsidian3() {
   }
 
   // Re-centre the generated default spread on the first real spot. The product
-  // registry only carries a placeholder (TXO's is 21,850 against an index near
-  // 45,800), and the real one lands a moment later from the snapshot or the
+  // registry only carries a placeholder (TXO's once sat at 21,850 against an
+  // index near 45,800), and the real one lands a moment later from the snapshot or the
   // proxy — without this the opening position sits ten thousand points away and
   // the payoff chart and P&L table read flat everywhere. Only ever touches legs
   // this component generated itself; one edit and `legs` is a different array,
@@ -692,8 +710,11 @@ function Obsidian3() {
   // ② Live auto-refresh: while connected, re-pull the quote every 10s and the
   // option chain every 30s so intraday prices don't silently go stale. Paused
   // when the tab is hidden; refetches immediately on becoming visible again.
+  // Not on the end-of-day snapshot: it never changes, and re-reading its quote
+  // every 10s wrote the snapshot price back over a What-if / stress-test spot.
   uE(() => {
     if (!live || !P.live || !window.LiveData) return undefined;
+    if (live.health && live.health.source === 'eod') return undefined;
     let dead = false;
     const pullQuote = async () => {
       if (document.hidden) return;
@@ -893,6 +914,12 @@ function Obsidian3() {
   }
 
   // ── Mobile / foldable layout — completely different shell.
+  // The market's own price, untouched by the What-if rail: the selected expiry's
+  // underlying future, else the quote, else the product's placeholder. Stress
+  // buttons and P&L attribution measure from here — they used P.defaultSpot,
+  // so on TXO a "−5%" button set spot to 20,757 against an index near 45,000.
+  const marketSpot = (spotUnderlying && spotUnderlying.price > 0) ? spotUnderlying.price
+    : ((quoteNow || (live && live.quote)) && (quoteNow || live.quote).last > 0) ? (quoteNow || live.quote).last : P.defaultSpot;
   if (vp.layout !== 'desk') {
     return (
       <MobileApp
@@ -908,7 +935,7 @@ function Obsidian3() {
         spotMin={spotMin} spotMax={spotMax}
         expiryId={expiryId} setExpiryId={setExpiryId} expiry={expiry}
         legs={legs} setLegs={setLegs} addLegFromChain={addLegFromChain}
-        spot={spot} setSpot={setSpot}
+        spot={spot} setSpot={setSpot} marketSpot={marketSpot}
         iv={iv} setIv={setIv}
         dte={dte}
         view={view} setView={setView}
@@ -1016,7 +1043,7 @@ function Obsidian3() {
           maxProfit={maxProfit} maxLoss={maxLoss} fees={fees}
           accent={accent} D={D} t={t}
           portfolioG={portfolioG} popValue={popValue} quality={quality} grid={grid}
-          margin={taifexExtra.margin} marginIdx={marginIdx}
+          margin={taifexExtra.margin} marginIdx={marginIdx} marketSpot={marketSpot}
         />
       )}
       {workspace === 'lab' && labView === '3d' && (
@@ -1035,7 +1062,7 @@ function Obsidian3() {
           pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss} fees={fees}
           popValue={popValue} portfolioG={portfolioG}
           accent={accent} t={t} D={D}
-          quality={quality} grid={grid} hv20={hv20} probFwd={probFwd}
+          quality={quality} grid={grid} hv20={hv20} probFwd={probFwd} marketSpot={marketSpot}
         />
       )}
       {workspace === 'watch' && (
@@ -1090,7 +1117,7 @@ function Obsidian3() {
 }
 
 // ───────────────────────────────────────────────── CALCULATOR WORKSPACE
-function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, accent, D, t, portfolioG, popValue, quality, grid, margin = null, marginIdx = null }) {
+function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs, spot, setSpot, marketSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, accent, D, t, portfolioG, popValue, quality, grid, margin = null, marginIdx = null }) {
   const light = theme === 'light';
   // Net of estimated round-trip fees (⑤). Charts stay gross.
   const netPnl = pnlNTD - fees;
@@ -1168,7 +1195,7 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
               color: netPnl >= 0 ? (light ? 'oklch(0.60 0.13 75)' : 'oklch(0.84 0.14 75)') : (light ? 'oklch(0.50 0.10 220)' : 'oklch(0.74 0.12 220)'),
               fontFamily: 'var(--font-mono)', lineHeight: 1,
             }}>
-              {netPnl >= 0 ? '+' : ''}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
+              {netPnl >= 0 ? '+' : '−'}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
             </div>
             <div className="tnum" style={{ fontSize: 10, opacity: 0.55, marginTop: 4 }}>
               {pnlPts >= 0 ? '+' : ''}{pnlPts.toFixed(1)} 點 {P.unitLabel}
@@ -1193,7 +1220,7 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
         {rv === 'cross' && <CrossSection legs={legs} spot={spot} iv={iv} dte={dte} r={P.r / 100} model={P.model} mult={P.mult} cur={P.cur} theme={theme} height={140} width={304} />}
         {rv === 'greeks' && <GreeksProfile legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={140} width={304} model={P.model} r={P.r / 100} />}
         {rv === 'dist' && <PnLDistribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={140} width={304} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />}
-        {rv === 'attr' && <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={150} width={304} baseSpot={P.defaultSpot} baseIv={P.defaultIv} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />}
+        {rv === 'attr' && <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={150} width={304} baseSpot={marketSpot || P.defaultSpot} baseIv={P.defaultIv} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />}
         {rv === 'theta' && (<>
           <ThetaDecay theme={theme} dte={dte} height={140} width={304} />
           <div style={{ marginTop: 6, fontSize: 11, opacity: 0.6 }}>目前到期天數下每日約 −{P.cur}{(0.12 * P.mult * 100).toFixed(0)}</div>
@@ -1302,7 +1329,7 @@ function WhatIfCard({ P, pnlPts, pnlNTD, maxProfit, maxLoss, popValue, fees = 0,
         <div style={{ minWidth: 0 }}>
           {!bare && <Eyebrow hk="pnlwhatif">部位損益試算 · {P.code}</Eyebrow>}
           <div className="tnum" style={{ fontSize: 24, fontWeight: 600, letterSpacing: -0.4, lineHeight: 1.05, marginTop: 3, fontFamily: 'var(--font-mono)', color: heroColor }}>
-            {profit ? '+' : ''}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
+            {profit ? '+' : '−'}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
           </div>
           <div className="tnum" style={{ fontSize: 9, opacity: 0.5, marginTop: 3 }}>{pnlPts >= 0 ? '+' : ''}{pnlPts.toFixed(1)} 點 {P.unitLabel}{fees > 0 ? ` · 已扣估計手續費 ${P.cur}${Math.round(fees).toLocaleString()}` : ''}</div>
         </div>
@@ -1337,7 +1364,7 @@ function LayoutToggle({ value, onChange }) {
   return <Seg items={Object.keys(CHAIN_LAYOUTS).map((k) => ({ id: k, label: CHAIN_LAYOUTS[k].label }))} value={value} onChange={onChange} />;
 }
 
-function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiries, onAddLeg, legs, setLegs,
+function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, marketSpot, expiry, expiries, onAddLeg, legs, setLegs,
   iv, setIv, dte, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, popValue, portfolioG, accent, t, D, quality, grid, hv20 = null, probFwd = null }) {
   const light = theme === 'light';
   const credit = netPremiumPts(legs);
@@ -1382,7 +1409,7 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiri
             { label: '崩跌 10%', spot: -10, iv: 21 },
           ].map((sc, i) => (
             <button key={i} onClick={() => {
-              setSpot(Math.round(P.defaultSpot * (1 + sc.spot / 100) / P.spotStep) * P.spotStep);
+              setSpot(Math.round((marketSpot || P.defaultSpot) * (1 + sc.spot / 100) / P.spotStep) * P.spotStep);
               setIv(Math.max(P.ivMin, Math.min(P.ivMax, P.defaultIv + sc.iv)));
             }} style={{ ...miniBtn, padding: '7px 6px' }}>{sc.label}</button>
           ))}
@@ -2910,7 +2937,7 @@ function MobileApp({
   spotMin, spotMax,
   expiryId, setExpiryId, expiry,
   legs, setLegs, addLegFromChain,
-  spot, setSpot, iv, setIv, dte,
+  spot, setSpot, marketSpot, iv, setIv, dte,
   view, setView, sliceFrac, setSliceFrac,
   pnlPts, pnlNTD, maxProfit, maxLoss,
   portfolioG, popValue, quality,
@@ -3034,7 +3061,7 @@ function MobileApp({
             P={P} bars={bars} barsLive={barsLive} expiries={expiries} fees={fees}
             barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
             legs={legs} setLegs={setLegs}
-            spot={spot} setSpot={setSpot}
+            spot={spot} setSpot={setSpot} marketSpot={marketSpot}
             iv={iv} setIv={setIv} dte={dte}
             view={view} setView={setView}
             sliceFrac={sliceFrac} setSliceFrac={setSliceFrac}
@@ -3116,7 +3143,7 @@ function MobileLiveBadge({ live, P, lastLiveAt, light }) {
 function MobileCalc({
   isFold, chartW, theme = 'dark',
   P, bars, barsLive, barPeriodId, setBarPeriodId, expiries,
-  legs, setLegs, spot, setSpot, iv, setIv, dte,
+  legs, setLegs, spot, setSpot, marketSpot, iv, setIv, dte,
   view, setView, sliceFrac, setSliceFrac,
   pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0,
   portfolioG, popValue, quality,
@@ -3139,7 +3166,7 @@ function MobileCalc({
                 : (light ? 'oklch(0.50 0.10 220)' : 'oklch(0.74 0.12 220)'),
               fontFamily: 'var(--font-mono)', lineHeight: 1.05,
             }}>
-              {netPnl >= 0 ? '+' : ''}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
+              {netPnl >= 0 ? '+' : '−'}{P.cur}{Math.abs(Math.round(netPnl)).toLocaleString()}
             </div>
             <div className="tnum" style={{ fontSize: 10, opacity: 0.55, marginTop: 4 }}>
               Max <span style={{ color: light ? '#8a6410' : '#f0c068' }}>{fmtCap(maxProfit - fees, P, true)}</span>
@@ -3216,7 +3243,7 @@ function MobileCalc({
         </>)}
         {view === 'attr' && (<>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>vs baseline</span>}>P&L attribution</Eyebrow>
-          <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={155} width={chartW} baseSpot={P.defaultSpot} baseIv={P.defaultIv} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />
+          <PnLAttribution legs={legs} spot={spot} iv={iv} dte={dte} theme={theme} height={155} width={chartW} baseSpot={marketSpot || P.defaultSpot} baseIv={P.defaultIv} ntdMult={P.mult} cur={P.cur} model={P.model} r={P.r / 100} />
         </>)}
         {view === 'theta' && (<>
           <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>θ decay</span>}>Time decay</Eyebrow>
@@ -3296,8 +3323,9 @@ function MobileCalc({
             { label: 'Reset',        spot: 0, iv: 0, reset: true },
           ].map((s, i) => (
             <button key={i} onClick={() => {
-              if (s.reset) { setSpot(P.defaultSpot); setIv(P.defaultIv); return; }
-              setSpot(Math.round(P.defaultSpot * (1 + s.spot / 100)));
+              const base = marketSpot || P.defaultSpot;
+              if (s.reset) { setSpot(base); setIv(P.defaultIv); return; }
+              setSpot(Math.round(base * (1 + s.spot / 100) / P.spotStep) * P.spotStep);
               setIv(Math.max(P.ivMin, Math.min(P.ivMax, P.defaultIv + s.iv)));
             }} style={{
               padding: '10px 6px', borderRadius: 8, fontSize: 11, fontWeight: 600,
