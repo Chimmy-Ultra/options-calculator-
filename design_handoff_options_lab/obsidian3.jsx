@@ -409,7 +409,14 @@ const GRID_DEFAULTS = {
     { i: 'top20',    x: 4, y: 40, w: 8,  h: 8 },
     { i: 'gex',      x: 4, y: 48, w: 8,  h: 11 },
     { i: 'premarket', x: 0, y: 50, w: 4, h: 8 },
-    { i: 'twse',      x: 0, y: 58, w: 4, h: 9 },
+    { i: 'twse',      x: 0, y: 58, w: 4, h: 11 },
+    { i: 'pctrend',    x: 4, y: 59, w: 8, h: 14 },
+    { i: 'optinst',    x: 4, y: 73, w: 8, h: 16 },
+    { i: 'optlarge',   x: 4, y: 89, w: 8, h: 13 },
+    { i: 'settlehist', x: 4, y: 102, w: 8, h: 12 },
+    { i: 'retail',     x: 0, y: 69, w: 4, h: 10 },
+    { i: 'sessions',   x: 0, y: 79, w: 4, h: 8 },
+    { i: 'dividends',  x: 0, y: 87, w: 4, h: 11 },
   ],
   chart: [{ i: 'kline', x: 0, y: 0, w: 12, h: 19 }],
   watch: [{ i: 'watch', x: 0, y: 0, w: 6, h: 21 }],
@@ -421,6 +428,7 @@ const GRID_DEFAULTS = {
     { i: 'legs',    x: 8, y: 18, w: 4, h: 8 },
     { i: 'oiprof',  x: 0, y: 24, w: 6, h: 9 },
     { i: 'maxpain', x: 6, y: 26, w: 6, h: 8 },
+    { i: 'prob',    x: 6, y: 34, w: 6, h: 14 },
   ],
   calc: [
     { i: 'legs',     x: 0, y: 0,  w: 3, h: 7 },
@@ -430,6 +438,7 @@ const GRID_DEFAULTS = {
     { i: 'pnl',      x: 9, y: 0,  w: 3, h: 7 },
     { i: 'analysis', x: 9, y: 7,  w: 3, h: 9 },
     { i: 'greeks',   x: 9, y: 16, w: 3, h: 6 },
+    { i: 'margin',   x: 9, y: 22, w: 3, h: 11 },
   ],
   'lab-iv': [
     { i: 'surface', x: 0, y: 0,  w: 9, h: 24 },
@@ -437,6 +446,7 @@ const GRID_DEFAULTS = {
     { i: 'term',    x: 9, y: 11, w: 3, h: 7 },
     { i: 'skew',    x: 9, y: 18, w: 3, h: 4 },
     { i: 'help',    x: 9, y: 22, w: 3, h: 3 },
+    { i: 'ivhist',  x: 0, y: 24, w: 9, h: 10 },
   ],
 };
 const gridCap = (txt) => <span className="mono" style={{ fontSize: 9, opacity: 0.6 }}>{txt}</span>;
@@ -462,6 +472,7 @@ function Obsidian3() {
   const [intradayData, setIntradayData] = uS(null); // 1-min bars + 成本線 + 多空差額 (Shioaji ticks live, TAIFEX tick file otherwise)
   const [twseData, setTwseData] = uS(null);         // 台股籌碼日報: TWSE 三大法人 + 融資融券 (previous session)
   const [premarketData, setPremarketData] = uS(null); // 盤前脈絡: ES / NQ / SOX / VIX / TSM ADR / 2330 / USDTWD via the proxy's IB session
+  const [taifexExtra, setTaifexExtra] = uS({});      // { optpos, margin, sessions, dividends } — TAIFEX / TWSE daily blocks (taifex.py)
   const [lastLiveAt, setLastLiveAt] = uS(null); // ② timestamp of last successful live fetch
   const [liveBars, setLiveBars] = uS(null); // 近月期貨的 IB 歷史 K
   const [liveDayBars, setLiveDayBars] = uS(null); // daily 日盤 bars regardless of the K-line toggles — the 關卡價 input
@@ -559,6 +570,7 @@ function Obsidian3() {
     setLiveRows(null);
     setOiData(null);
     setMarketData(null);
+    setTaifexExtra({});
     setLiveBars(null);
     setLastLiveAt(null);
     setExpiryId(e0.id);
@@ -631,6 +643,15 @@ function Obsidian3() {
         const w = await window.LiveData.twse(P.id);
         if (!dead && w && w.institutional && w.institutional.length) setTwseData(w);
       })();
+    }
+    if (P.oiSource === 'taifex') {
+      ['optpos', 'margin', 'sessions', 'dividends'].forEach((k) => {
+        if (!window.LiveData[k]) return;
+        (async () => {
+          const v = await window.LiveData[k](P.id);
+          if (!dead && v) setTaifexExtra((o) => ({ ...o, [k]: v }));
+        })();
+      });
     }
     if (P.oiSource === 'taifex' && window.LiveData.premarket) {
       (async () => {
@@ -791,6 +812,14 @@ function Obsidian3() {
   const quality = uM(() => dataQuality(legs, chainRows), [legs, chainRows]);
   // Levels (價平和 band + max-OI walls) from the rows on screen + the OI table.
   const levels = uM(() => computeLevels({ spot, rows: chainRows, oi: oiData, P, iv, dte }), [spot, chainRows, oiData, productId, iv, dte]);
+  // TAIFEX daily history (taifex-history.js) and the snapshot's own context for
+  // the margin rule (標的指數) and the settle probabilities (per-expiry forward).
+  const history = (window.LiveData && window.LiveData.history) ? window.LiveData.history(P.id) : null;
+  const eodSnap = (window.TAIFEX_EOD && window.TAIFEX_EOD.product === P.id) ? window.TAIFEX_EOD : null;
+  const marginIdx = eodSnap && eodSnap.index && eodSnap.index.price > 0
+    ? { px: eodSnap.index.price, label: `期交所 ${eodSnap.date.slice(5)} 加權指數` } : { px: spot, label: '沒有指數，以現價代替' };
+  const eodFwd = eodSnap && eodSnap.chains && eodSnap.chains[expiryId] && eodSnap.chains[expiryId].forward;
+  const probFwd = eodFwd ? { px: eodFwd, label: `期交所 ${eodSnap.date.slice(5)} 結算價平價遠期` } : { px: spot, label: '沒有遠期，以現價代替' };
   // Dealer gamma exposure for the expiry on screen (the full TAIFEX strike
   // range when loaded, else the chain rows).
   const gex = uM(() => computeGex({ spot, oiRows: levels.oiRows, chainRows, iv, dte, P }), [spot, levels, chainRows, iv, dte, productId]);
@@ -961,6 +990,7 @@ function Obsidian3() {
         <LevelsWorkspace
           P={P} theme={theme} light={light} spot={spot} spotChg={spotChgTop} expiry={expiry} levels={levels} live={live} market={marketData}
           rangeLevels={rangeLevels} dayBarsLive={!!liveDayBars} gex={gex} grid={grid} top20={top20Data} intraday={intradayData} keyLevels={keyLevels} twse={twseData} premarket={premarketData}
+          extra={taifexExtra} history={history}
           bars={bars} barsLive={!!liveBars} barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
           barSession={barSession} setBarSession={setBarSession}
           D={D}
@@ -980,13 +1010,14 @@ function Obsidian3() {
           maxProfit={maxProfit} maxLoss={maxLoss} fees={fees}
           accent={accent} D={D} t={t}
           portfolioG={portfolioG} popValue={popValue} quality={quality} grid={grid}
+          margin={taifexExtra.margin} marginIdx={marginIdx}
         />
       )}
       {workspace === 'lab' && labView === '3d' && (
         <LabSurface P={P} theme={theme} light={light} t={t} spot={spot} dte={dte} legs={legs} hover={hover} setHover={setHover} D={D} />
       )}
       {workspace === 'lab' && labView === 'iv' && (
-        <IVWorkspace D={D} P={P} spot={spot} iv={iv} expiry={expiry} expiries={expiries} rows={chainRows} hv20={hv20} hvLive={hvLive} dayBars={dayBars} live={live} light={light} theme={theme} grid={grid} />
+        <IVWorkspace D={D} P={P} spot={spot} iv={iv} expiry={expiry} expiries={expiries} rows={chainRows} hv20={hv20} hvLive={hvLive} dayBars={dayBars} live={live} light={light} theme={theme} grid={grid} history={history} />
       )}
       {workspace === 'chain' && (
         <ChainWorkspace
@@ -998,7 +1029,7 @@ function Obsidian3() {
           pnlPts={pnlPts} pnlNTD={pnlNTD} maxProfit={maxProfit} maxLoss={maxLoss} fees={fees}
           popValue={popValue} portfolioG={portfolioG}
           accent={accent} t={t} D={D}
-          quality={quality} grid={grid} hv20={hv20}
+          quality={quality} grid={grid} hv20={hv20} probFwd={probFwd}
         />
       )}
       {workspace === 'watch' && (
@@ -1053,7 +1084,7 @@ function Obsidian3() {
 }
 
 // ───────────────────────────────────────────────── CALCULATOR WORKSPACE
-function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, accent, D, t, portfolioG, popValue, quality, grid }) {
+function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs, spot, setSpot, spotMin, spotMax, iv, setIv, dte, sliceFrac, setSliceFrac, view, setView, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, accent, D, t, portfolioG, popValue, quality, grid, margin = null, marginIdx = null }) {
   const light = theme === 'light';
   // Net of estimated round-trip fees (⑤). Charts stay gross.
   const netPnl = pnlNTD - fees;
@@ -1171,6 +1202,8 @@ function CalcWorkspace({ P, theme = 'dark', rows, expiries, live, legs, setLegs,
           <GreekChip label="Vega · V" helpKey="vega" value={(portfolioG.vega >= 0 ? '+' : '') + portfolioG.vega.toFixed(2)} theme={theme} emphasis={portfolioG.vega >= 0 ? 'up' : 'down'} />
         </div>
       ) },
+    { i: 'margin', title: '賣方保證金 · 期交所規則', right: gridCap(margin ? `期交所 ${margin.date} 公告` : ''),
+      body: <MarginPanel legs={legs} rows={rows} dte={dte} M={margin} P={P} idx={marginIdx ? marginIdx.px : spot} idxLabel={marginIdx ? marginIdx.label : '現價'} spot={spot} iv={iv} light={light} /> },
   ];
   return (
     <div style={GRID_BODY}>
@@ -1298,7 +1331,7 @@ function LayoutToggle({ value, onChange }) {
 }
 
 function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiries, onAddLeg, legs, setLegs,
-  iv, setIv, dte, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, popValue, portfolioG, accent, t, D, quality, grid, hv20 = null }) {
+  iv, setIv, dte, pnlPts, pnlNTD, maxProfit, maxLoss, fees = 0, popValue, portfolioG, accent, t, D, quality, grid, hv20 = null, probFwd = null }) {
   const light = theme === 'light';
   const credit = legs.reduce((a, l) => a + (l.side === 'long' ? -1 : 1) * l.premium * l.qty, 0);
   const greekGrid = (
@@ -1351,6 +1384,8 @@ function ChainWorkspace({ P, rows, theme = 'dark', spot, setSpot, expiry, expiri
       body: <OIProfile spot={spot} contract={expiry.type} rows={rows} theme={theme} maxRows={11} /> },
     { i: 'maxpain', title: '最大痛苦點', right: gridCap('結算價'),
       body: <MaxPain spot={spot} contract={expiry.type} rows={rows} ntdMult={P.mult} cur={P.cur} theme={theme} height={150} width={520} /> },
+    { i: 'prob', title: '到期收在各履約價上／下方的機率', right: gridCap(`${expCap(expiry)} · Black-76 N(d2)`),
+      body: <ProbPanel rows={rows} fwd={probFwd ? probFwd.px : spot} fwdSrc={probFwd ? probFwd.label : '現價'} dte={expiry.dte} P={P} light={light} /> },
   ];
   return (
     <div style={GRID_BODY}>
@@ -2047,8 +2082,17 @@ function TwseFlowsPanel({ W, light = false }) {
       dText: money ? yi(d * 1e3) : `${d < 0 ? '−' : d > 0 ? '+' : ''}${Math.abs(d).toLocaleString()} 張` };
   });
   const cell = { fontFamily: 'var(--font-mono)', textAlign: 'right', whiteSpace: 'nowrap' };
+  // Lead sentence: 外資, the total, and the margin-balance change, each in the exchange's own figures.
+  const fxRow = rows.find((r) => r.name.startsWith('外資及陸資')), tot = rows.find((r) => r.name === '合計');
+  const bs = (v) => (v > 0 ? '買超' : v < 0 ? '賣超' : '持平');
+  const fin = margin.find((x) => x.k === '融資(交易單位)');
   return (
     <div>
+      {(fxRow || tot) && <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.4, marginBottom: 8 }}>
+        {fxRow && <>外資{bs(fxRow.net)} <span style={{ color: col(fxRow.net) }}>{(Math.abs(fxRow.net) / 1e8).toFixed(1)} 億</span></>}
+        {tot && <>{fxRow ? '，' : ''}三大法人合計{bs(tot.net)} <span style={{ color: col(tot.net) }}>{(Math.abs(tot.net) / 1e8).toFixed(1)} 億</span></>}
+        {fin && fin.d !== 0 && <>；融資餘額{fin.d > 0 ? '增' : '減'} {Math.abs(fin.d).toLocaleString()} 張</>}
+      </div>}
       <div className="mono" style={{ fontSize: 9.5, color: dim, marginBottom: 3 }}>三大法人買賣超（億元）</div>
       {rows.map((r) => {
         const total = r.name === '合計';
@@ -2078,7 +2122,7 @@ function TwseFlowsPanel({ W, light = false }) {
   );
 }
 
-function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expiry, levels: L, live, market: M, rangeLevels: R, dayBarsLive, gex: G, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D, grid, top20: T, intraday: I, keyLevels: K, twse: W, premarket: PM }) {
+function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expiry, levels: L, live, market: M, rangeLevels: R, dayBarsLive, gex: G, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D, grid, top20: T, intraday: I, keyLevels: K, twse: W, premarket: PM, extra = {}, history: H = null }) {
   const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
   const chg = (v) => (v == null ? '' : `（${v > 0 ? '+' : ''}${v.toLocaleString()}）`);
@@ -2122,6 +2166,42 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expi
   const oiRows = L.oiRows.map((r) => ({ ...r, atm: r.strike === atmK }));
   const walls = { call: L.resistance ? L.resistance.strike : null, put: L.support ? L.support.strike : null };
   const dim = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
+  // OI date picker: the latest session from the OI table, earlier ones from
+  // taifex-history.js (per-strike OI of the near expiries, last ~8 sessions).
+  const [oiPick, setOiPick] = uS(null);
+  uE(() => { setOiPick(null); }, [expiry.id]);
+  const histDates = (H && H.oi) ? Object.keys(H.oi).filter((d) => H.oi[d][expiry.id]).sort() : [];
+  const oiDates = L.oiDate ? [...new Set(histDates.concat([L.oiDate]))].sort().slice(-8) : [];
+  const oiSel = (oiPick && oiPick !== L.oiDate && histDates.includes(oiPick)) ? oiPick : null;
+  let oiView = { rows: oiRows, walls, showChange: true, vs: null };
+  if (oiSel) {
+    const i = histDates.indexOf(oiSel), pd = i > 0 ? histDates[i - 1] : null;
+    const prev = pd ? new Map(H.oi[pd][expiry.id].map((r) => [r[0], r])) : null;
+    const rws = H.oi[oiSel][expiry.id].map(([k, c, p]) => {
+      const q = prev && prev.get(k);
+      return { strike: k, call: { oi: c, oiChg: q ? c - q[1] : 0 }, put: { oi: p, oiChg: q ? p - q[2] : 0 } };
+    });
+    let ak = null;
+    for (const r of rws) if (ak == null || Math.abs(r.strike - spot) < Math.abs(ak - spot)) ak = r.strike;
+    const top = (side) => rws.reduce((a, r) => (r[side].oi > (a ? a[side].oi : 0) ? r : a), null);
+    oiView = { rows: rws.map((r) => ({ ...r, atm: r.strike === ak })), walls: { call: (top('call') || {}).strike, put: (top('put') || {}).strike }, showChange: !!prev, vs: pd };
+  }
+  // 最大痛點 vs the previous stored session (history days), same definition as computeLevels.
+  const mpOn = (d) => {
+    if (d === L.oiDate && L.maxPain) return L.maxPain.strike;
+    const rec = H && H.days && H.days.find((x) => x.date === d);
+    const e = rec && rec.exp.find((x) => x.id === expiry.id);
+    return e ? e.mp : null;
+  };
+  const mpDate = oiSel || L.oiDate;
+  const mpPrevDate = (H && H.days) ? (H.days.filter((x) => x.date < mpDate && x.exp.some((e) => e.id === expiry.id && e.mp != null)).pop() || {}).date : null;
+  const mpNow = mpDate ? mpOn(mpDate) : null, mpPrev = mpPrevDate ? mpOn(mpPrevDate) : null;
+  const mpLine = mpNow == null ? (mpDate ? <>最大痛點：歷史裡沒有 {mpDate.slice(5)} 的全履約價紀錄（那天沒有存快照）</> : null) : (mpPrev == null
+    ? <>最大痛點 {fmtP(mpNow)}；歷史裡還沒有更早一天的 {expiry.label}（已存 {H && H.days ? H.days.length : 0} 天）</>
+    : mpNow === mpPrev ? <>最大痛點 {fmtP(mpNow)}，與前一交易日（{mpPrevDate.slice(5)}）相同</>
+    : <>最大痛點 {fmtP(mpNow)}，比前一交易日（{mpPrevDate.slice(5)}）往{mpNow > mpPrev ? '上' : '下'}移 <span style={{ color: mpNow > mpPrev ? LEVEL_COLORS.up : LEVEL_COLORS.down }}>{fmtP(Math.abs(mpNow - mpPrev))}</span> 點</>);
+  const X = extra || {};
+  const ymd = (d) => (d ? (d.includes('/') ? d : `${d.slice(0, 4)}/${d.slice(4, 6)}/${d.slice(6)}`) : '');
   const pc = M && M.pcRatio, fx = M && M.foreign, t10 = M && M.top10;
   const noMkt = isLive ? '期交所資料未載入' : '模擬模式沒有籌碼資料';
   // A source that lags the others names its own date (TAIFEX's OpenAPI P/C feed ran a session behind, 2026-09/10).
@@ -2180,8 +2260,18 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expi
       right: <div style={{ display: 'flex', gap: 8 }}><KSessionToggle value={barSession} onChange={setBarSession} /><KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} /></div>,
       body: <PriceChart bars={bars} theme={theme} code={P.code} periodLabel={`${per.label}K`} levels={chartLevels}
               cone={L.atmIv ? { ivPct: L.atmIv, days: expiry.dte, label: expiry.label } : null} /> },
-    { i: 'oi', title: '各履約價未平倉 · 對前日增減', hk: 'oichg', right: gridCap(`${pcExpiry != null ? `本到期日 P/C ${pcExpiry.toFixed(2)} · ` : ''}${oiLabel}`),
-      body: <OIProfile spot={spot} contract={expiry.type} rows={oiRows} theme={theme} maxRows={15} showChange walls={walls} /> },
+    { i: 'oi', title: '各履約價未平倉 · 對前日增減', hk: 'oichg', right: gridCap(oiSel ? `● 期交所 ${oiSel}（歷史）${oiView.vs ? ` · 增減對 ${oiView.vs.slice(5)}` : ' · 沒有更早一天可比'}` : `${pcExpiry != null ? `本到期日 P/C ${pcExpiry.toFixed(2)} · ` : ''}${oiLabel}`),
+      body: (<>
+        {mpLine && <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>{mpLine}</div>}
+        {oiDates.length > 1 && <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6, alignItems: 'center' }}>
+          <span className="mono" style={{ fontSize: 9.5, color: dim }}>日期</span>
+          {oiDates.map((d) => {
+            const on = (oiSel || L.oiDate) === d;
+            return <button key={d} onClick={() => setOiPick(d === L.oiDate ? null : d)} style={{ ...miniBtn, padding: '1px 6px', fontSize: 10, background: on ? 'var(--panel2)' : 'transparent', fontWeight: on ? 700 : 500, color: on ? 'var(--text)' : 'var(--muted)' }}>{d.slice(5)}</button>;
+          })}
+        </div>}
+        <OIProfile spot={spot} contract={expiry.type} rows={oiView.rows} theme={theme} maxRows={15} showChange={oiView.showChange} walls={oiView.walls} />
+      </>) },
     { i: 'intraday', title: <>{I && I.night ? '' : ''}當日走勢 · 成本線 · 多空差額</>, hk: 'intraday',
       right: gridCap(I ? `${I.flow === 'tick-type' ? '永豐逐筆 · 內外盤' : '期交所逐筆 · tick rule 近似內外盤'} · ${I.date.slice(4, 6)}/${I.date.slice(6)} ${I.month}` : ''),
       body: <IntradayPanel I={I} P={P} light={light} /> },
@@ -2202,6 +2292,20 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expi
           GEX = γ × OI × {P.mult} × S² × 1%，Call 為正、Put 為負（SqueezeMetrics 的造市者存貨慣例：Call 多 Gamma／Put 空 Gamma）。零 Gamma 以上造市者順勢對沖壓抑波動，以下追價放大波動。OI 為前一交易日。
         </div>
       </>) },
+    { i: 'pctrend', title: 'P/C 比趨勢 · 未平倉／成交量', hk: 'pcratio',
+      right: gridCap(pc ? `期交所 ${pc.date} · 前一交易日` : ''), body: <PcTrendPanel M={M} H={H} light={light} /> },
+    { i: 'optinst', title: '三大法人 · 臺指選擇權買賣權',
+      right: gridCap(X.optpos && X.optpos.inst ? `期交所 ${X.optpos.inst.date} · 前一交易日` : ''), body: <OptInstPanel O={X.optpos} light={light} /> },
+    { i: 'optlarge', title: '大額交易人 · 臺指選擇權 · 台指期',
+      right: gridCap(X.optpos && X.optpos.large ? `期交所 ${X.optpos.large.date} · 前一交易日` : ''), body: <OptLargePanel O={X.optpos} M={M} light={light} /> },
+    { i: 'settlehist', title: '結算歷史 · 最後結算價 · 歸零比例',
+      right: gridCap(H && H.settle && H.settle.length ? `期交所 · ${H.settle.length} 個已到期契約` : ''), body: <SettleHistPanel H={H} light={light} /> },
+    { i: 'retail', title: '散戶多空比 · 小台／微台',
+      right: gridCap(M && M.retail && M.retail.MTX ? `期交所 ${M.retail.MTX.date} · 前一交易日` : ''), body: <RetailPanel M={M} light={light} /> },
+    { i: 'sessions', title: '台指期日夜盤拆解',
+      right: gridCap(X.sessions ? `期交所 ${X.sessions.date} · ${X.sessions.month}` : ''), body: <SessionsPanel S={X.sessions} light={light} /> },
+    { i: 'dividends', title: '除息點數 · 各契約（推算）',
+      right: gridCap(X.dividends ? `證交所 × 期交所 ${ymd(X.dividends.asOf)}` : ''), body: <DividendsPanel Dv={X.dividends} light={light} /> },
   ];
   return (
     <div style={GRID_BODY}>
@@ -2357,7 +2461,7 @@ function ivAnalytics({ rows, expiry, expiries, spot, P }) {
   return { grid: { strikes, exps, base }, term, skew };
 }
 
-function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv20, hvLive, dayBars = null, live = null, light = false, theme = 'dark', grid: gridCtl }) {
+function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv20, hvLive, dayBars = null, live = null, light = false, theme = 'dark', grid: gridCtl, history = null }) {
   const ref = uR(null);
   const instRef = uR(null);
   const [ivView, setIvView] = uS('3d'); // '3d' | 'heat'
@@ -2496,6 +2600,8 @@ function IVWorkspace({ D, P, spot, iv, expiry, expiries = TXO_EXPIRIES, rows, hv
             : <>每格＝該履約價、該到期日的 IV（%）。越亮越高。橫向讀微笑／偏斜，縱向讀期限結構。</>}
         </div>
       ) },
+    { i: 'ivhist', title: '30 天 IV 歷史 · 恆定到期', right: gridCap(history ? `期交所結算價 · 已存 ${history.days.length} 天` : ''),
+      body: <IvHistPanel H={history} light={light} /> },
   ];
   return (
     <div style={GRID_BODY}>

@@ -16,6 +16,10 @@
   GET /api/top20/{pid}       → 權值股 TOP20：期交所成分股權重 + 證交所日收盤（見 taifex.py）
   GET /api/intraday/{pid}    → 1 分 K + 成本線 (高+低)/2 + 多空差額（永豐逐筆 tick_type，或期交所逐筆 tick rule 近似）
   GET /api/twse/{pid}        → 台股籌碼日報：證交所三大法人買賣超 + 融資融券餘額（前一交易日，見 taifex.py）
+  GET /api/optpos/{pid}      → 三大法人選擇權買賣權分計 + 選擇權大額交易人（TAIFEX 每日，見 taifex.py）
+  GET /api/margin/{pid}      → 臺指選擇權風險保證金 A / B / C 值（期交所保證金一覽表）
+  GET /api/sessions/{pid}    → 台指期日夜盤拆解（TAIFEX 期貨每日行情）
+  GET /api/dividends/{pid}   → 各契約除息點數（證交所除權除息預告表 × 期交所成分股權重推算）
   GET /api/premarket/{pid}   → 盤前脈絡：ES / NQ 期指、費半、VIX、台積電 ADR 與 2330、美元／台幣（SGX 期貨），走 IB
 
 唯讀行情 + 部位代理：只讀行情與持倉，不下單、不改單（沒有任何下單端點）。
@@ -489,6 +493,55 @@ async def market(pid: str):
     data = await taifex.market()
     if data is None:
         raise HTTPException(503, "TAIFEX daily reports unavailable")
+    return data
+
+
+def _taifex_only(pid: str, what: str) -> None:
+    if _product(pid).get("oi") != "taifex":
+        raise HTTPException(404, f"no {what} source for {pid!r}")
+
+
+@app.get("/api/optpos/{pid}")
+async def optpos(pid: str):
+    """TXO positions from TAIFEX: 三大法人 call / put long, short and net OI
+    (contracts and 契約金額, 千元) by date, and the options large traders'
+    top-5 / top-10 / 特定法人 positions for all months, weeklies and the front
+    month. Previous session's numbers."""
+    _taifex_only(pid, "options positioning")
+    data = await taifex.options_positioning()
+    if data is None:
+        raise HTTPException(503, "TAIFEX options positioning reports unavailable")
+    return data
+
+
+@app.get("/api/margin/{pid}")
+async def margin(pid: str):
+    """TAIFEX's current TXO risk-margin A / B / C values (結算 / 維持 / 原始) and their 更新日期."""
+    _taifex_only(pid, "margin")
+    data = await taifex.margin()
+    if data is None:
+        raise HTTPException(503, "TAIFEX margin table unavailable")
+    return data
+
+
+@app.get("/api/sessions/{pid}")
+async def sessions(pid: str):
+    """TX night session vs the previous settlement and day session vs the night close."""
+    _taifex_only(pid, "session")
+    data = await taifex.sessions()
+    if data is None:
+        raise HTTPException(503, "TAIFEX futures daily report unavailable")
+    return data
+
+
+@app.get("/api/dividends/{pid}")
+async def dividends(pid: str):
+    """Dividend points per listed contract, derived from TWSE's ex-dividend
+    schedule × TAIFEX's constituent weights (no exchange publishes the estimate)."""
+    _taifex_only(pid, "dividend")
+    data = await taifex.dividends()
+    if data is None:
+        raise HTTPException(503, "TWSE schedule / TAIFEX weights unavailable")
     return data
 
 

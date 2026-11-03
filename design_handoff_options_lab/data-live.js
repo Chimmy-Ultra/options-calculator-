@@ -127,6 +127,15 @@
     twse: (pid) => get('/api/twse/' + encodeURIComponent(pid), 15000),
     // { source: 'ib', asOf, marketDataType, rows: [{ key, symbol, localSymbol, exchange, last, prevClose, chg, chgPct, high, low, time, status }] } | null
     premarket: (pid) => get('/api/premarket/' + encodeURIComponent(pid), 15000),
+    // { source, date, inst: { date, prevDate, rows: { foreign|trust|dealer: { call|put: { longOi, shortOi, netOi, longAmt, shortAmt, netAmt (千元), chgOi, chgAmt } } }, series },
+    //   large: { date, prevDate, filters: { all|weekly|front: { month, call|put: { top5|top10|specific: { buy, sell, net, buyPct, sellPct, netPct, chg }, marketOi } } } } } | null
+    optpos: (pid) => get('/api/optpos/' + encodeURIComponent(pid), 20000),
+    // { source, date (更新日期), values: { A|B|C|TX: { clearing, maintenance, initial } }, mult } | null — 期交所保證金一覽表
+    margin: (pid) => get('/api/margin/' + encodeURIComponent(pid), 15000),
+    // { date, prevDate, month, prevSettle, settle, night: { o,h,l,c,v,chg,gap }, day: { o,h,l,c,v,chg,gap,chgVsSettle } } | null — 台指期日夜盤
+    sessions: (pid) => get('/api/sessions/' + encodeURIComponent(pid), 15000),
+    // { asOf, weightsDate, closeDate, index, items: [{ date, code, name, cash, close, weight, points }], pending, byExpiry: [{ id, label, points, pending }] } | null
+    dividends: (pid) => get('/api/dividends/' + encodeURIComponent(pid), 20000),
   };
   // health.source 'eod' + a label tells the top bar what it is showing; no proxy ⇒ never "STALE".
   const fallback = {};
@@ -163,11 +172,18 @@
   fallback.intraday = async (pid) => { const s = eod(pid); return (s && s.intraday) || null; };
   fallback.twse = async (pid) => { const s = eod(pid); return (s && s.twse) || null; };
   fallback.premarket = async (pid) => { const s = eod(pid); return (s && s.premarket) || null; };
+  fallback.optpos = async (pid) => { const s = eod(pid); return (s && s.optPositions) || null; };
+  fallback.margin = async (pid) => { const s = eod(pid); return (s && s.margin) || null; };
+  fallback.sessions = async (pid) => { const s = eod(pid); return (s && s.sessions) || null; };
+  fallback.dividends = async (pid) => { const s = eod(pid); return (s && s.dividends) || null; };
 
   // Proxy first; the snapshot only answers when the proxy could not.
   window.LiveData = {};
   // Snapshot-only, no proxy leg: the watchlist is a previous-session board.
   window.LiveData.watchRow = watchRow;
+  // Snapshot-only: taifex-history.js (window.TAIFEX_HISTORY), the daily history
+  // the pipeline appends to. Only for the product the TAIFEX snapshot describes.
+  window.LiveData.history = (pid) => ((window.TAIFEX_HISTORY && window.TAIFEX_EOD && window.TAIFEX_EOD.product === pid) ? window.TAIFEX_HISTORY : null);
   Object.keys(live).forEach((k) => {
     window.LiveData[k] = async (...args) => {
       const r = await live[k](...args);
