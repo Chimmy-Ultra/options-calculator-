@@ -692,8 +692,11 @@ function Obsidian3() {
   // ② Live auto-refresh: while connected, re-pull the quote every 10s and the
   // option chain every 30s so intraday prices don't silently go stale. Paused
   // when the tab is hidden; refetches immediately on becoming visible again.
+  // Not on the end-of-day snapshot: it never changes, and re-reading its quote
+  // every 10s wrote the snapshot price back over a What-if / stress-test spot.
   uE(() => {
     if (!live || !P.live || !window.LiveData) return undefined;
+    if (live.health && live.health.source === 'eod') return undefined;
     let dead = false;
     const pullQuote = async () => {
       if (document.hidden) return;
