@@ -32,7 +32,17 @@ averages the call and put IV). On 2026/11/04, the 11/06 F1 expiry alone gives
 26.36 億 at the forward and 28.96 億 with gamma at the spot 43,204 — the site
 shows ≈29.1 — so the gap is the forward (43,015 that day), not the data.
 dlOptDataDown serves TXO back to 2020 (one calendar month per request, ~1–10
-MB each), so gex starts with bars.
+MB each), so gex starts with bars. One method over the whole span, but the
+board it sums grows: Wednesday weeklies are listed throughout, Friday weeklies
+(codes YYYYMMFn) from 2025/06/27, so a session lists a median 6 series in
+2020–22, 7 in 2023–24, 8 in 2025 and 9 in 2026 (the expiring one included).
+The total is dominated by series one day from expiry, so its extremes (and
+the negative days) cluster on the eve of an expiry and become more frequent
+once there are two expiries a week. Through 2020 the 100-point strikes near
+the money often leave fewer than the five strikes taifex._parity_forward
+needs, so those expiries use the TX close as the forward. flip is null (never
+clipped to the grid edge) when the total does not change sign within ±10% —
+4 sessions, all in 2020.
 
 TAIFEX's institutional download (futContractsDateDown, and the per-day HTML
 page behind it) only serves a rolling three years — on 2026/11/04 it refused
