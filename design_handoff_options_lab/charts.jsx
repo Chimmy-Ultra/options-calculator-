@@ -844,7 +844,9 @@ function spreadTags(items, gap, lo, hi) {
   return a;
 }
 
-function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceLabel = '', levels = [], cone = null }) {
+// intraday: one session's minute bars — the whole session in view, no range
+// presets; pctRef = the previous session's close for the percent axis.
+function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceLabel = '', levels = [], cone = null, intraday = false, pctRef = null }) {
   const dark = theme === 'dark';
   const [hiddenMa, setHiddenMa] = React.useState({});
   // Visible bar window into `bars`; null = the whole series. The wheel zooms
@@ -858,14 +860,14 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
   React.useEffect(() => { setView(null); }, [seriesKey]);
   const zoomAt = React.useCallback((factor, fracX) => {
     setView((v) => {
-      const d = Math.min(nAll, DEFAULT_VIEW_BARS);
+      const d = intraday ? nAll : Math.min(nAll, DEFAULT_VIEW_BARS);
       const f = v ? v.from : nAll - d, t = v ? v.to : nAll;
       const span = t - f;
       const next = Math.max(Math.min(MIN_VIEW_BARS, nAll), Math.min(nAll, Math.round(span * factor)));
       const nf = Math.max(0, Math.min(nAll - next, Math.round(f + span * fracX - next * fracX)));
       return { from: nf, to: nf + next };
     });
-  }, [nAll]);
+  }, [nAll, intraday]);
   React.useEffect(() => {
     const el = svgRef.current;
     if (!el) return undefined;
@@ -883,7 +885,7 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
   // percent axis beyond them, so neither has to give up its slot.
   const W = 812, H = 296, plotW = 720, pTop = 12, pBot = 196, vTop = 210, vBot = 274, dateY = 288;
   const n = bars.length;                       // MA / RSI still run over the whole series
-  const defSpan = Math.min(n, DEFAULT_VIEW_BARS);
+  const defSpan = intraday ? n : Math.min(n, DEFAULT_VIEW_BARS);
   const span = view ? Math.max(MIN_VIEW_BARS, Math.min(n, view.to - view.from)) : defSpan;
   const from = view ? Math.max(0, Math.min(n - span, view.from)) : n - defSpan;
   const to = from + span;
@@ -921,7 +923,7 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
   // bar reads the same number as the headline. (moomoo scales its percent axis
   // to the first visible bar, which re-bases on every zoom; this keeps the
   // chart and the top bar telling one story.)
-  const pctBase = n >= 2 ? bars[n - 2].c : bars[n - 1].c;
+  const pctBase = pctRef > 0 ? pctRef : n >= 2 ? bars[n - 2].c : bars[n - 1].c;
   const fmtPct = (p) => {
     const v = pctBase > 0 ? (p / pctBase - 1) * 100 : 0;
     return { text: `${v >= 0 ? '+' : '\u2212'}${Math.abs(v).toFixed(2)}%`, col: v >= 0 ? up : down };
@@ -1020,14 +1022,14 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
           })}
           <span><i style={{ display: 'inline-block', width: 14, height: 2, background: '#a78bfa', verticalAlign: 'middle', marginRight: 4 }} />RSI 14</span>
           {view
-            ? <span className="tnum" onClick={() => setView(null)} title={`回到預設的近 ${Math.min(n, DEFAULT_VIEW_BARS)} 根`}
+            ? <span className="tnum" onClick={() => setView(null)} title={intraday ? '回到整個盤' : `回到預設的近 ${Math.min(n, DEFAULT_VIEW_BARS)} 根`}
                     style={{ cursor: 'pointer', color: '#f0c068', fontWeight: 700, userSelect: 'none' }}>{nv}/{n} 根 · 重設</span>
             : <span className="tnum" style={{ opacity: 0.45 }}>近 {nv}/{n} 根 · 滾輪縮放 · 拖曳平移</span>}
         </span>
       </div>
 
       {/* Range presets — click a period instead of scrolling the wheel back. */}
-      <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
+      {!intraday && <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
         {presets.map((r) => {
           const on = span === r.bars && to === n;
           return (
@@ -1040,7 +1042,7 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
             }}>{r.label}</button>
           );
         })}
-      </div>
+      </div>}
 
       <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width="100%"
            style={{ display: 'block', fontFamily: 'var(--font-mono)', cursor: view ? 'grab' : 'default', touchAction: 'none' }}
