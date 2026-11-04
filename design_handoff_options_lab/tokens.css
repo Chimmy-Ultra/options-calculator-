@@ -8,16 +8,26 @@
   --font-text: "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: -apple-system, "SF Pro Text", "Segoe UI", "Helvetica Neue", Arial, "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
 
-  /* Terminal palette (dark). body.light overrides below. */
-  --bg: #0b0e13;
-  --panel: #11151c;
-  --panel2: #161b24;
-  --border: #232b36;
-  --text: #e6e9ef;
+  /* Palette (dark). body.light overrides below. 2026-11 redesign: cards on a
+     soft ground, rounded, borders only where a card needs an edge. */
+  --bg: #0e1116;
+  --panel: #161a21;
+  --panel2: #1c2129;
+  --border: #262c36;
+  --card-border: #20262f;
+  --text: #e8ebf0;
   --text2: #9aa3b2;
-  --muted: #6b7482;
+  --muted: #6b7480;
   --seg-on: rgba(255,255,255,0.10);
+  --chip: #20252e;
+  --chip-on: #313845;
+  --nav-on: #1c2640;
   --gold: #f0c068;
+  --blue: #4d82ff;
+  --up: #ef5350;
+  --down: #26a69a;
+  --radius: 14px;
+  --shadow: none;
 
   /* Diverging P&L palette (oklch — colorblind-friendlier than red/green) */
   --pnl-up:    oklch(0.78 0.14 75);   /* warm amber */
@@ -30,14 +40,22 @@
   --accent:    oklch(0.66 0.16 250); /* serene blue */
 }
 body.light {
-  --bg: #f2f4f8;
+  --bg: #f4f5f7;
   --panel: #ffffff;
-  --panel2: #f5f7fa;
-  --border: #d3d9e3;
-  --text: #1c2433;
-  --text2: #4b5565;
-  --muted: #7b8494;
-  --seg-on: rgba(20,40,80,0.10);
+  --panel2: #f5f6f9;
+  --border: #e6e9ee;
+  --card-border: transparent;
+  --text: #15181d;
+  --text2: #5b6472;
+  --muted: #98a0ab;
+  --seg-on: rgba(20,40,80,0.08);
+  --chip: #eef0f4;
+  --chip-on: #ffffff;
+  --nav-on: #eaf0ff;
+  --blue: #2f6bff;
+  --up: #e5484d;
+  --down: #12a37a;
+  --shadow: 0 1px 2px rgba(16,24,40,0.05), 0 1px 3px rgba(16,24,40,0.04);
 }
 
 /* Tabular figures for any number column */
@@ -71,11 +89,33 @@ body.light .lt-chainbg { background: rgba(255,255,255,0.55) !important; border-c
    scrolls, instead of flex-shrinking and clipping/overlapping when tall. */
 .calc-col > * { flex-shrink: 0; }
 
-/* Segmented control (flat) */
-.seg { display: inline-flex; border: 1px solid var(--border); }
-.seg > button { padding: 4px 10px; font-size: 11px; font-weight: 600; background: transparent; color: var(--text2); border: none; border-right: 1px solid var(--border); cursor: pointer; font-family: inherit; white-space: nowrap; }
-.seg > button:last-child { border-right: none; }
-.seg > button.on { background: var(--seg-on); color: var(--text); }
+/* Segmented control — rounded pills on a soft track */
+.seg { display: inline-flex; gap: 2px; padding: 2px; background: var(--chip); border-radius: 999px; }
+.seg > button { padding: 4px 11px; font-size: 11.5px; font-weight: 600; background: transparent; color: var(--text2); border: none; border-radius: 999px; cursor: pointer; font-family: inherit; white-space: nowrap; }
+.seg > button:hover { color: var(--text); }
+.seg > button.on { background: var(--chip-on); color: var(--text); box-shadow: var(--shadow); }
+
+/* Chip row (moomoo-style filter pills): .chips > button, .on = filled ink */
+.chips { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chips > button { padding: 4px 12px; font-size: 12px; font-weight: 600; border: none; border-radius: 999px; background: var(--chip); color: var(--text2); cursor: pointer; font-family: inherit; white-space: nowrap; }
+.chips > button.on { background: var(--text); color: var(--bg); }
+.chips > .sep { width: 8px; }
+
+/* Underlined tabs (當日 / 日K / 週K / 月K) */
+.utabs { display: inline-flex; gap: 20px; }
+.utabs > button { padding: 0 0 6px; font-size: 15px; font-weight: 500; border: none; border-bottom: 3px solid transparent; background: transparent; color: var(--text2); cursor: pointer; font-family: inherit; }
+.utabs > button.on { color: var(--text); font-weight: 700; border-bottom-color: var(--blue); }
+
+/* Left navigation rail */
+.rail-btn { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 60px; padding: 9px 0 7px; border: none; border-radius: 12px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.rail-btn:hover { color: var(--text); }
+.rail-btn.on { color: var(--blue); background: var(--nav-on); }
+.rail-btn svg { width: 22px; height: 22px; }
+
+/* Cards */
+.card { background: var(--panel); border: 1px solid var(--card-border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.sec-title { font-size: 17px; font-weight: 700; margin: 26px 2px 12px; display: flex; align-items: baseline; gap: 10px; }
+.sec-title small { font-size: 12px; font-weight: 500; color: var(--muted); }
 
 /* Adjustable panel grid (react-grid-layout). Panels drag by their header bar
    and resize from the bottom-right corner while 調整版面 is on. */
@@ -83,9 +123,10 @@ body.light .lt-chainbg { background: rgba(255,255,255,0.55) !important; border-c
 .react-grid-item { transition: transform 200ms ease, width 200ms ease, height 200ms ease; }
 .react-grid-item.cssTransforms { transition-property: transform, width, height; }
 .react-grid-item.resizing, .react-grid-item.react-draggable-dragging { transition: none; z-index: 3; will-change: transform; }
-.react-grid-item.react-grid-placeholder { background: rgba(240,192,104,0.14); border: 1px dashed var(--gold); opacity: 1; z-index: 2; transition-duration: 100ms; user-select: none; }
+.react-grid-item.react-grid-placeholder { background: rgba(77,130,255,0.10); border: 1px dashed var(--blue); border-radius: var(--radius); opacity: 1; z-index: 2; transition-duration: 100ms; user-select: none; }
 .react-grid-item > .react-resizable-handle { position: absolute; width: 18px; height: 18px; right: 0; bottom: 0; cursor: se-resize; background: linear-gradient(135deg, transparent 55%, var(--gold) 55%, var(--gold) 70%, transparent 70%, transparent 80%, var(--gold) 80%); opacity: 0.85; z-index: 4; }
-.pg-editing .pg-handle { cursor: move; box-shadow: inset 0 0 0 1px rgba(240,192,104,0.35); }
+.pg-editing .pg-handle { cursor: move; }
+.pg-editing .pg-item > .g2 { outline: 1px dashed rgba(77,130,255,0.5); outline-offset: -1px; }
 .pg-item > .g2 { height: 100%; display: flex; flex-direction: column; }
 .pg-body { flex: 1; min-height: 0; overflow: auto; }
 .react-resizable-hide > .react-resizable-handle { display: none; }

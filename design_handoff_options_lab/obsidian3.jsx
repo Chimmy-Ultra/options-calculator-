@@ -159,18 +159,21 @@ function initialProductId() {
   return (s && s.productId && window.PRODUCTS.some((p) => p.id === s.productId)) ? s.productId : 'txo';
 }
 
-function Glass2({ tone = 'panel', radius = 0, padding = 12, style, children, ...rest }) {
-  // Flat terminal panel: solid ground, 1px border, square corners. `tone`
-  // picks the ground (panel / chip / raised share the second shade). The
-  // padding is exported as CSS variables so an Eyebrow inside can bleed to
-  // the edges as the panel's header bar.
+function Glass2({ tone = 'panel', radius = null, padding = 12, style, children, ...rest }) {
+  // Card: solid ground, rounded, a hairline edge in dark and a soft shadow in
+  // light (tokens.css). `tone` picks the ground (panel / chip / raised share
+  // the second shade). The padding is exported as CSS variables for content
+  // that wants to bleed to the edges.
   const pad = typeof padding === 'number' ? `${padding}px` : String(padding);
   const parts = pad.trim().split(/\s+/);
   const ppy = parts[0], ppx = parts.length > 1 ? parts[1] : parts[0];
   return (
     <div className={`g2 g2-${tone}`} style={{
       padding, position: 'relative', overflow: 'hidden', color: 'var(--text)',
-      background: tone === 'panel' ? 'var(--panel)' : 'var(--panel2)', border: '1px solid var(--border)',
+      background: tone === 'panel' ? 'var(--panel)' : 'var(--panel2)',
+      border: `1px solid ${tone === 'panel' ? 'var(--card-border)' : 'var(--border)'}`,
+      borderRadius: radius != null ? radius : (tone === 'panel' ? 'var(--radius)' : 10),
+      boxShadow: tone === 'panel' ? 'var(--shadow)' : 'none',
       '--ppx': ppx, '--ppy': ppy, ...style,
     }} {...rest}>
       {children}
@@ -181,14 +184,99 @@ function Glass2({ tone = 'panel', radius = 0, padding = 12, style, children, ...
 function Eyebrow({ children, right, hk }) {
   const HT = window.HelpTip; // desktop-only hover help (⑧a); pass hk to enable
   const label = (hk && HT) ? <HT k={hk}>{children}</HT> : children;
-  // The panel's header bar: bleeds to the panel edges (see Glass2's --ppx/--ppy).
+  // The card's title row: a plain heading (no bar), controls / source on the right.
   return (
     <div className="pg-handle" style={{
-      display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, minHeight: 30, padding: '0 12px',
-      margin: 'calc(-1 * var(--ppy, 12px)) calc(-1 * var(--ppx, 12px)) 10px', background: 'var(--panel2)', borderBottom: '1px solid var(--border)',
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, minHeight: 28, margin: '0 0 10px',
     }}>
-      <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.5, whiteSpace: 'nowrap', textTransform: 'none' }}>{label}</span>
+      <span style={{ fontSize: 14, fontWeight: 700, whiteSpace: 'nowrap', textTransform: 'none', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
       <span className="mono tnum" style={{ fontSize: 10.5, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, whiteSpace: 'nowrap' }}>{right}</span>
+    </div>
+  );
+}
+
+// Left navigation rail (2026-11 redesign): icon + label per workspace, the
+// theme and help at the foot.
+const NAV_ICONS = {
+  watch: <path d="M12 20.5s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.6a4.3 4.3 0 0 1 7.5 2.9c0 5.4-7.5 10-7.5 10z" />,
+  levels: <><path d="M4 6h16M4 12h16M4 18h16" /><circle cx="15" cy="12" r="2.2" fill="currentColor" stroke="none" /></>,
+  chain: <><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><path d="M3.5 9.5h17M3.5 14.5h17M10 4.5v15" /></>,
+  chart: <><path d="M7 4v16M17 6v13M12 8v9" /><rect x="5" y="8" width="4" height="7" rx="1" /><rect x="15" y="9" width="4" height="6" rx="1" /><rect x="10" y="10.5" width="4" height="4" rx="1" /></>,
+  calc: <><path d="M4 19l5-6 4 3 7-9" /><path d="M15 7h5v5" /></>,
+  lab: <><path d="M9.5 3.5h5M10.5 3.5v6L5 18.5a1.5 1.5 0 0 0 1.3 2h11.4a1.5 1.5 0 0 0 1.3-2L13.5 9.5v-6" /><path d="M7.5 14.5h9" /></>,
+};
+const NAV_ITEMS = [
+  { id: 'watch', label: '自選' }, { id: 'levels', label: '關卡' }, { id: 'chain', label: '報價表' },
+  { id: 'chart', label: 'K線' }, { id: 'calc', label: '策略' }, { id: 'lab', label: '實驗室' },
+];
+function NavRail({ value, onChange, light, setTheme, onHelp, helpOpen }) {
+  const icon = (d) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{d}</svg>;
+  return (
+    <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: RAIL_W, zIndex: 22, background: 'var(--panel)', borderRight: '1px solid var(--border)',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '18px 0 14px', gap: 4 }}>
+      <div title="Options Lab" style={{ width: 36, height: 36, borderRadius: 11, marginBottom: 16, background: 'linear-gradient(135deg, #2f6bff, #7c5cff)',
+        display: 'grid', placeItems: 'center', color: '#fff', fontSize: 13, fontWeight: 800, letterSpacing: -0.5 }}>OL</div>
+      {NAV_ITEMS.map((it) => (
+        <button key={it.id} className={`rail-btn${value === it.id ? ' on' : ''}`} onClick={() => onChange(it.id)}>{icon(NAV_ICONS[it.id])}{it.label}</button>
+      ))}
+      <div style={{ flex: 1 }} />
+      <button className="rail-btn" onClick={() => setTheme(light ? 'dark' : 'light')} title="切換 淺色 / 深色">
+        {icon(light ? <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" /> : <><circle cx="12" cy="12" r="4" /><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4" /></>)}
+        {light ? '深色' : '淺色'}
+      </button>
+      <button className={`rail-btn${helpOpen ? ' on' : ''}`} onClick={onHelp} title="說明 — 這些數字怎麼讀">
+        {icon(<><circle cx="12" cy="12" r="9" /><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.1-2.4 3.6" /><circle cx="12" cy="17" r="0.6" fill="currentColor" /></>)}
+        說明
+      </button>
+    </div>
+  );
+}
+
+// The price header: product (menu) · big last price + change · the session's
+// high / low · data status. moomoo's quote header, in this app's words.
+function HeroQuote({ productId, P, spot, chg, scenario, open, setOpen, onPick, hl, status }) {
+  const fmtSpot = (v) => v.toLocaleString(undefined, { maximumFractionDigits: v < 10 ? 3 : v < 1000 ? 2 : 0 });
+  const col = chg == null ? 'var(--text)' : chg >= 0 ? 'var(--up)' : 'var(--down)';
+  const pct = chg != null && spot - chg !== 0 ? chg / (spot - chg) * 100 : null;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 34, minWidth: 0 }}>
+      <div style={{ position: 'relative', flexShrink: 0 }}>
+        {open && <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 25 }} />}
+        <div onClick={() => setOpen(!open)} title="切換商品" style={{ cursor: 'pointer' }}>
+          <div style={{ fontSize: 19, fontWeight: 700, whiteSpace: 'nowrap' }}>{P.nameZh || P.name}
+            <span style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--text2)', marginLeft: 8 }}>{P.code} ▾</span></div>
+          <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 5, display: 'flex', alignItems: 'center', gap: 10, whiteSpace: 'nowrap' }}>{status}</div>
+        </div>
+        {open && (
+          <div className="card" style={{ position: 'absolute', top: 'calc(100% + 10px)', left: 0, zIndex: 30, width: 270, padding: 6, display: 'flex', flexDirection: 'column', gap: 2, boxShadow: '0 12px 32px rgba(0,0,0,0.25)' }}>
+            {window.PRODUCTS.map((p) => (
+              <button key={p.id} onClick={() => onPick(p.id)} style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', border: 'none', borderRadius: 9, textAlign: 'left', cursor: 'pointer',
+                background: p.id === productId ? 'var(--chip)' : 'transparent', color: 'inherit', fontFamily: 'inherit',
+              }}>
+                <span className="mono" style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 6, background: 'var(--chip)', minWidth: 34, textAlign: 'center' }}>{p.code}</span>
+                <span style={{ fontSize: 12, flex: 1 }}>{p.nameZh || p.name}<span style={{ color: 'var(--muted)', marginLeft: 6, fontSize: 11 }}>{p.name}</span></span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexShrink: 0 }}>
+        <span className="mono tnum" style={{ fontSize: 40, fontWeight: 700, color: col, letterSpacing: -1, lineHeight: 1 }}>
+          {fmtSpot(spot)}{chg != null && <span style={{ fontSize: 28, marginLeft: 6 }}>{chg >= 0 ? '↑' : '↓'}</span>}
+        </span>
+        <span className="mono tnum" style={{ fontSize: 16, fontWeight: 600, color: col, whiteSpace: 'nowrap' }}>
+          {chg != null ? <>{chg >= 0 ? '+' : '−'}{fmtSpot(Math.abs(chg))}{pct != null ? `  ${pct >= 0 ? '+' : '−'}${Math.abs(pct).toFixed(2)}%` : ''}</>
+            : scenario ? <span style={{ color: 'var(--gold)', fontSize: 13 }}>模擬價位</span> : null}
+        </span>
+      </div>
+      {hl && (
+        <div className="mono tnum" style={{ display: 'grid', gridTemplateColumns: 'auto auto', gap: '3px 14px', fontSize: 12.5, color: 'var(--text2)', flexShrink: 0 }}>
+          <span>最高</span><b style={{ color: 'var(--up)', textAlign: 'right' }}>{fmtSpot(hl.high)}</b>
+          <span>最低</span><b style={{ color: 'var(--down)', textAlign: 'right' }}>{fmtSpot(hl.low)}</b>
+          {hl.vol > 0 && <><span>成交量</span><b style={{ color: 'var(--text)', textAlign: 'right' }}>{Math.round(hl.vol).toLocaleString()}</b></>}
+        </div>
+      )}
     </div>
   );
 }
@@ -268,13 +356,13 @@ function ExpiryStrip({ value, onChange, expiries = TXO_EXPIRIES }) {
         const isMonthly = e.type === 'monthly';
         return (
           <button key={e.id} onClick={() => onChange(e.id)} style={{
-            display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', height: 26, flexShrink: 0,
-            border: `1px solid ${active ? 'var(--gold)' : 'var(--border)'}`, background: active ? 'rgba(240,192,104,0.12)' : 'transparent',
-            color: active ? 'var(--text)' : 'var(--text2)', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit',
+            display: 'flex', alignItems: 'center', gap: 6, padding: '0 12px', height: 28, flexShrink: 0, borderRadius: 999,
+            border: 'none', background: active ? 'var(--text)' : 'var(--chip)',
+            color: active ? 'var(--bg)' : 'var(--text2)', fontSize: 11.5, fontWeight: active ? 700 : 500, cursor: 'pointer', fontFamily: 'inherit',
           }}>
-            <span className="mono tnum" style={{ fontWeight: 600 }}>{e.date}</span>
+            <span className="mono tnum" style={{ fontWeight: 700 }}>{e.date}</span>
             <span>{isMonthly ? '月選' : e.label}</span>
-            {e.dte != null && <span className="mono tnum" style={{ color: 'var(--muted)' }}>{e.dte}天</span>}
+            {e.dte != null && <span className="mono tnum" style={{ opacity: 0.6 }}>{e.dte}天</span>}
           </button>
         );
       })}
@@ -309,16 +397,16 @@ function KSessionToggle({ value, onChange }) {
 function WhatIfRail({ P, spot, setSpot, spotMin, spotMax, iv, setIv, open, setOpen, theme, light }) {
   if (!open) {
     return (
-      <Glass2 tone="chip" padding="7px 12px" onClick={() => setOpen(true)}
-        style={{ position: 'fixed', bottom: 12, right: 12, zIndex: 15, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+      <Glass2 tone="chip" radius={999} padding="8px 14px" onClick={() => setOpen(true)}
+        style={{ position: 'fixed', bottom: 14, right: 16, boxShadow: '0 4px 14px rgba(0,0,0,0.12)', zIndex: 15, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', whiteSpace: 'nowrap' }}>
         <span style={{ fontSize: 11, fontWeight: 700 }}>模擬情境</span>
         <span className="tnum" style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'var(--font-mono)' }}>{P.code} {spot.toLocaleString()} · IV {iv}%</span>
       </Glass2>
     );
   }
   return (
-    <Glass2 tone="raised" padding="10px 16px"
-      style={{ position: 'fixed', bottom: 12, right: 12, zIndex: 15, width: 520, maxWidth: 'calc(100vw - 24px)', display: 'grid', gridTemplateColumns: 'auto 1fr 1fr', gap: 18, alignItems: 'center', boxShadow: '0 12px 28px rgba(0,0,0,0.45)' }}>
+    <Glass2 tone="raised" radius={16} padding="12px 18px"
+      style={{ position: 'fixed', bottom: 14, right: 16, zIndex: 15, width: 520, maxWidth: 'calc(100vw - 24px)', display: 'grid', gridTemplateColumns: 'auto 1fr 1fr', gap: 18, alignItems: 'center', boxShadow: '0 12px 28px rgba(0,0,0,0.45)' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
         <span style={{ fontSize: 11, fontWeight: 700 }}>模擬情境</span>
         <button onClick={() => setOpen(false)} title="收合" style={{ fontSize: 13, lineHeight: 1, padding: '2px 7px', border: '1px solid var(--border)', background: 'transparent', color: 'inherit', cursor: 'pointer', fontFamily: 'inherit' }}>×</button>
@@ -400,7 +488,7 @@ function PanelGrid({ tab, panels, defaults, grid }) {
   };
   const item = (p) => (
     <div key={p.i} className="pg-item">
-      <Glass2 tone={p.tone || 'panel'} padding={p.pad != null ? p.pad : 12}>
+      <Glass2 tone={p.tone || 'panel'} padding={p.pad != null ? Math.max(p.pad, 12) : 16}>
         <Eyebrow hk={p.hk} right={p.right}>{p.title}</Eyebrow>
         <div className="pg-body">{p.body}</div>
       </Glass2>
@@ -408,7 +496,7 @@ function PanelGrid({ tab, panels, defaults, grid }) {
   );
   if (!RGL) return <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{panels.map(item)}</div>;
   return (
-    <RGL className={`pg${editing ? ' pg-editing' : ''}`} layout={layout} cols={12} rowHeight={30} margin={[8, 8]} containerPadding={[0, 0]}
+    <RGL className={`pg${editing ? ' pg-editing' : ''}`} layout={layout} cols={12} rowHeight={30} margin={[14, 14]} containerPadding={[0, 0]}
       isDraggable={editing} isResizable={editing} draggableHandle=".pg-handle" compactType="vertical" onLayoutChange={onLayoutChange}>
       {panels.map(item)}
     </RGL>
@@ -471,7 +559,11 @@ const gridCap = (txt) => <span className="mono" style={{ fontSize: 9, opacity: 0
 // Max profit / loss text: an unbounded side reads 無上限 rather than a number.
 const fmtCap = (v, P, plus = false) => (Number.isFinite(v) ? `${plus ? '+' : ''}${P.cur}${Math.round(v).toLocaleString()}` : '無上限');
 const expCap = (e) => `${e.date} ${e.type === 'monthly' ? '月選' : e.label} · ${e.dte} 天`;
-const GRID_BODY = { position: 'absolute', top: 90, left: 12, right: 12, bottom: 12, zIndex: 5, overflowY: 'auto', overflowX: 'hidden' };
+// Desktop shell geometry: a left rail, the price header, the expiry row, then
+// the workspace body (scrolls on its own).
+const RAIL_W = 80, HEAD_H = 84, EXP_H = 46;
+const BODY_TOP = HEAD_H + EXP_H + 6;
+const GRID_BODY = { position: 'absolute', top: BODY_TOP, left: RAIL_W + 18, right: 18, bottom: 14, zIndex: 5, overflowY: 'auto', overflowX: 'hidden' };
 
 function Obsidian3() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
@@ -969,56 +1061,58 @@ function Obsidian3() {
   const spotChgTop = (qNow && qNow.last > 0 && qNow.close > 0 && spot === qNow.last) ? qNow.last - qNow.close
     : (spotUnderlying && spotUnderlying.price === spot && spotUnderlying.prevClose > 0) ? spot - spotUnderlying.prevClose : null;
   const spotScenario = !!live && !(qNow && spot === qNow.last) && !(spotUnderlying && spot === spotUnderlying.price);
+  // The header's 最高 / 最低 / 成交量: the live quote's session range when the
+  // source reports one, else the latest day bar of the real series. A
+  // scenario price or mock data shows none.
+  const lastDay = liveDayBars && liveDayBars.length ? liveDayBars[liveDayBars.length - 1] : null;
+  const headHL = spotScenario ? null
+    : (qNow && qNow.high > 0 && qNow.low > 0) ? { high: qNow.high, low: qNow.low, vol: qNow.volume || 0 }
+    : lastDay ? { high: lastDay.h, low: lastDay.l, vol: lastDay.v || 0 } : null;
   return (
     <div style={{
       width: '100%', minHeight: '100vh', position: 'relative', overflow: 'hidden',
       fontFamily: 'var(--font-display)', color: 'var(--text)', background: 'var(--bg)', fontSize: 12,
     }}>
-      {/* Top bar: brand · tabs · (right) product + price, data source, settlement, theme, help.
+      <NavRail value={workspace} onChange={setWorkspace} light={light} setTheme={setTheme} helpOpen={helpOpen}
+        onHelp={() => { setHelpOpen((v) => !v); dismissHelpHint(); }} />
+
+      {/* Price header: product menu · big last price · session high / low · status chips · theme switch.
           Sits above the expiry row: the product menu inside must win the stacking order. */}
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 44, display: 'flex', alignItems: 'stretch', gap: 12, padding: '0 12px', background: 'var(--panel2)', borderBottom: '1px solid var(--border)', zIndex: 20 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingRight: 12, borderRight: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
-          <div style={{ width: 10, height: 10, background: 'var(--gold)' }} />
-          <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: 0.5 }}>Options Lab</span>
-        </div>
-        <WorkspaceTabs value={workspace} onChange={setWorkspace} />
+      <div style={{ position: 'absolute', top: 0, left: RAIL_W, right: 0, height: HEAD_H, display: 'flex', alignItems: 'center', gap: 16, padding: '0 22px', zIndex: 20 }}>
+        <HeroQuote
+          productId={productId} P={P} spot={spot} chg={spotChgTop} scenario={spotScenario}
+          open={prodMenuOpen} setOpen={setProdMenuOpen} hl={headHL}
+          onPick={(id) => { switchProduct(id); setProdMenuOpen(false); }}
+          status={(<>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+              title={live ? (live.health && live.health.source === 'eod' ? `${P.live === 'ib' ? 'IB 快照' : '期交所前一交易日'}資料（${live.health.asOf}），沒有即時報價` : `${BROKER[P.live]} 已連線`) : '沒有本機資料代理 — 模擬資料'}>
+              <span style={{ width: 7, height: 7, borderRadius: 4, background: live ? 'var(--down)' : 'var(--muted)' }} />
+              {P.live ? liveLabelZh(live, P) : '模擬'}
+              {live && P.live && !(live.health && live.health.source === 'eod') && <FreshnessChip lastLiveAt={lastLiveAt} />}
+            </span>
+            <span>·</span>
+            {dte <= 0 ? <span style={{ color: 'var(--up)', fontWeight: 700 }}>今天結算 · {P.settleNote || '13:30'}</span>
+              : <span>{expiry.type === 'monthly' ? '月選' : expiry.label} {expiry.date} 結算 · 剩 {dte} 天</span>}
+          </>)}
+        />
         <div style={{ flex: 1 }} />
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexShrink: 0 }}>
-          <ProductDropdown
-            productId={productId} P={P} spot={spot} chg={spotChgTop} scenario={spotScenario} live={live}
-            open={prodMenuOpen} setOpen={setProdMenuOpen}
-            onPick={(id) => { switchProduct(id); setProdMenuOpen(false); }}
-          />
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', border: '1px solid var(--border)', fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap' }}
-            title={live ? (live.health && live.health.source === 'eod' ? `${P.live === 'ib' ? 'IB 快照' : '期交所前一交易日'}資料（${live.health.asOf}），沒有即時報價` : `${BROKER[P.live]} 已連線`) : '沒有本機資料代理 — 模擬資料'}>
-            <span style={{ width: 6, height: 6, borderRadius: 3, background: live ? '#26a69a' : 'var(--muted)' }} />
-            {P.live ? liveLabelZh(live, P) : '模擬'}
-            {live && P.live && !(live.health && live.health.source === 'eod') && <FreshnessChip lastLiveAt={lastLiveAt} />}
+        <DataQualityPill quality={quality} />
+        <Seg items={[{ id: 'light', label: '淺色' }, { id: 'dark', label: '深色' }]} value={theme} onChange={setTheme} />
+        {!helpHintSeen && (
+          <div style={{
+            position: 'absolute', top: 'calc(100% - 6px)', left: 12, zIndex: 20, whiteSpace: 'nowrap',
+            display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 8,
+            background: 'rgba(240,192,104,0.16)', border: '1px solid rgba(240,192,104,0.4)',
+            fontSize: 10.5, fontWeight: 600, color: light ? '#8a6410' : '#f7d394',
+          }}>
+            ← 第一次用？按左下「說明」
+            <button onClick={(e) => { e.stopPropagation(); dismissHelpHint(); }} title="關閉" style={{ border: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 12, lineHeight: 1, padding: 0, fontFamily: 'inherit' }}>×</button>
           </div>
-          <DataQualityPill quality={quality} />
-          <SettlementCountdown dte={dte} note={P.settleNote} />
-          <button onClick={() => setTheme(light ? 'dark' : 'light')} title="切換 亮色 / 深色" style={{ padding: '4px 8px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text2)', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
-            {light ? '☀ 亮色' : '☾ 深色'}
-          </button>
-          <div style={{ position: 'relative', flexShrink: 0 }}>
-            <button onClick={() => { setHelpOpen((v) => !v); dismissHelpHint(); }} title="說明 — 這些數字怎麼讀" style={{ padding: '4px 9px', border: `1px solid ${helpOpen ? 'var(--gold)' : 'var(--border)'}`, background: 'transparent', color: 'var(--text)', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>?</button>
-            {!helpHintSeen && (
-              <div style={{
-                position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 20, whiteSpace: 'nowrap',
-                display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
-                background: 'rgba(240,192,104,0.16)', border: '1px solid rgba(240,192,104,0.4)',
-                fontSize: 10, fontWeight: 600, color: light ? '#8a6410' : '#f7d394',
-              }}>
-                第一次用？按 <b>?</b> 看說明
-                <button onClick={(e) => { e.stopPropagation(); dismissHelpHint(); }} title="關閉" style={{ border: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 12, lineHeight: 1, padding: 0, fontFamily: 'inherit' }}>×</button>
-              </div>
-            )}
-          </div>
-        </div>
+        )}
       </div>
 
-      {/* Expiry row — second row; tab-specific controls on the right */}
-      <div style={{ position: 'absolute', top: 44, left: 0, right: 0, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '0 12px', borderBottom: '1px solid var(--border)', zIndex: 10 }}>
+      {/* Expiry row — tab-specific controls on the right */}
+      <div style={{ position: 'absolute', top: HEAD_H, left: RAIL_W, right: 0, height: EXP_H, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '0 18px', zIndex: 10 }}>
         <ExpiryStrip value={expiryId} onChange={setExpiryId} expiries={expiries} />
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {workspace === 'lab' && <LabToggle value={labView} onChange={setLabView} />}
@@ -1279,12 +1373,12 @@ function LabSurface({ P, theme = 'dark', light = false, t, spot, dte, legs, hove
   }, [hover, spot, dte, P]);
   return (
     <>
-      <div style={{ position: 'absolute', inset: '110px 0 0 0' }}>
+      <div style={{ position: 'absolute', inset: `${BODY_TOP - 10}px 0 0 ${RAIL_W}px` }}>
         <Surface3DMount theme={theme} height="100%" scheme={t.scheme} onHover={setHover} />
       </div>
       {hoverInfo && (
         <div style={{
-          position: 'absolute', top: 130, left: '50%', transform: 'translateX(-50%)', zIndex: 6,
+          position: 'absolute', top: BODY_TOP + 20, left: `calc(50% + ${RAIL_W / 2}px)`, transform: 'translateX(-50%)', zIndex: 6,
           padding: '8px 14px', borderRadius: 0,
           background: 'rgba(20,24,34,0.85)', backdropFilter: 'blur(20px)',
           border: '1px solid rgba(255,255,255,0.12)',
@@ -1300,7 +1394,7 @@ function LabSurface({ P, theme = 'dark', light = false, t, spot, dte, legs, hove
           </span>
         </div>
       )}
-      <Glass2 tone="panel" padding={D.panelPad} style={{ position: 'absolute', bottom: 24, left: 24, zIndex: 5, width: 300 }}>
+      <Glass2 tone="panel" padding={D.panelPad} style={{ position: 'absolute', bottom: 24, left: RAIL_W + 24, zIndex: 5, width: 300 }}>
         <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{P.code} · {dte} 天</span>}>3D 損益曲面</Eyebrow>
         <div style={{ fontSize: 11, lineHeight: 1.6, opacity: 0.8 }}>
           橫軸＝標的價格，縱深＝時間流逝（前緣今天、後緣到期），高度與顏色＝損益。拖曳旋轉、滾輪縮放。
@@ -1859,7 +1953,7 @@ function Spark({ series, w = 96, h = 30, light = false }) {
 function LevelTile({ label, hk, value, sub, color, right, light }) {
   const HT = window.HelpTip;
   return (
-    <Glass2 tone="chip" radius={0} padding="10px 12px" style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+    <Glass2 tone="chip" radius={12} padding="10px 12px" style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
       <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.62, marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {(hk && HT) ? <HT k={hk}>{label}</HT> : label}
@@ -2768,7 +2862,7 @@ function CompareWorkspace({ D, P, spot, iv, dte, theme = 'dark' }) {
   const biasColor = { bullish: '#ef5350', bearish: '#26a69a', neutral: '#a78bfa', volatile: '#f0c068' };
 
   return (
-    <div style={{ position: 'absolute', top: 90, left: 12, right: 12, bottom: 12, zIndex: 5, display: 'flex', flexDirection: 'column', gap: D.gap }}>
+    <div style={{ position: 'absolute', top: BODY_TOP, left: RAIL_W + 18, right: 18, bottom: 14, zIndex: 5, display: 'flex', flexDirection: 'column', gap: D.gap }}>
       {/* Strategy picker bar */}
       <Glass2 tone="panel" padding="12px 16px">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
