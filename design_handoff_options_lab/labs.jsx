@@ -4,8 +4,8 @@
 //     prices for every listed expiry (Breeden–Litzenberger: the density is
 //     the second derivative of the call price in strike), drawn as ridgelines,
 //     with a price cursor that reads P(settle above / below) per expiry.
-//  2. 當沖重播練習場 — the latest session replayed minute by minute with the
-//     future hidden; buy / sell 小台 as it plays and get a scorecard.
+//  2. 籌碼指標回測 — whether 散戶多空比 / P/C / 外資 positioning has said
+//     anything about TX's next day and next five days so far.
 // Exports on window.* like the other .jsx files; hooks are aliased (classic
 // scripts share one global scope).
 const { useState: lbS, useMemo: lbM, useRef: lbR, useEffect: lbE } = React;
@@ -15,17 +15,18 @@ const lbN = (v, dp = 0) => (v == null || !Number.isFinite(v) ? '—' : v.toLocal
 const lbPct = (v) => (v == null ? '—' : `${(v * 100).toFixed(v > 0.995 || v < 0.005 ? 1 : 0)}%`);
 
 // Width of an element, kept current (charts draw at 1 viewBox unit = 1px).
+// A callback ref, so an element that only appears once the data has loaded
+// is still measured.
 function useLbWidth(init = 800) {
-  const ref = lbR(null);
+  const [el, setEl] = lbS(null);
   const [w, setW] = lbS(init);
   lbE(() => {
-    const el = ref.current;
     if (!el || !window.ResizeObserver) return undefined;
     const ro = new ResizeObserver((es) => { const x = Math.round(es[0].contentRect.width); if (x > 0) setW(x); });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
-  return [ref, w];
+  }, [el]);
+  return [setEl, w];
 }
 
 // ───────────────────────────────────────────── 1. implied distribution
@@ -220,227 +221,150 @@ function ImpliedDistCard({ E, spot, marks = [], light }) {
   );
 }
 
-// ───────────────────────────────────────────── 2. day-trade replay
-const LB_SPEEDS = [{ id: 2, label: '慢' }, { id: 6, label: '中' }, { id: 15, label: '快' }, { id: 40, label: '極速' }];
-const LB_MULT = 50; // 小台 NT$ per point
-// Round-trip cost estimate per contract per side: NT$20 commission + 期交稅
-// 0.002% of contract value.
-const lbFee = (px) => 20 + Math.round(px * LB_MULT * 0.00002);
-function bestOf(key) { try { const v = JSON.parse(localStorage.getItem(key) || 'null'); return Number.isFinite(v) ? v : null; } catch (e) { return null; } }
-
-function ReplayCard({ I, levels = [], light }) {
-  const [full, setFull] = lbS(false);
-  const [idx, setIdx] = lbS(0);
-  const [playing, setPlaying] = lbS(false);
-  const [speed, setSpeed] = lbS(6);
-  const [pos, setPos] = lbS(0);          // signed contracts
-  const [avg, setAvg] = lbS(0);
-  const [realized, setRealized] = lbS(0);
-  const [fees, setFees] = lbS(0);
-  const [trades, setTrades] = lbS([]);   // closed round trips {pnl}
-  const [fills, setFills] = lbS([]);     // {i, side}
-  const [boxRef, w] = useLbWidth(900);
-  const hoverRef = lbR(false);
-  const bars = lbM(() => {
-    if (!I || !I.day || !I.day.bars) return [];
-    const src = (full && I.night && I.night.bars ? I.night.bars : []).concat(I.day.bars);
-    return src.map((b) => ({ t: `${b[0].slice(0, 2)}:${b[0].slice(2, 4)}`, o: b[1], h: b[2], l: b[3], c: b[4], v: b[5] }));
-  }, [I, full]);
-  const n = bars.length;
-  const reset = () => { setIdx(0); setPlaying(false); setPos(0); setAvg(0); setRealized(0); setFees(0); setTrades([]); setFills([]); };
-  lbE(() => { reset(); }, [I, full]);
-  lbE(() => {
-    if (!playing) return undefined;
-    const t = setInterval(() => setIdx((i) => { if (i >= n - 1) { setPlaying(false); return i; } return i + 1; }), 1000 / speed);
-    return () => clearInterval(t);
-  }, [playing, speed, n]);
-  const px = n ? bars[idx].c : 0;
-  const trade = (dir, atClose = false) => { // dir +1 buy, −1 sell, 0 flatten
-    if (!n || (idx >= n - 1 && !atClose)) return;
-    const q = dir === 0 ? -Math.sign(pos) * Math.abs(pos) : dir;
-    if (!q) return;
-    let p = pos, a = avg, real = realized, closed = [];
-    for (let k = 0; k < Math.abs(q); k++) {
-      const s = Math.sign(q);
-      if (p !== 0 && Math.sign(p) !== s) { const pnl = (px - a) * Math.sign(p) * LB_MULT; real += pnl; closed.push(pnl); p += s; if (p === 0) a = 0; }
-      else { a = (a * Math.abs(p) + px) / (Math.abs(p) + 1); p += s; }
-    }
-    if (Math.abs(p) > 5) return; // keep it to five contracts
-    setPos(p); setAvg(a); setRealized(real); setFees((f) => f + Math.abs(q) * lbFee(px));
-    if (closed.length) setTrades((t) => t.concat(closed.map((x) => ({ pnl: x }))));
-    setFills((f) => f.concat([{ i: idx, side: Math.sign(q) }]));
-  };
-  lbE(() => {
-    const onKey = (e) => {
-      if (!hoverRef.current || /INPUT|TEXTAREA|SELECT/.test((e.target && e.target.tagName) || '')) return;
-      const k = e.key.toLowerCase();
-      if (k === ' ') { e.preventDefault(); setPlaying((v) => !v); }
-      else if (k === 'b') trade(1);
-      else if (k === 's') trade(-1);
-      else if (k === 'f') trade(0);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  });
-  // Personal best per session and session type, in this browser only.
-  const bestKey = `optionsLab.replayBest.${I && I.date}.${full ? 'full' : 'day'}`;
-  const doneNow = n > 0 && idx >= n - 1;
-  // At the close an open position is flattened at the last price (a day
-  // trade doesn't carry overnight), then the score is final.
-  lbE(() => { if (doneNow && pos !== 0) trade(0, true); }, [doneNow, pos]);
-  lbE(() => {
-    if (!doneNow || pos !== 0 || !trades.length) return;
-    const score = Math.round(realized - fees);
-    const prev = bestOf(bestKey);
-    if (prev == null || score > prev) { try { localStorage.setItem(bestKey, JSON.stringify(score)); } catch (e) { /* storage off */ } }
-  }, [doneNow, pos, trades.length]);
-  if (!n) return <div style={{ fontSize: 12, color: 'var(--muted)' }}>沒有逐筆資料（期交所逐筆檔或永豐逐筆）。</div>;
-  const unreal = pos ? (px - avg) * pos * LB_MULT : 0;
-  const net = realized + unreal - fees;
-  const done = idx >= n - 1;
-  // y range: what has been seen so far (never shrinks), plus the levels near it.
-  const seen = bars.slice(0, idx + 1);
-  let yLo = Math.min(...seen.map((b) => b.l)), yHi = Math.max(...seen.map((b) => b.h));
-  const span0 = Math.max(yHi - yLo, bars[0].o * 0.006);
-  const mid = (yLo + yHi) / 2;
-  yLo = Math.min(yLo, mid - span0 / 2); yHi = Math.max(yHi, mid + span0 / 2);
-  const near = levels.filter((l) => l.price > yLo - span0 * 0.35 && l.price < yHi + span0 * 0.35);
-  near.forEach((l) => { yLo = Math.min(yLo, l.price); yHi = Math.max(yHi, l.price); });
-  const padY = (yHi - yLo) * 0.08;
-  yLo -= padY; yHi += padY;
-  const H = 300, pl = 8, pr = 74, pt = 10, pb = 22;
-  const band = (w - pl - pr) / n;
-  const X = (i) => pl + band * (i + 0.5);
-  const Y = (v) => pt + (yHi - v) / (yHi - yLo) * (H - pt - pb);
-  const txt = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
-  // Levels crossed so far, newest first.
-  const events = [];
-  for (let i = 1; i <= idx; i++) {
-    for (const l of levels) {
-      if (bars[i].l <= l.price && bars[i].h >= l.price && !(bars[i - 1].l <= l.price && bars[i - 1].h >= l.price)
-        && !events.some((e) => e.l === l && i - e.i < 15)) events.push({ t: bars[i].t, l, i });
-    }
+// ───────────────────────────────────────────── 2. positioning backtest
+// Do the positioning numbers say anything about what TX does next? For each
+// indicator, sessions are split into thirds by its value; the top and bottom
+// thirds are compared on the next session's and the next five sessions'
+// close-to-close return of the TX front month (day session). The gap is
+// tested with Welch's t; five-day windows overlap, so their t is divided by
+// √5 (overlapping returns share four of five days). |t| < 2 reads as no
+// reliable difference. Sources: taifex-history.js (retail since 2026-07,
+// P/C since 2026-07, 外資 since 2026-09) and the snapshot's daily bars.
+function lbStats(a) {
+  const n = a.length;
+  if (!n) return null;
+  const m = a.reduce((s, x) => s + x, 0) / n;
+  const sd = n > 1 ? Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / (n - 1)) : 0;
+  return { n, m, sd, up: a.filter((x) => x > 0).length / n };
+}
+function lbBacktest(rows, bars) {
+  const ix = {};
+  bars.forEach((b, i) => { const t = String(b.t); ix[`${t.slice(0, 4)}/${t.slice(4, 6)}/${t.slice(6, 8)}`] = i; });
+  const fwd = (d, k) => { const i = ix[d]; return (i == null || i + k >= bars.length) ? null : (bars[i + k].c / bars[i].c - 1) * 100; };
+  const pts = rows.map(([d, v]) => ({ d, v, r1: fwd(d, 1), r5: fwd(d, 5) })).filter((p) => Number.isFinite(p.v) && p.r1 != null);
+  if (pts.length < 15) return null;
+  const vs = pts.map((p) => p.v).sort((a, b) => a - b);
+  const lo = vs[Math.floor(vs.length / 3)], hi = vs[Math.floor(2 * vs.length / 3)];
+  const side = (f, key) => lbStats(pts.filter(f).map((p) => p[key]).filter((x) => x != null));
+  const res = {};
+  for (const [key, adj] of [['r1', 1], ['r5', Math.sqrt(5)]]) {
+    const H = side((p) => p.v >= hi, key), L = side((p) => p.v <= lo, key);
+    const se = H && L && H.n > 1 && L.n > 1 ? Math.sqrt(H.sd ** 2 / H.n + L.sd ** 2 / L.n) : null;
+    res[key] = { hi: H, lo: L, t: se ? (H.m - L.m) / se / adj : null };
   }
-  const wins = trades.filter((x) => x.pnl > 0).length;
-  const hold = (bars[n - 1].c - bars[0].o) * LB_MULT - 2 * lbFee(bars[0].o);
-  let best = 0;
-  { let lo = Infinity, hi = -Infinity; for (const b of bars) { lo = Math.min(lo, b.l); hi = Math.max(hi, b.h); best = Math.max(best, (b.h - lo), (hi - b.l)); } }
-  const bestScore = bestOf(bestKey);
-  const btn = (label, onClick, bg, disabled) => (
-    <button onClick={onClick} disabled={disabled} style={{ border: 'none', borderRadius: 10, padding: '9px 16px', fontSize: 14, fontWeight: 800, cursor: disabled ? 'default' : 'pointer',
-      background: bg, color: '#fff', fontFamily: 'inherit', opacity: disabled ? 0.4 : 1, minWidth: 92 }}>{label}</button>
-  );
-  const nt = (v) => <span style={{ color: v > 0 ? LB_UP : v < 0 ? LB_DOWN : 'var(--text)' }}>{v > 0 ? '+' : v < 0 ? '−' : ''}NT${lbN(Math.abs(Math.round(v)))}</span>;
+  return { n: pts.length, lo, hi, pts, from: pts[0].d, to: pts[pts.length - 1].d, ...res };
+}
+
+const LB_INDICATORS = [
+  { id: 'rmtx', name: '散戶多空比 · 小台', unit: '%', dp: 1, rows: (H) => (H.retail && H.retail.MTX || []).map((r) => [r[0], r[1]]), hint: '常被當反向指標：散戶越偏多，越容易跌' },
+  { id: 'rtmf', name: '散戶多空比 · 微台', unit: '%', dp: 1, rows: (H) => (H.retail && H.retail.TMF || []).map((r) => [r[0], r[1]]), hint: '同上，微台散戶比重更高' },
+  { id: 'pc', name: 'P/C 未平倉比', unit: '', dp: 2, rows: (H) => (H.pc || []).map((r) => [r[0], r[1]]), hint: '賣權多 = 避險或看空的人多' },
+  { id: 'fx', name: '外資期貨淨部位', unit: '口', dp: 0, rows: (H) => (H.fx || []).map((r) => [r[0], r[1]]), hint: '負數 = 淨空單；越負越偏空' },
+  { id: 'fxd', name: '外資淨部位 · 單日增減', unit: '口', dp: 0, rows: (H) => (H.fx || []).slice(1).map((r, i) => [r[0], r[1] - H.fx[i][1]]), hint: '當天加空還是回補' },
+];
+
+function BacktestCard({ H, bars, light }) {
+  const [sel, setSel] = lbS('rmtx');
+  const [boxRef, w] = useLbWidth(520);
+  const results = lbM(() => (H && bars && bars.length ? LB_INDICATORS.map((ind) => ({ ind, r: lbBacktest(ind.rows(H), bars) })).filter((x) => x.r) : []), [H, bars]);
+  if (!results.length) return <div style={{ fontSize: 12, color: 'var(--muted)' }}>需要籌碼歷史和日 K（每個交易日 16:30 後更新）。</div>;
+  const pct = (v) => (v == null ? '—' : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}%`);
+  const col = (v) => (v > 0 ? LB_UP : v < 0 ? LB_DOWN : 'var(--text)');
+  const cell = (s) => (s ? <span><b className="mono tnum" style={{ color: col(s.m) }}>{pct(s.m)}</b><span style={{ color: 'var(--muted)', fontSize: 11 }}> · 漲 {Math.round(s.up * 100)}%</span></span> : '—');
+  const verdict = (t) => (t == null ? { text: '樣本不足', c: 'var(--muted)' } : Math.abs(t) >= 2 ? { text: '有差異（待更多樣本確認）', c: LB_GOLD } : { text: '看不出差別', c: 'var(--muted)' });
+  const any = results.some((x) => (x.r.r1.t != null && Math.abs(x.r.r1.t) >= 2) || (x.r.r5.t != null && Math.abs(x.r.r5.t) >= 2));
+  const cur = results.find((x) => x.ind.id === sel) || results[0];
+  // Scatter: indicator value vs next-5-session return, thirds shaded.
+  const sp = cur.r.pts.filter((p) => p.r5 != null);
+  const Hh = 230, pl = 52, pr = 14, pt = 12, pb = 30;
+  const vx = sp.map((p) => p.v), vy = sp.map((p) => p.r5);
+  const xLo = Math.min(...vx), xHi = Math.max(...vx), yAbs = Math.max(1, ...vy.map((v) => Math.abs(v))) * 1.1;
+  const X = (v) => pl + (v - xLo) / ((xHi - xLo) || 1) * (w - pl - pr);
+  const Y = (v) => pt + (yAbs - v) / (2 * yAbs) * (Hh - pt - pb);
+  const txt = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
+  const grid = light ? 'rgba(20,30,50,0.10)' : 'rgba(255,255,255,0.09)';
+  const fmtV = (v) => `${lbN(v, cur.ind.dp)}${cur.ind.unit}`;
   return (
-    <div onMouseEnter={() => { hoverRef.current = true; }} onMouseLeave={() => { hoverRef.current = false; }}>
-      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>
-        把 {I.date.slice(4, 6)}/{I.date.slice(6)} {full ? '全日盤' : '日盤'} 重播一次，看不到未來，你來操作一口小台
+    <div>
+      <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.5, marginBottom: 4 }}>
+        {any ? '有指標出現差異，但樣本還少，先當參考就好' : '以目前的資料，這些籌碼指標都看不出能可靠預測台指接下來的漲跌'}
       </div>
-      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
-        按播放後每一根 K 棒是一分鐘。快捷鍵（游標在這張卡上時）：空白鍵 播放／暫停、B 買進、S 賣出、F 全部平倉。最多 5 口，以每根收盤價成交，小台每點 NT$50。
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.6 }}>
+        把每個交易日依指標高低分成三等份，比較「最高三分之一」和「最低三分之一」之後台指期的表現。差距要大到統計上站得住（|t| ≥ 2）才算有意義；樣本每天自動增加，結論會跟著更新。
       </div>
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
-        <button onClick={() => (done ? (reset(), setPlaying(true)) : setPlaying((v) => !v))} style={{ border: 'none', borderRadius: 999, width: 42, height: 42, fontSize: 16, cursor: 'pointer', background: 'var(--text)', color: 'var(--bg)' }}
-          title="播放／暫停（空白鍵）">{playing ? '❚❚' : done ? '↺' : '▶'}</button>
-        <div className="chips">
-          {LB_SPEEDS.map((s) => <button key={s.id} className={speed === s.id ? 'on' : ''} onClick={() => setSpeed(s.id)}>{s.label}</button>)}
-          <span className="sep" />
-          <button className={!full ? 'on' : ''} onClick={() => setFull(false)}>日盤</button>
-          <button className={full ? 'on' : ''} onClick={() => setFull(true)}>全日盤</button>
-          <span className="sep" />
-          <button onClick={reset}>重來</button>
+      <div style={{ overflowX: 'auto' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px, 1.3fr) 66px repeat(4, minmax(128px, 1fr)) minmax(140px, 1fr)', gap: 0, fontSize: 12.5, minWidth: 900 }}>
+          {['指標', '樣本', '偏高時 · 隔天', '偏低時 · 隔天', '偏高時 · 5 天後', '偏低時 · 5 天後', '結論'].map((h, k) => (
+            <span key={h} style={{ fontSize: 11, color: 'var(--muted)', padding: `4px 12px 4px ${k ? 0 : 6}px`, borderBottom: '1px solid var(--border)' }}>{h}</span>
+          ))}
+          {results.map(({ ind, r }) => {
+            const v1 = verdict(r.r1.t), v5 = verdict(r.r5.t);
+            const on = ind.id === cur.ind.id;
+            const rowStyle = { padding: '8px 12px 8px 0', borderBottom: '1px solid var(--border)', background: on ? 'var(--chip)' : 'transparent', cursor: 'pointer' };
+            return [
+              <span key={`${ind.id}0`} style={{ ...rowStyle, fontWeight: 700, paddingLeft: 6, borderRadius: '8px 0 0 8px' }} onClick={() => setSel(ind.id)}>{ind.name}</span>,
+              <span key={`${ind.id}1`} className="mono" style={{ ...rowStyle, color: 'var(--text2)' }} onClick={() => setSel(ind.id)}>{r.n} 天</span>,
+              <span key={`${ind.id}2`} style={rowStyle} onClick={() => setSel(ind.id)}>{cell(r.r1.hi)}</span>,
+              <span key={`${ind.id}3`} style={rowStyle} onClick={() => setSel(ind.id)}>{cell(r.r1.lo)}</span>,
+              <span key={`${ind.id}4`} style={rowStyle} onClick={() => setSel(ind.id)}>{cell(r.r5.hi)}</span>,
+              <span key={`${ind.id}5`} style={rowStyle} onClick={() => setSel(ind.id)}>{cell(r.r5.lo)}</span>,
+              <span key={`${ind.id}6`} style={{ ...rowStyle, borderRadius: '0 8px 8px 0', fontSize: 12 }} onClick={() => setSel(ind.id)}>
+                <span style={{ color: v1.c }}>隔天 {v1.text}</span><br /><span style={{ color: v5.c }}>5 天 {v5.text}</span>
+              </span>,
+            ];
+          })}
         </div>
-        <span style={{ flex: 1 }} />
-        <span className="mono tnum" style={{ fontSize: 13, color: 'var(--text2)' }}>{bars[idx].t} · 第 {idx + 1}/{n} 分鐘</span>
-        <span className="mono tnum" style={{ fontSize: 24, fontWeight: 800 }}>{lbN(px)}</span>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 250px', gap: 16, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 280px', gap: 16, marginTop: 16, alignItems: 'start' }}>
         <div ref={boxRef} style={{ minWidth: 0 }}>
-          <svg width={w} height={H} style={{ display: 'block', fontFamily: 'var(--font-mono)' }}>
-            {levels.map((l) => l.price > yLo && l.price < yHi && (
-              <g key={l.label}>
-                <line x1={pl} x2={w - pr} y1={Y(l.price)} y2={Y(l.price)} stroke={l.color} strokeDasharray="5 4" strokeOpacity="0.8" />
-                <text x={w - pr + 4} y={Y(l.price) + 4} fontSize="11" fontWeight="700" fill={l.color}>{l.label}</text>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>{cur.ind.name} vs. 之後 5 天台指漲跌<span style={{ fontSize: 11, fontWeight: 500, color: 'var(--muted)', marginLeft: 8 }}>每一點是一天 · 點表格換指標</span></div>
+          <svg width={w} height={Hh} style={{ display: 'block', fontFamily: 'var(--font-mono)' }}>
+            <rect x={pl} y={pt} width={Math.max(0, X(cur.r.lo) - pl)} height={Hh - pt - pb} fill={LB_DOWN} fillOpacity="0.07" />
+            <rect x={X(cur.r.hi)} y={pt} width={Math.max(0, w - pr - X(cur.r.hi))} height={Hh - pt - pb} fill={LB_UP} fillOpacity="0.07" />
+            {[-yAbs * 0.8, -yAbs * 0.4, 0, yAbs * 0.4, yAbs * 0.8].map((v) => (
+              <g key={v}>
+                <line x1={pl} x2={w - pr} y1={Y(v)} y2={Y(v)} stroke={grid} strokeWidth={v === 0 ? 1.4 : 1} />
+                <text x={pl - 6} y={Y(v) + 3.5} fontSize="10.5" fill={txt} textAnchor="end">{v >= 0 ? '+' : '−'}{Math.abs(v).toFixed(1)}%</text>
               </g>
             ))}
-            {seen.map((b, i) => {
-              const up = b.c >= b.o, col = up ? LB_UP : LB_DOWN;
-              return (
-                <g key={i}>
-                  <line x1={X(i)} x2={X(i)} y1={Y(b.h)} y2={Y(b.l)} stroke={col} />
-                  <rect x={X(i) - Math.max(0.5, band * 0.35)} width={Math.max(1, band * 0.7)} y={Y(Math.max(b.o, b.c))} height={Math.max(1, Math.abs(Y(b.o) - Y(b.c)))} fill={col} />
-                </g>
-              );
-            })}
-            {pos !== 0 && <line x1={pl} x2={w - pr} y1={Y(avg)} y2={Y(avg)} stroke={LB_GOLD} strokeWidth="1.5" />}
-            {pos !== 0 && <text x={pl + 4} y={Y(avg) - 5} fontSize="11" fontWeight="700" fill={LB_GOLD}>持倉均價 {lbN(avg, 0)}</text>}
-            {fills.map((f, k) => (
-              <text key={k} x={X(f.i)} y={f.side > 0 ? Y(bars[f.i].l) + 15 : Y(bars[f.i].h) - 6} fontSize="13" fontWeight="900" textAnchor="middle" fill={f.side > 0 ? LB_UP : LB_DOWN}>{f.side > 0 ? '▲' : '▼'}</text>
-            ))}
-            <line x1={X(idx)} x2={w - pr} y1={Y(px)} y2={Y(px)} stroke="var(--text)" strokeOpacity="0.5" strokeDasharray="2 3" />
-            <rect x={w - pr + 2} y={Y(px) - 9} width={pr - 4} height={18} rx="4" fill="var(--text)" />
-            <text x={w - pr + pr / 2} y={Y(px) + 4} fontSize="11.5" fontWeight="800" fill="var(--bg)" textAnchor="middle">{lbN(px)}</text>
-            {[0, Math.round(n / 4), Math.round(n / 2), Math.round(3 * n / 4), n - 1].map((i) => <text key={i} x={X(i)} y={H - 5} fontSize="10.5" fill={txt} textAnchor="middle">{bars[i].t}</text>)}
+            {sp.map((p) => <circle key={p.d} cx={X(p.v)} cy={Y(p.r5)} r="4" fill={p.r5 >= 0 ? LB_UP : LB_DOWN} fillOpacity="0.75" />)}
+            <text x={pl} y={Hh - 8} fontSize="10.5" fill={txt}>{fmtV(xLo)}</text>
+            <text x={w - pr} y={Hh - 8} fontSize="10.5" fill={txt} textAnchor="end">{fmtV(xHi)}</text>
+            <text x={(pl + w - pr) / 2} y={Hh - 8} fontSize="10.5" fill={txt} textAnchor="middle">← 偏低三分之一　　{cur.ind.name}　　偏高三分之一 →</text>
           </svg>
-          <div style={{ display: 'flex', gap: 10, marginTop: 10, justifyContent: 'center' }}>
-            {btn('買進 B', () => trade(1), LB_UP, pos >= 5 || done)}
-            {btn('賣出 S', () => trade(-1), LB_DOWN, pos <= -5 || done)}
-            {btn('平倉 F', () => trade(0), '#64748b', pos === 0 || done)}
-          </div>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div className="card" style={{ padding: '12px 14px', boxShadow: 'none', background: 'var(--panel2)' }}>
-            <div style={{ fontSize: 12, color: 'var(--text2)' }}>淨損益（已扣手續費、期交稅）</div>
-            <div className="mono tnum" style={{ fontSize: 26, fontWeight: 800, margin: '2px 0 6px' }}>{nt(net)}</div>
-            <div style={{ fontSize: 12, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '3px 10px' }}>
-              <span style={{ color: 'var(--muted)' }}>部位</span><b>{pos === 0 ? '空手' : `${pos > 0 ? '多' : '空'} ${Math.abs(pos)} 口 @ ${lbN(avg, 0)}`}</b>
-              <span style={{ color: 'var(--muted)' }}>未實現</span><span className="mono">{nt(unreal)}</span>
-              <span style={{ color: 'var(--muted)' }}>已實現</span><span className="mono">{nt(realized)}</span>
-              <span style={{ color: 'var(--muted)' }}>成本</span><span className="mono">NT${lbN(fees)}</span>
-            </div>
-          </div>
-          <div className="card" style={{ padding: '12px 14px', boxShadow: 'none', background: 'var(--panel2)', minHeight: 96 }}>
-            <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 4 }}>盤中事件</div>
-            {events.length ? events.slice(-4).reverse().map((e, k) => (
-              <div key={k} className="mono" style={{ fontSize: 12, padding: '2px 0', opacity: k ? 0.7 : 1 }}>{e.t} 碰到 <b style={{ color: e.l.color }}>{e.l.label}</b> {lbN(e.l.price)}</div>
-            )) : <div style={{ fontSize: 12, color: 'var(--muted)' }}>還沒碰到任何關鍵價位</div>}
-          </div>
-          {done && (
-            <div className="card" style={{ padding: '12px 14px', boxShadow: 'none', border: `1px solid ${LB_GOLD}` }}>
-              <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 6 }}>收盤成績單 🏁</div>
-              <div style={{ fontSize: 12.5, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 10px' }}>
-                <span style={{ color: 'var(--muted)' }}>你的結果</span><b className="mono">{nt(net)}</b>
-                <span style={{ color: 'var(--muted)' }}>交易</span><span>{trades.length} 筆 · 勝率 {trades.length ? Math.round(wins / trades.length * 100) : 0}%</span>
-                <span style={{ color: 'var(--muted)' }}>開盤買抱到收</span><span className="mono">{nt(hold)}</span>
-                <span style={{ color: 'var(--muted)' }}>事後諸葛一筆</span><span className="mono">{nt(best * LB_MULT)}</span>
-                {bestScore != null && <><span style={{ color: 'var(--muted)' }}>你的最佳</span><span className="mono">{nt(Math.max(bestScore, trades.length && pos === 0 ? net : -Infinity))}</span></>}
-                {!trades.length && <span style={{ gridColumn: '1 / -1', color: 'var(--muted)' }}>這次沒有交易 — 按 ↺ 再來一次</span>}
-              </div>
-            </div>
-          )}
+        <div className="card" style={{ padding: '12px 14px', boxShadow: 'none', background: 'var(--panel2)', fontSize: 12.5, lineHeight: 1.7 }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>{cur.ind.name}</div>
+          <div style={{ color: 'var(--text2)' }}>{cur.ind.hint}</div>
+          <div style={{ marginTop: 6 }}>偏高 = {fmtV(cur.r.hi)} 以上 · 偏低 = {fmtV(cur.r.lo)} 以下</div>
+          <div>資料 {cur.r.from} – {cur.r.to}，共 {cur.r.n} 天</div>
+          <div style={{ marginTop: 6 }}>隔天 t = {cur.r.r1.t != null ? cur.r.r1.t.toFixed(2) : '—'} · 5 天 t = {cur.r.r5.t != null ? cur.r.r5.t.toFixed(2) : '—'}</div>
         </div>
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10, lineHeight: 1.6 }}>
+        方法：指標是當天收盤後公布的數字，報酬是台指期近月日盤收盤到下一個（或第 5 個）交易日收盤。t 為 Welch 檢定；5 天報酬彼此重疊，t 已除以 √5 校正。幾個月的資料只能看出很大的效果，「看不出差別」不代表指標沒用，只代表目前證據不夠。
       </div>
     </div>
   );
 }
 
 // The block itself: a section title and the two cards.
-function LabsShowcase({ P, spot, I, replayLevels = [], marks = [], light }) {
+function LabsShowcase({ P, spot, H, bars, marks = [], light }) {
   const E = window.TAIFEX_EOD && window.TAIFEX_EOD.product === P.id ? window.TAIFEX_EOD : null;
   if (P.oiSource !== 'taifex') return null;
   return (
     <div>
-      <div className="sec-title">✨ 實驗室精選<small>用期交所資料做的兩個小實驗</small></div>
+      <div className="sec-title">✨ 實驗室精選<small>用期交所資料做的兩個分析</small></div>
       <div className="card" style={{ padding: '18px 20px', marginBottom: 14 }}>
         <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 10 }}>🔮 市場隱含機率地圖</div>
         <ImpliedDistCard E={E} spot={spot} marks={marks} light={light} />
       </div>
       <div className="card" style={{ padding: '18px 20px', marginBottom: 24 }}>
-        <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 10 }}>🎮 當沖重播練習場</div>
-        <ReplayCard I={I} levels={replayLevels} light={light} />
+        <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 10 }}>📊 籌碼指標回測：這些數字真的有用嗎？</div>
+        <BacktestCard H={H} bars={bars} light={light} />
       </div>
     </div>
   );
 }
 
-Object.assign(window, { lbDensity, ImpliedDistCard, ReplayCard, LabsShowcase });
+Object.assign(window, { lbDensity, ImpliedDistCard, lbBacktest, BacktestCard, LabsShowcase });
