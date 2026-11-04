@@ -266,6 +266,129 @@ function RetailPanel({ M, light }) {
   );
 }
 
+// ── 6c'. 散戶多空比 vs 收盤價 — the brokers' daily chart (元大「台指籌碼快訊」):
+// one bar per session, red above zero (retail net long) and green below, the
+// index close as a line on the right axis, and the latest 散戶多單 / 散戶空單 /
+// ratio in the header. Rows come from taifex-history.js `retail` (backfilled
+// from 2026-07) with the snapshot's newer days laid over it.
+function psRetailRows(code, M, H) {
+  const by = {};
+  ((H && H.retail && H.retail[code]) || []).forEach((r) => { by[r[0]] = { date: r[0], ratio: r[1], long: r[2], short: r[3], oi: r[4] }; });
+  const s = M && M.retail && M.retail[code];
+  if (s) {
+    (s.series || []).concat([s]).forEach((x) => {
+      if (!x || !x.date || x.ratio == null) return;
+      const was = by[x.date] || {};
+      by[x.date] = { date: x.date, ratio: x.ratio, oi: x.oi != null ? x.oi : was.oi,
+        long: x.retailLong != null ? x.retailLong : was.long != null ? was.long : null,
+        short: x.retailShort != null ? x.retailShort : was.short != null ? was.short : null };
+    });
+  }
+  return Object.keys(by).sort().map((d) => by[d]).slice(-90);
+}
+
+function RetailChart({ title, accent, rows, closeOf, priceLabel, light }) {
+  const boxRef = psR(null);
+  const [w, setW] = psS(640);
+  const [hover, setHover] = psS(null);
+  React.useEffect(() => {
+    const el = boxRef.current;
+    if (!el || !window.ResizeObserver) return undefined;
+    const ro = new ResizeObserver((es) => { const x = Math.round(es[0].contentRect.width); if (x > 0) setW(x); });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const last = rows[rows.length - 1];
+  const H = 230, pl = 44, pr = 58, pt = 10, pb = 24;
+  const n = rows.length;
+  const band = (w - pl - pr) / Math.max(n, 1);
+  const x = (i) => pl + band * (i + 0.5);
+  const lim = Math.max(20, Math.ceil(Math.max(...rows.map((r) => Math.abs(r.ratio || 0))) / 10) * 10);
+  const yR = (v) => pt + (lim - v) / (2 * lim) * (H - pt - pb);
+  const closes = rows.map((r) => closeOf(r.date));
+  const cs = closes.filter((c) => c != null);
+  const cLo = cs.length ? Math.min(...cs) : 0, cHi = cs.length ? Math.max(...cs) : 1;
+  const padC = (cHi - cLo) * 0.08 || cHi * 0.02 || 1;
+  const yC = (v) => pt + (cHi + padC - v) / (cHi - cLo + 2 * padC) * (H - pt - pb);
+  const line = closes.map((c, i) => (c == null ? null : `${x(i).toFixed(1)},${yC(c).toFixed(1)}`)).filter(Boolean).join(' ');
+  const grid = light ? 'rgba(20,30,50,0.10)' : 'rgba(255,255,255,0.09)';
+  const txt = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
+  const lineCol = light ? '#1f3a8a' : '#8fb0ff';
+  const ticks = [lim, lim / 2, 0, -lim / 2, -lim];
+  const cTicks = [0, 1, 2, 3].map((k) => cLo - padC + (cHi - cLo + 2 * padC) * k / 3);
+  const dIdx = n > 1 ? [0, Math.round((n - 1) / 3), Math.round(2 * (n - 1) / 3), n - 1] : [0];
+  const h = hover != null ? rows[hover] : null;
+  const onMove = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const i = Math.floor((e.clientX - r.left - pl) / band);
+    setHover(i >= 0 && i < n ? i : null);
+  };
+  const badge = (lab, v, bg, soft) => (
+    <span style={{ display: 'inline-flex', alignItems: 'stretch', borderRadius: 8, overflow: 'hidden', fontSize: 12 }}>
+      <span style={{ background: bg, color: '#fff', fontWeight: 700, padding: '4px 8px', lineHeight: 1.25, textAlign: 'center' }}>{lab}</span>
+      <span className="tnum" style={{ background: soft, color: light ? '#1c2433' : '#e8eaef', fontWeight: 700, padding: '0 10px', display: 'flex', alignItems: 'center', fontFamily: 'var(--font-mono)', fontSize: 15 }}>{psN(v)}</span>
+    </span>
+  );
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 6 }}>
+        <span style={{ background: accent, color: '#fff', fontWeight: 700, fontSize: 14, padding: '6px 14px', borderRadius: '10px 22px 0 10px' }}>{title}</span>
+        <span style={{ flex: 1 }} />
+        {last && last.long != null && badge(<>散戶<br />多單</>, last.long, PS_UP, light ? 'rgba(239,83,80,0.12)' : 'rgba(239,83,80,0.18)')}
+        {last && last.short != null && badge(<>散戶<br />空單</>, last.short, PS_DOWN, light ? 'rgba(38,166,154,0.12)' : 'rgba(38,166,154,0.18)')}
+        {last && <span className="tnum" style={{ fontFamily: 'var(--font-mono)', fontSize: 28, fontWeight: 800, color: psCol(last.ratio), minWidth: 120, textAlign: 'right' }}>{psN(last.ratio, 2)}%</span>}
+      </div>
+      <div style={{ display: 'flex', gap: 16, fontSize: 11, color: txt, margin: '0 0 2px 44px' }}>
+        <span><i style={{ display: 'inline-block', width: 12, height: 10, background: `linear-gradient(${PS_UP} 50%, ${PS_DOWN} 50%)`, verticalAlign: 'middle', marginRight: 5 }} />多空比（左軸）</span>
+        <span><i style={{ display: 'inline-block', width: 14, height: 2, background: lineCol, verticalAlign: 'middle', marginRight: 5 }} />{priceLabel}（右軸）</span>
+        {h && <span className="tnum" style={{ marginLeft: 'auto', color: 'var(--text)', fontFamily: 'var(--font-mono)' }}>
+          {h.date} · 多空比 <b style={{ color: psCol(h.ratio) }}>{psN(h.ratio, 2)}%</b>
+          {h.long != null ? ` · 多 ${psN(h.long)} · 空 ${psN(h.short)}` : ''}{closeOf(h.date) != null ? ` · 收 ${psN(closeOf(h.date))}` : ''}</span>}
+      </div>
+      <div ref={boxRef}>
+        <svg width={w} height={H} style={{ display: 'block', fontFamily: 'var(--font-mono)' }} onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+          {ticks.map((t) => (
+            <g key={t}>
+              <line x1={pl} x2={w - pr} y1={yR(t)} y2={yR(t)} stroke={grid} strokeWidth={t === 0 ? 1.2 : 1} />
+              <text x={pl - 6} y={yR(t) + 3.5} fontSize="10.5" fill={txt} textAnchor="end">{t}%</text>
+            </g>
+          ))}
+          {cs.length > 0 && cTicks.map((c, k) => <text key={k} x={w - pr + 6} y={yC(c) + 3.5} fontSize="10.5" fill={txt}>{psN(Math.round(c))}</text>)}
+          {rows.map((r, i) => {
+            const v = r.ratio || 0, y0 = yR(0), y1 = yR(v);
+            return <rect key={r.date} x={x(i) - band * 0.33} width={Math.max(1, band * 0.66)} y={Math.min(y0, y1)} height={Math.max(0.8, Math.abs(y1 - y0))}
+              fill={v >= 0 ? PS_UP : PS_DOWN} fillOpacity={hover == null || hover === i ? 1 : 0.55} />;
+          })}
+          {line && <polyline points={line} fill="none" stroke={lineCol} strokeWidth="2" strokeLinejoin="round" />}
+          {h && <line x1={x(hover)} x2={x(hover)} y1={pt} y2={H - pb} stroke={txt} strokeDasharray="3 3" />}
+          {dIdx.map((i) => rows[i] && <text key={i} x={x(i)} y={H - 6} fontSize="10.5" fill={txt} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}>{rows[i].date}</text>)}
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+function RetailChartsPanel({ M, H, bars, light }) {
+  const closeBy = psM(() => {
+    const m = {};
+    (bars || []).forEach((b) => { const t = String(b.t || ''); if (t.length >= 8) m[`${t.slice(0, 4)}/${t.slice(4, 6)}/${t.slice(6, 8)}`] = b.c; });
+    return m;
+  }, [bars]);
+  const closeOf = (d) => (closeBy[d] != null ? closeBy[d] : null);
+  const sets = [['MTX', '小台指多空比 vs. 收盤價', '#1d4ed8'], ['TMF', '微台指多空比 vs. 收盤價', '#f97316']]
+    .map(([k, t, c]) => ({ k, t, c, rows: psRetailRows(k, M, H) })).filter((x) => x.rows.length >= 2);
+  if (!sets.length) return <PsEmpty light={light}>期交所小台／微台資料未載入。</PsEmpty>;
+  const a = M && M.retail && M.retail.MTX;
+  return (
+    <div>
+      {a && <PsLead>小台散戶多空比 <span style={{ color: psCol(a.ratio) }}>{psSigned(a.ratio, 2, '%')}</span>，散戶{a.ratio > 0 ? '偏多' : a.ratio < 0 ? '偏空' : '中性'}
+        {a.chg != null ? `；比前一交易日${a.chg >= 0 ? '升' : '降'} ${Math.abs(a.chg).toFixed(2)} 個百分點` : ''}。常當反向指標看：散戶越偏多，盤勢越容易往下修。</PsLead>}
+      {sets.map((x) => <RetailChart key={x.k} title={x.t} accent={x.c} rows={x.rows} closeOf={closeOf} priceLabel="台指期收盤" light={light} />)}
+      <PsNote light={light}>多單 = 全市場未平倉 − 三大法人多單；空單 = 全市場未平倉 − 三大法人空單；多空比 = (多單 − 空單) ÷ 全市場未平倉 × 100%。未平倉為期交所每日行情各月份（含週）一般盤合計，法人為期交所「區分各期貨契約」三大法人。收盤價為台指期近月日盤。</PsNote>
+    </div>
+  );
+}
+
 // ── 6d. 日夜盤拆解 ─────────────────────────────────────────────────────────
 function SessionsPanel({ S, light }) {
   if (!S || !S.night || !S.day) return <PsEmpty light={light}>期交所台指期日夜盤資料未載入。</PsEmpty>;
@@ -504,4 +627,4 @@ function MarginPanel({ legs, rows, dte, M, P, idx, idxLabel, spot, iv, light }) 
   );
 }
 
-Object.assign(window, { OptInstPanel, OptLargePanel, PcTrendPanel, RetailPanel, SessionsPanel, DividendsPanel, SettleHistPanel, IvHistPanel, ProbPanel, MarginPanel, computeMargin });
+Object.assign(window, { OptInstPanel, OptLargePanel, PcTrendPanel, RetailPanel, RetailChartsPanel, SessionsPanel, DividendsPanel, SettleHistPanel, IvHistPanel, ProbPanel, MarginPanel, computeMargin });

@@ -2,7 +2,7 @@
 // Strategy: cache-first for the app shell + same-origin assets, network-first for HTML
 // and the daily data snapshots (taifex-eod.js / taifex-history.js / ib-eod.js).
 // Bumping CACHE_VERSION purges old caches.
-const CACHE_VERSION = 'options-lab-v45';
+const CACHE_VERSION = 'options-lab-v46';
 const APP_SHELL = [
   './',
   './index.html',

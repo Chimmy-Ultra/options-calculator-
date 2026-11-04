@@ -528,21 +528,21 @@ const GRID_DEFAULTS = {
   ],
   // Below the 關卡 hero: two columns, wide on the left.
   levels2: [
-    { i: 'oi',         x: 0, y: 0,  w: 7, h: 13 },
-    { i: 'intraday',   x: 0, y: 13, w: 7, h: 12 },
-    { i: 'gex',        x: 0, y: 25, w: 7, h: 11 },
-    { i: 'pctrend',    x: 0, y: 36, w: 7, h: 14 },
-    { i: 'optinst',    x: 0, y: 50, w: 7, h: 16 },
-    { i: 'settlehist', x: 0, y: 66, w: 7, h: 12 },
-    { i: 'top20',      x: 0, y: 78, w: 7, h: 8 },
+    { i: 'retail',     x: 0, y: 0,  w: 7, h: 21 },
+    { i: 'oi',         x: 0, y: 21, w: 7, h: 13 },
+    { i: 'intraday',   x: 0, y: 34, w: 7, h: 12 },
+    { i: 'gex',        x: 0, y: 46, w: 7, h: 11 },
+    { i: 'pctrend',    x: 0, y: 57, w: 7, h: 14 },
+    { i: 'optinst',    x: 0, y: 71, w: 7, h: 16 },
+    { i: 'settlehist', x: 0, y: 87, w: 7, h: 12 },
+    { i: 'top20',      x: 0, y: 99, w: 7, h: 8 },
     { i: 'keylevels',  x: 7, y: 0,  w: 5, h: 16 },
     { i: 'range',      x: 7, y: 16, w: 5, h: 10 },
     { i: 'optlarge',   x: 7, y: 26, w: 5, h: 14 },
-    { i: 'retail',     x: 7, y: 40, w: 5, h: 10 },
-    { i: 'sessions',   x: 7, y: 50, w: 5, h: 8 },
-    { i: 'twse',       x: 7, y: 58, w: 5, h: 11 },
-    { i: 'premarket',  x: 7, y: 69, w: 5, h: 8 },
-    { i: 'dividends',  x: 7, y: 77, w: 5, h: 11 },
+    { i: 'sessions',   x: 7, y: 40, w: 5, h: 8 },
+    { i: 'twse',       x: 7, y: 48, w: 5, h: 11 },
+    { i: 'premarket',  x: 7, y: 59, w: 5, h: 8 },
+    { i: 'dividends',  x: 7, y: 67, w: 5, h: 11 },
   ],
   chart: [{ i: 'kline', x: 0, y: 0, w: 12, h: 19 }],
   watch: [{ i: 'watch', x: 0, y: 0, w: 6, h: 21 }],
@@ -1152,7 +1152,7 @@ function Obsidian3() {
         <LevelsWorkspace
           P={P} theme={theme} light={light} spot={spot} spotChg={spotChgTop} expiry={expiry} levels={levels} live={live} market={marketData}
           rangeLevels={rangeLevels} dayBarsLive={!!liveDayBars} gex={gex} grid={grid} top20={top20Data} intraday={intradayData} keyLevels={keyLevels} twse={twseData} premarket={premarketData}
-          extra={taifexExtra} history={history}
+          extra={taifexExtra} history={history} dayBars={liveDayBars}
           bars={bars} barsLive={!!liveBars} barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
           barSession={barSession} setBarSession={setBarSession}
           D={D}
@@ -2576,7 +2576,7 @@ function SmartMoneyGrid({ X, M, L, P, spot, expiry }) {
   return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))', gap: 14 }}>{cards}</div>;
 }
 
-function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expiry, levels: L, live, market: M, rangeLevels: R, dayBarsLive, gex: G, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D, grid, top20: T, intraday: I, keyLevels: K, twse: W, premarket: PM, extra = {}, history: H = null }) {
+function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expiry, levels: L, live, market: M, rangeLevels: R, dayBarsLive, gex: G, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D, grid, top20: T, intraday: I, keyLevels: K, twse: W, premarket: PM, extra = {}, history: H = null, dayBars: dayBarsArr = null }) {
   const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
   const chg = (v) => (v == null ? '' : `（${v > 0 ? '+' : ''}${v.toLocaleString()}）`);
@@ -2754,8 +2754,8 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expi
       right: gridCap(X.optpos && X.optpos.large ? `期交所 ${X.optpos.large.date} · 前一交易日` : ''), body: <OptLargePanel O={X.optpos} M={M} light={light} /> },
     { i: 'settlehist', title: '結算歷史 · 最後結算價 · 歸零比例',
       right: gridCap(H && H.settle && H.settle.length ? `期交所 · ${H.settle.length} 個已到期契約` : ''), body: <SettleHistPanel H={H} light={light} /> },
-    { i: 'retail', title: '散戶多空比 · 小台／微台',
-      right: gridCap(M && M.retail && M.retail.MTX ? `期交所 ${M.retail.MTX.date} · 前一交易日` : ''), body: <RetailPanel M={M} light={light} /> },
+    { i: 'retail', title: '散戶多空比 · 小台／微台 vs. 收盤價',
+      right: gridCap(M && M.retail && M.retail.MTX ? `期交所 ${M.retail.MTX.date} · 前一交易日` : ''), body: <RetailChartsPanel M={M} H={H} bars={dayBarsArr} light={light} /> },
     { i: 'sessions', title: '台指期日夜盤拆解',
       right: gridCap(X.sessions ? `期交所 ${X.sessions.date} · ${X.sessions.month}` : ''), body: <SessionsPanel S={X.sessions} light={light} /> },
     { i: 'dividends', title: '除息點數 · 各契約（推算）',
