@@ -348,23 +348,268 @@ function BacktestCard({ H, bars, light }) {
   );
 }
 
-// The block itself: a section title and the two cards.
-function LabsShowcase({ P, spot, H, bars, marks = [], light }) {
-  const E = window.TAIFEX_EOD && window.TAIFEX_EOD.product === P.id ? window.TAIFEX_EOD : null;
-  if (P.oiSource !== 'taifex') return null;
+// ── GEX 波動檢定. Dealer gamma is supposed to change how far the index moves,
+// not which way: long gamma (GEX > 0) hedging leans against moves, short
+// gamma chases them. So the outcome here is the next session's true range
+// (from today's close, gap included — what an option seller is exposed to),
+// split by today's GEX sign. Negative gamma tends to show up when the market
+// is already moving, and volatility clusters, so the test that counts is a
+// HAR regression — next range on today's range and the 5- and 20-session
+// averages (Corsi 2009) plus a 負 Gamma dummy — with Newey–West (5 lags)
+// standard errors; the dummy's coefficient is what GEX adds beyond recent
+// volatility. A synthetic GEX built only from 5-day volatility shows a big
+// raw gap and a ~0 coefficient here, which is the point of the control.
+// The total is dominated by the series expiring the next session, so the
+// negative days cluster on expiry eves; the regression also carries a
+// "next session is an expiry" dummy (Wednesdays, plus Fridays once Friday
+// weeklies listed on 2025/06/27 — holiday shifts are not tracked).
+function lbQuantile(a, q) { if (!a.length) return null; const s = a.slice().sort((x, y) => x - y); const k = (s.length - 1) * q, i = Math.floor(k); return s[i] + (s[Math.min(i + 1, s.length - 1)] - s[i]) * (k - i); }
+function lbSolve(A, b) {
+  const n = b.length, M = A.map((r, i) => r.concat([b[i]]));
+  for (let c = 0; c < n; c++) {
+    let p = c; for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
+    [M[c], M[p]] = [M[p], M[c]];
+    if (Math.abs(M[c][c]) < 1e-12) return null;
+    for (let r = 0; r < n; r++) if (r !== c) { const f = M[r][c] / M[c][c]; for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k]; }
+  }
+  return M.map((r, i) => r[n] / r[i]);
+}
+// OLS, Newey–West standard errors. Returns the last regressor's beta and t.
+function lbOlsNW(X, y, lags = 5) {
+  const n = y.length, k = X[0].length;
+  if (n < k + 10) return null;
+  const XtX = Array.from({ length: k }, (_, a) => Array.from({ length: k }, (_, c) => X.reduce((s, r) => s + r[a] * r[c], 0)));
+  const beta = lbSolve(XtX, Array.from({ length: k }, (_, a) => X.reduce((s, r, i) => s + r[a] * y[i], 0)));
+  if (!beta) return null;
+  const e = y.map((v, i) => v - X[i].reduce((s, x, a) => s + x * beta[a], 0));
+  const S = Array.from({ length: k }, () => new Array(k).fill(0));
+  for (let l = 0; l <= lags; l++) {
+    const w = l ? 1 - l / (lags + 1) : 1;
+    for (let t = l; t < n; t++) for (let a = 0; a < k; a++) for (let c = 0; c < k; c++) {
+      const v = e[t] * e[t - l] * X[t][a] * X[t - l][c];
+      S[a][c] += l ? w * (v + e[t - l] * e[t] * X[t - l][a] * X[t][c]) : v;
+    }
+  }
+  // Var(beta_last) = row of (X'X)^-1 · S · (X'X)^-1
+  const last = Array.from({ length: k }, (_, j) => (j === k - 1 ? 1 : 0));
+  const g = lbSolve(XtX, last);
+  if (!g) return null;
+  let v = 0; for (let a = 0; a < k; a++) for (let c = 0; c < k; c++) v += g[a] * S[a][c] * g[c];
+  const b = beta[k - 1];
+  return { b, t: v > 0 ? b / Math.sqrt(v) : null, n, beta };
+}
+function lbGexVol(B) {
+  if (!B || !B.gex || !B.gex.length || !B.bars) return null;
+  const bars = B.bars, at = {};
+  bars.forEach((b, i) => { at[b[0]] = i; });
+  const trPts = (i) => Math.max(bars[i][2], bars[i - 1][4]) - Math.min(bars[i][3], bars[i - 1][4]);
+  const tr = (i) => trPts(i) / bars[i - 1][4] * 100;
+  const pts = [];
+  B.gex.forEach((r) => {
+    const i = at[r[0]];
+    if (i == null || i < 21 || i + 1 >= bars.length || r[1] == null) return;
+    let a = 0, a5 = 0;
+    for (let j = i - 19; j <= i; j++) { a += tr(j); if (j > i - 5) a5 += tr(j); }
+    a /= 20; a5 /= 5;
+    const next = tr(i + 1);
+    const nd = bars[i + 1][0], wd = new Date(`${nd.replace(/\//g, '-')}T12:00:00+08:00`).getDay();
+    const exp = wd === 3 || (wd === 5 && nd >= '2025/06/27') ? 1 : 0;
+    pts.push({ d: r[0], y: r[0].slice(0, 4), g: r[1], neg: r[1] < 0, exp, next, nextPts: trPts(i + 1), rel: next / a, ret: (bars[i + 1][4] / bars[i][4] - 1) * 100, x: [1, tr(i), a5, a, exp] });
+  });
+  if (pts.length < 60) return null;
+  const px = bars[bars.length - 1][4];
+  // Tomorrow's inputs: today's ranges, whether the next weekday is an expiry,
+  // today's GEX sign (holidays are not known here, so "next weekday").
+  const iL = bars.length - 1, lastG = B.gex[B.gex.length - 1];
+  let todayX = null, nextDay = null;
+  if (lastG[0] === bars[iL][0] && iL >= 20) {
+    let a = 0, a5 = 0;
+    for (let j = iL - 19; j <= iL; j++) { a += tr(j); if (j > iL - 5) a5 += tr(j); }
+    const t0 = new Date(`${bars[iL][0].replace(/\//g, '-')}T12:00:00+08:00`);
+    do { t0.setDate(t0.getDate() + 1); } while (t0.getDay() === 0 || t0.getDay() === 6);
+    nextDay = `${t0.getFullYear()}/${String(t0.getMonth() + 1).padStart(2, '0')}/${String(t0.getDate()).padStart(2, '0')}`;
+    const exp = t0.getDay() === 3 || (t0.getDay() === 5 && nextDay >= '2025/06/27') ? 1 : 0;
+    todayX = [1, tr(iL), a5 / 5, a / 20, exp, lastG[1] < 0 ? 1 : 0];
+  }
+  const grp = (f) => {
+    const x = pts.filter(f);
+    const m = (k) => lbStats(x.map((p) => p[k]));
+    // Percentiles in % of the close, shown in points at today's level (the index tripled since 2020).
+    return { n: x.length, next: m('next'), rel: m('rel'), ret: m('ret'), p: [0.5, 0.75, 0.9].map((q) => lbQuantile(x.map((p) => p.next), q) / 100 * px) };
+  };
+  const welch = (A, B2) => (A && B2 && A.n > 1 && B2.n > 1 ? (A.m - B2.m) / Math.sqrt(A.sd ** 2 / A.n + B2.sd ** 2 / B2.n) : null);
+  const neg = grp((p) => p.neg), pos = grp((p) => !p.neg);
+  // GEX quintiles (raw level — open interest grew over the years, so the
+  // relative column and the yearly split matter more than these edges).
+  const gs = pts.map((p) => p.g).sort((a, b) => a - b);
+  const edges = [0.2, 0.4, 0.6, 0.8].map((q) => gs[Math.floor(q * gs.length)]);
+  const qOf = (g) => edges.filter((e) => g >= e).length;
+  const quint = [0, 1, 2, 3, 4].map((k) => { const x = pts.filter((p) => qOf(p.g) === k); return { k, n: x.length, lo: k ? edges[k - 1] : gs[0], hi: k < 4 ? edges[k] : gs[gs.length - 1], next: lbStats(x.map((p) => p.next)), rel: lbStats(x.map((p) => p.rel)) }; });
+  const har = (x) => lbOlsNW(x.map((p) => p.x.concat([p.neg ? 1 : 0])), x.map((p) => p.next));
+  const H = har(pts);
+  const dot = (x) => x.reduce((s2, v, k) => s2 + v * H.beta[k], 0);
+  let fc = null;
+  if (H && todayX) {
+    const pred = dot(todayX), ratios = pts.map((p) => p.next / dot(p.x.concat([p.neg ? 1 : 0]))).filter((r) => Number.isFinite(r) && r > 0);
+    fc = { day: nextDay, neg: todayX[5] === 1, exp: todayX[4] === 1, pts: pred / 100 * px, p75: lbQuantile(ratios, 0.75) * pred / 100 * px, p90: lbQuantile(ratios, 0.9) * pred / 100 * px };
+  }
+  // Same question asked other ways (shown under the verdict).
+  const noExp = (p) => p.x.slice(0, 4).concat([p.neg ? 1 : 0]);
+  const fit = (x, y, xf) => lbOlsNW(x.map(xf), x.map(y));
+  const rLog = fit(pts, (p) => Math.log(p.next), (p) => p.x.concat([p.neg ? 1 : 0]));
+  const rob = {
+    nonExp: fit(pts.filter((p) => !p.exp), (p) => p.next, noExp),
+    logPct: rLog ? { b: (Math.exp(rLog.b) - 1) * 100, t: rLog.t } : null,
+    absRet: fit(pts, (p) => Math.abs(p.ret), (p) => p.x.concat([p.neg ? 1 : 0])),
+    cont: fit(pts, (p) => p.next, (p) => p.x.concat([p.g / 100])),
+  };
+  const years = [...new Set(pts.map((p) => p.y))].map((y) => {
+    const x = pts.filter((p) => p.y === y), nNeg = x.filter((p) => p.neg).length, nPos = x.length - nNeg;
+    return { y, nNeg, nPos, har: nNeg >= 10 && nPos >= 10 ? har(x) : null };
+  });
+  const scored = years.filter((y) => y.har);
+  const last = pts[pts.length - 1], lastRow = B.gex[B.gex.length - 1];
+  return {
+    pts, neg, pos, quint, years, negExp: pts.filter((p) => p.neg && p.exp).length, fc, rob,
+    from: pts[0].d, to: pts[pts.length - 1].d,
+    ratio: neg.next && pos.next ? neg.next.m / pos.next.m : null,
+    ratioRel: neg.rel && pos.rel ? neg.rel.m / pos.rel.m : null,
+    tNext: welch(neg.next, pos.next), tRel: welch(neg.rel, pos.rel), tRet: welch(neg.ret, pos.ret),
+    har: H, extraPts: H ? H.b / 100 * px : null, px,
+    yearsAgree: scored.filter((y) => y.har.b > 0).length, yearsScored: scored.length,
+    today: { d: lastRow[0], g: lastRow[1], zg: lastRow[2], neg: lastRow[1] < 0, lastPt: last },
+  };
+}
+function lbGexVerdict(V) {
+  if (!V.neg.n || !V.pos.n || V.neg.n < 20 || V.pos.n < 20) return { c: 'var(--muted)', t: '負 Gamma 或正 Gamma 的天數太少，還不能下結論。' };
+  const agree = V.yearsScored ? V.yearsAgree / V.yearsScored : 0, h = V.har;
+  if (!h || h.t == null) return { c: 'var(--muted)', t: '樣本不足，無法控制近期波動。' };
+  const extra = `控制今天、近 5 日、近 20 日的波動和隔天是否結算後，負 Gamma 隔天振幅多 ${h.b >= 0 ? '+' : '−'}${Math.abs(h.b).toFixed(2)} 個百分點${V.extraPts != null ? `（約 ${Math.round(Math.abs(V.extraPts))} 點）` : ''}，t = ${h.t.toFixed(1)}，${V.yearsAgree}/${V.yearsScored} 年同方向`;
+  if (h.b > 0 && h.t >= 2 && agree >= 2 / 3) return { c: LB_GOLD, t: `成立：${extra}。` };
+  if (h.b < 0 && h.t <= -2) return { c: LB_DOWN, t: `和理論相反：${extra}。可能是台指選的部位結構和美股假設不同。` };
+  if (V.ratio >= 1.1) return { c: 'var(--text)', t: `負 Gamma 隔天振幅表面上大 ${Math.round((V.ratio - 1) * 100)}%，但主要是因為當時本來就在大波動 —— ${extra}，不夠明確。` };
+  return { c: 'var(--muted)', t: `看不出穩定的差別：${extra}。` };
+}
+function GexVolCard({ light }) {
+  const V = lbM(() => lbGexVol(window.BT_DATA), []);
+  const [boxRef, w] = useLbWidth(520);
+  if (!V) return <div style={{ fontSize: 12, color: 'var(--muted)' }}>需要 GEX 歷史資料（backtest-data.js 的 gex，每個交易日更新）。</div>;
+  const E = window.TAIFEX_EOD, dl = E && E.optPositions && E.optPositions.inst && E.optPositions.inst.rows && E.optPositions.inst.rows.dealer;
+  const verdict = lbGexVerdict(V);
+  const f2 = (v, dp = 2) => (v == null || !Number.isFinite(v) ? '—' : v.toFixed(dp));
+  const pts = (v) => (v == null ? '—' : Math.round(v).toLocaleString());
+  const NEG = '#f0a020', POS = 'var(--blue)';
+  const txt = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
+  const big = (lab, G, color) => (
+    <div style={{ flex: 1, minWidth: 180, padding: '12px 14px', borderRadius: 12, background: 'var(--panel2)' }}>
+      <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>{lab} <span style={{ color: 'var(--muted)' }}>· {G.n} 天</span></div>
+      <div className="mono tnum" style={{ fontSize: 24, fontWeight: 800, color, marginTop: 2 }}>{G.next ? `${f2(G.next.m)}%` : '—'}</div>
+      <div style={{ fontSize: 12, color: 'var(--text2)' }}>隔天平均振幅 · 是近 20 日平均的 <b className="mono">{G.rel ? f2(G.rel.m) : '—'}</b> 倍</div>
+    </div>
+  );
+  // Quintile bars: mean next-day range %, relative multiple on top.
+  // Left column of the 1.2fr / 1fr grid below (16px gap).
+  const cw = Math.max(220, Math.floor((w - 16) * 1.2 / 2.2));
+  const Hh = 150, pb = 34, pt = 18, maxV = Math.max(...V.quint.map((q) => (q.next ? q.next.m : 0))) * 1.15 || 1, bw = cw / 5;
+  const yrs = V.years.filter((y) => y.har);
   return (
-    <div>
-      <div className="sec-title">✨ 實驗室精選<small>用期交所資料做的兩個分析</small></div>
-      <div className="card" style={{ padding: '18px 20px', marginBottom: 14 }}>
-        <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 10 }}>🔮 市場隱含機率地圖</div>
-        <ImpliedDistCard E={E} spot={spot} marks={marks} light={light} />
+    <div ref={boxRef}>
+      <div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.7, marginBottom: 12 }}>
+        研究上 GEX 比較有根據的是預測<b>波動大小</b>，不是方向：正 Gamma 時造市商避險會壓住行情，負 Gamma 時避險會追價。這裡檢定「負 Gamma 的隔天，振幅是不是真的比較大」。
+        資料 {V.from} – {V.to}，共 {V.pts.length} 天；振幅 = 隔天最高最低相對今天收盤（含跳空）。
       </div>
-      <div className="card" style={{ padding: '18px 20px', marginBottom: 24 }}>
-        <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 10 }}>📊 籌碼指標回測：這些數字真的有用嗎？</div>
-        <BacktestCard H={H} bars={bars} light={light} />
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        {big('負 Gamma（GEX < 0）', V.neg, NEG)}
+        {big('正 Gamma（GEX > 0）', V.pos, POS)}
+        <div style={{ flex: 1, minWidth: 180, padding: '12px 14px', borderRadius: 12, background: 'var(--panel2)' }}>
+          <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>GEX 多給的資訊 <span style={{ color: 'var(--muted)' }}>· 控制近期波動和結算日後</span></div>
+          <div className="mono tnum" style={{ fontSize: 24, fontWeight: 800, marginTop: 2 }}>{V.har ? `${V.har.b >= 0 ? '+' : '−'}${f2(Math.abs(V.har.b))} pp` : '—'}</div>
+          <div style={{ fontSize: 12, color: 'var(--text2)' }}>表面上負 ÷ 正 = <b className="mono">{V.ratio ? `${f2(V.ratio)} 倍` : '—'}</b> · t = {f2(V.har && V.har.t, 1)}</div>
+        </div>
+      </div>
+      <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', fontSize: 13.5, fontWeight: 700, color: verdict.c, lineHeight: 1.6 }}>
+        {verdict.t}
+        {(() => {
+          const R = V.rob, x = (r, u = ' pp') => (r ? `${r.b >= 0 ? '+' : '−'}${f2(Math.abs(r.b))}${u}（t ${f2(r.t, 1)}）` : '—');
+          return <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text2)', marginTop: 4 }}>
+            換個問法：排除結算前一天 {x(R.nonExp)} · 改用對數振幅 {R.logPct ? `${R.logPct.b >= 0 ? '+' : '−'}${Math.abs(R.logPct.b).toFixed(0)}%（t ${f2(R.logPct.t, 1)}）` : '—'} · 隔天漲跌幅絕對值 {x(R.absRet)} · GEX 每多 100 億 {x(R.cont)}
+          </div>;
+        })()}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 1fr)', gap: 16, marginTop: 14 }}>
+        <div>
+          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>依 GEX 由負到正分五組 · 隔天平均振幅</div>
+          <svg width={cw} height={Hh} style={{ display: 'block', fontFamily: 'var(--font-mono)' }}>
+            {V.quint.map((q, k) => {
+              const h = q.next ? (q.next.m / maxV) * (Hh - pb - pt) : 0, x = k * bw + bw * 0.18;
+              return <g key={k}>
+                <rect x={x} y={Hh - pb - h} width={bw * 0.64} height={h} rx="4" fill={q.hi <= 0 ? NEG : q.lo >= 0 ? POS : txt} opacity="0.85" />
+                <text x={x + bw * 0.32} y={Hh - pb - h - 4} fontSize="11" fill="var(--text)" textAnchor="middle">{q.next ? `${f2(q.next.m)}%` : ''}</text>
+                <text x={x + bw * 0.32} y={Hh - pb + 13} fontSize="10" fill={txt} textAnchor="middle">{k === 0 ? '最負' : k === 4 ? '最正' : `第 ${k + 1} 組`}</text>
+                <text x={x + bw * 0.32} y={Hh - pb + 26} fontSize="10" fill={txt} textAnchor="middle">×{q.rel ? f2(q.rel.m) : '—'}</text>
+              </g>;
+            })}
+          </svg>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>×＝隔天振幅是近 20 日平均的幾倍。早年 OI 較小，GEX 數值也較小，所以各組的邊界會混到不同年份。</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>逐年：控制近期波動後，負 Gamma 多的振幅</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {yrs.map((y) => <span key={y.y} className="mono tnum" style={{ fontSize: 12, padding: '4px 8px', borderRadius: 8, background: 'var(--panel2)', color: y.har.b > 0 ? NEG : POS }} title={`負 Gamma ${y.nNeg} 天、正 Gamma ${y.nPos} 天 · t = ${f2(y.har.t, 1)}`}>{y.y} {y.har.b >= 0 ? '+' : '−'}{f2(Math.abs(y.har.b))}</span>)}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>單位：百分點。正數 = 那一年負 Gamma 的隔天振幅比較大；兩邊都要有 10 天以上才列出。</div>
+          <div style={{ fontSize: 12.5, fontWeight: 700, margin: '12px 0 4px' }}>方向對照組：隔天平均漲跌</div>
+          <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>負 Gamma <b className="mono">{V.neg.ret ? `${f2(V.neg.ret.m)}%` : '—'}</b> · 正 Gamma <b className="mono">{V.pos.ret ? `${f2(V.pos.ret.m)}%` : '—'}</b>（t = {f2(V.tRet, 1)}）</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>如果這裡看不出差別而振幅有差，代表 GEX 說的是「會動多大」而不是「往哪動」。</div>
+        </div>
+      </div>
+      <div style={{ fontSize: 12.5, fontWeight: 700, margin: '14px 0 6px' }}>給賣方參考：隔天振幅<span style={{ fontWeight: 500, color: 'var(--muted)' }}> · 用歷史百分比、以現在 {pts(V.px)} 點換算</span></div>
+      {V.fc && (
+        <div style={{ fontSize: 13, padding: '10px 12px', borderRadius: 10, background: 'var(--panel2)', marginBottom: 10, lineHeight: 1.6 }}>
+          <b>{V.fc.day.slice(5)}（下一個交易日）</b> · 今天 <b style={{ color: V.fc.neg ? NEG : POS }}>{V.fc.neg ? '負 Gamma' : '正 Gamma'}</b>{V.fc.exp ? ' · 隔天是結算日' : ''} ·
+          模型預估振幅約 <b className="mono">{pts(V.fc.pts)}</b> 點；照過去的誤差，75% 的日子在 <b className="mono">{pts(V.fc.p75)}</b> 點內、90% 在 <b className="mono">{pts(V.fc.p90)}</b> 點內
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>振幅 = 最高最低相對今天收盤（含跳空），不是收盤漲跌。遇到連假會算錯日期，只是參考。</div>
+        </div>
+      )}
+      <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 4 }}>不分當天波動，只看 Gamma 狀態：</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '120px repeat(3, minmax(0, 1fr))', fontSize: 12.5, maxWidth: 520 }}>
+        {['', '一半的日子在', '75% 的日子在', '90% 的日子在'].map((h, k) => <span key={k} style={{ fontSize: 11, color: 'var(--muted)', padding: '4px 0', borderBottom: '1px solid var(--border)' }}>{h}</span>)}
+        {[['負 Gamma', V.neg, NEG], ['正 Gamma', V.pos, POS]].map(([lab, G, c]) => [
+          <span key={`${lab}a`} style={{ padding: '5px 0', borderBottom: '1px solid var(--border)', color: c, fontWeight: 700 }}>{lab}{V.today.neg === (lab === '負 Gamma') ? ' · 今天' : ''}</span>,
+          ...G.p.map((v, k) => <span key={`${lab}${k}`} className="mono tnum" style={{ padding: '5px 0', borderBottom: '1px solid var(--border)' }}>{pts(v)} 點內</span>),
+        ])}
+      </div>
+      <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 12, lineHeight: 1.7 }}>
+        注意：GEX 用的是美股慣例（假設造市商買 Call、賣 Put）。台指選很多散戶在當賣方，造市商站哪一邊不一定一樣
+        {dl ? `；期交所 ${E.optPositions.inst.date} 自營商買權淨 ${dl.call.netOi >= 0 ? '+' : ''}${dl.call.netOi.toLocaleString()} 口、賣權淨 ${dl.put.netOi >= 0 ? '+' : ''}${dl.put.netOi.toLocaleString()} 口（自營商也包含自營部位，不全是造市）` : ''}。
+        檢定方法：隔天振幅對「今天振幅、近 5 日平均、近 20 日平均、隔天是否結算日、負 Gamma」做迴歸（HAR 模型），t 值用 Newey–West 修正波動群聚；逐年是否同方向比單一 t 值可靠。
+        總 GEX 主要由隔天到期的那一批決定，負 Gamma 的 {V.neg.n} 天裡有 {V.negExp} 天是結算前一天。
       </div>
     </div>
   );
 }
 
-Object.assign(window, { lbDensity, ImpliedDistCard, lbBacktest, BacktestCard, LabsShowcase });
+// The block itself: a section title and the cards.
+function LabsShowcase({ P, spot, H, bars, marks = [], light }) {
+  const E = window.TAIFEX_EOD && window.TAIFEX_EOD.product === P.id ? window.TAIFEX_EOD : null;
+  if (P.oiSource !== 'taifex') return null;
+  return (
+    <div>
+      <div className="sec-title">✨ 實驗室精選<small>用期交所資料做的分析</small></div>
+      <div className="card" style={{ padding: '18px 20px', marginBottom: 14 }}>
+        <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 10 }}>🔮 市場隱含機率地圖</div>
+        <ImpliedDistCard E={E} spot={spot} marks={marks} light={light} />
+      </div>
+      <div className="card" style={{ padding: '18px 20px', marginBottom: 14 }}>
+        <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 10 }}>📊 籌碼指標回測：這些數字真的有用嗎？</div>
+        <BacktestCard H={H} bars={bars} light={light} />
+      </div>
+      <div className="card" style={{ padding: '18px 20px', marginBottom: 24 }}>
+        <div style={{ fontSize: 17, fontWeight: 800, marginBottom: 10 }}>🧲 GEX 能預測波動嗎？</div>
+        <GexVolCard light={light} />
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { lbDensity, ImpliedDistCard, lbBacktest, BacktestCard, lbGexVol, lbGexVerdict, GexVolCard, LabsShowcase });

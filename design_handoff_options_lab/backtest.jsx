@@ -2,7 +2,8 @@
 // rules, run it over years of TAIFEX history, read the result.
 //
 // Data: window.BT_DATA (backtest-data.js — TX front-month day bars plus P/C,
-// 外資 net and 小台散戶多空比 from 2020, refreshed by the daily job); without it
+// 外資 net, 小台散戶多空比 and TXO dealer gamma (gex: total, zero-gamma level,
+// call / put walls), refreshed by the daily job); without it
 // the snapshot's ~8 months of bars and taifex-history.js stand in.
 //
 // Strategy JSON (also the target format for the natural-language parser):
@@ -42,6 +43,10 @@ const BT_SERIES = [
   { id: 'fx', label: '外資期貨淨部位', unit: '口' },
   { id: 'fxChg', label: '外資淨部位 N 日增減', n: 1, unit: '口', nLabel: '日' },
   { id: 'retail', label: '散戶多空比 · 小台', unit: '%' },
+  { id: 'gex', label: '總 GEX（億／1%）', unit: '億' },
+  { id: 'zeroGamma', label: '零 Gamma 價位', unit: '點' },
+  { id: 'callWall', label: 'Call Gamma 牆', unit: '點' },
+  { id: 'putWall', label: 'Put Gamma 牆', unit: '點' },
   { id: 'weekday', label: '星期（1 = 週一）', unit: '' },
 ];
 const BT_OPS = [
@@ -91,6 +96,7 @@ function btData() {
     pc: H && H.pc ? H.pc.map((r) => [r[0], r[1]]) : [],
     fx: H && H.fx ? H.fx.map((r) => [r[0], r[1]]) : [],
     retail: H && H.retail && H.retail.MTX ? H.retail.MTX.map((r) => [r[0], r[1]]) : [],
+    gex: [],
   };
 }
 
@@ -98,7 +104,7 @@ function btData() {
 function btMakeCalc(D) {
   const n = D.bars.length;
   const date = D.bars.map((b) => b[0]), o = D.bars.map((b) => b[1]), h = D.bars.map((b) => b[2]), l = D.bars.map((b) => b[3]), c = D.bars.map((b) => b[4]), v = D.bars.map((b) => b[5]);
-  const byDate = (rows) => { const m = {}; (rows || []).forEach((r) => { m[r[0]] = r[1]; }); return date.map((d) => (m[d] != null ? m[d] : null)); };
+  const byDate = (rows, j = 1) => { const m = {}; (rows || []).forEach((r) => { m[r[0]] = r[j]; }); return date.map((d) => (m[d] != null ? m[d] : null)); };
   const cache = {};
   const get = (s) => {
     const def = btDef(s.id), k = Math.max(1, Math.round(s.n || def.n || 1));
@@ -116,6 +122,10 @@ function btMakeCalc(D) {
     else if (s.id === 'pc') a = byDate(D.pc);
     else if (s.id === 'fx') a = byDate(D.fx);
     else if (s.id === 'retail') a = byDate(D.retail);
+    else if (s.id === 'gex') a = byDate(D.gex, 1);
+    else if (s.id === 'zeroGamma') a = byDate(D.gex, 2);
+    else if (s.id === 'callWall') a = byDate(D.gex, 3);
+    else if (s.id === 'putWall') a = byDate(D.gex, 4);
     else if (s.id === 'fxChg') { const f = byDate(D.fx); for (let i = k; i < n; i++) a[i] = f[i] != null && f[i - k] != null ? f[i] - f[i - k] : null; }
     else if (s.id === 'weekday') a = date.map((d) => new Date(`${d.replace(/\//g, '-')}T12:00:00+08:00`).getDay());
     cache[key] = a;
@@ -460,6 +470,10 @@ const BT_AI_SERIES_DOC = {
   fxChg: '外資台指期淨未平倉 N 日增減（口；正數代表變得更偏多）',
   retail: '小台散戶多空比（%；正數散戶偏多、負數偏空）',
   weekday: '星期幾（1 = 週一 … 5 = 週五）',
+  gex: '台指選擇權所有到期月份加總的造市商 Gamma 曝險（NT$ 億／指數每動 1%）；正數 = 造市商多 Gamma，避險會壓抑波動；負數 = 空 Gamma，波動容易放大。研究上主要預測波動大小，不是方向',
+  zeroGamma: '零 Gamma 價位（點）：總 GEX 由正轉負的指數價位；收盤在它之上 = 正 Gamma 區，之下 = 負 Gamma 區（現價上下 10% 內找不到時當天沒有值）',
+  callWall: 'Call Gamma 牆（點）：Call 的 Gamma 曝險最大的履約價，常被當成上方壓力',
+  putWall: 'Put Gamma 牆（點）：Put 的 Gamma 曝險最大的履約價，常被當成下方支撐',
 };
 // Engine rules and series, shared by both prompts below.
 const BT_AI_ENGINE = [
@@ -482,6 +496,7 @@ const BT_AI_ENGINE = [
   '- 「站上 / 突破 / 跌破 某均線」用 crossAbove / crossBelow；「在均線之上 / 之下」用 > / <。',
   '- 停損停利給百分比：用使用者訊息裡的最近收盤價換成點數（四捨五入到 10 點）。給金額：小台 ÷ 50、大台 ÷ 200 換成點數。',
   '- 「黃金交叉」= 短均線 crossAbove 長均線；MACD 翻正 ≈ ema(12) crossAbove ema(26)。',
+  '- 「跌破零 Gamma / 進入負 Gamma」= close crossBelow zeroGamma；「在正 Gamma 區」= close > zeroGamma；「GEX 轉負」= gex crossBelow 0。GEX 研究上預測的是波動大小不是方向；拿它決定做多或放空時，在 notes（或檢討的 issues）提醒這一點。',
   '- 使用者說「很高、偏多、大增」但沒給數字時，參考訊息裡的資料範圍選一個合理門檻。',
 ].join('\n');
 const BT_AI_SYSTEM = [
@@ -567,7 +582,7 @@ function btAiDataLines(D) {
   const last = D.bars[D.bars.length - 1];
   return [
     `資料：日 K ${D.bars[0][0]} – ${last[0]}，最近收盤 ${last[4]} 點。`,
-    `pc：${rng(D.pc)}。fx：${rng(D.fx)}。retail：${rng(D.retail)}。`,
+    `pc：${rng(D.pc)}。fx：${rng(D.fx)}。retail：${rng(D.retail)}。gex：${rng(D.gex)}。`,
   ];
 }
 function btAiUserMsg(text, cur, D) {
