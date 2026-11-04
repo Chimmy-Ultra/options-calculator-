@@ -2770,6 +2770,16 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expi
   // Positioning (法人 / 大額 / 散戶) exists only for TAIFEX products; elsewhere
   // the right column shows the option-implied move instead.
   const hasChips = P.oiSource === 'taifex';
+  // 實驗室精選: price chips for the probability map, and the replayed
+  // session's own pivots (from the session before it) for the replay.
+  const labMarks = [
+    ...(K ? K.levels.filter((l) => l.key === 'R1' || l.key === 'S1').map((l) => ({ label: l.key, price: l.price })) : []),
+    ...(L.resistance ? [{ label: '壓力牆', price: L.resistance.strike }] : []),
+    ...(L.support ? [{ label: '支撐牆', price: L.support.strike }] : []),
+    ...(L.maxPain ? [{ label: '最大痛苦點', price: L.maxPain.strike }] : []),
+  ];
+  const replayKey = (I && I.date && dayBarsArr && dayBarsArr.length) ? computeKeyLevels({ bars: dayBarsArr, today: String(I.date) }) : null;
+  const replayLevels = replayKey ? replayKey.levels.filter((l) => PIVOT_HEX[l.key]).map((l) => ({ label: l.key, price: l.price, color: PIVOT_HEX[l.key] })) : [];
   return (
     <div style={GRID_BODY}>
       <div className="lv-hero">
@@ -2811,6 +2821,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expi
       </>)}
       <div className="sec-title">更多分析<small>右上「調整版面」可拖曳、縮放</small></div>
       <PanelGrid tab="levels2" panels={rest} defaults={GRID_DEFAULTS.levels2} grid={grid} />
+      {window.LabsShowcase && <window.LabsShowcase P={P} spot={spot} I={I} light={light} marks={labMarks} replayLevels={replayLevels} />}
     </div>
   );
 }
