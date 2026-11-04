@@ -385,7 +385,7 @@ function DataQualityPill({ quality }) {
   return (
     <div style={{
       display: 'inline-flex', alignItems: 'center', gap: 6,
-      padding: '4px 8px', borderRadius: 0,
+      padding: '5px 10px', borderRadius: 999,
       background: ringBg, border: `1px solid ${border}`,
       fontSize: 10, fontFamily: 'var(--font-mono)',
     }} title={quality.label}>
@@ -846,7 +846,7 @@ function spreadTags(items, gap, lo, hi) {
 
 // intraday: one session's minute bars — the whole session in view, no range
 // presets; pctRef = the previous session's close for the percent axis.
-function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceLabel = '', levels = [], cone = null, intraday = false, pctRef = null }) {
+function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceLabel = '', levels = [], cone = null, intraday = false, pctRef = null, vw = 812, vh = 296, showRsi = true }) {
   const dark = theme === 'dark';
   const [hiddenMa, setHiddenMa] = React.useState({});
   // Visible bar window into `bars`; null = the whole series. The wheel zooms
@@ -883,7 +883,10 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
   if (!bars || bars.length < 2) return null;
   // The right gutter carries two columns: the price tags (as before) and the
   // percent axis beyond them, so neither has to give up its slot.
-  const W = 812, H = 296, plotW = 720, pTop = 12, pBot = 196, vTop = 210, vBot = 274, dateY = 288;
+  // vw / vh: viewBox size. A narrower vw draws a taller chart at the same
+  // card width; extra vh goes to the price pane.
+  const ext = Math.max(0, vh - 296);
+  const W = vw, H = 296 + ext, plotW = vw - 92, pTop = 12, pBot = 196 + ext, vTop = 210 + ext, vBot = 274 + ext, dateY = 288 + ext;
   const n = bars.length;                       // MA / RSI still run over the whole series
   const defSpan = intraday ? n : Math.min(n, DEFAULT_VIEW_BARS);
   const span = view ? Math.max(MIN_VIEW_BARS, Math.min(n, view.to - view.from)) : defSpan;
@@ -1198,15 +1201,15 @@ function PriceChart({ bars, theme = 'dark', code = '', periodLabel = '', sourceL
         })()}
       </svg>
 
-      <div style={{ fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600, margin: '10px 0 4px' }}>RSI · 14</div>
-      <svg viewBox={`0 0 ${W} 66`} width="100%" style={{ display: 'block', fontFamily: 'var(--font-mono)' }}>
+      {showRsi && <div style={{ fontSize: 9, letterSpacing: 0.6, textTransform: 'uppercase', opacity: 0.5, fontWeight: 600, margin: '10px 0 4px' }}>RSI · 14</div>}
+      {showRsi && <svg viewBox={`0 0 ${W} 66`} width="100%" style={{ display: 'block', fontFamily: 'var(--font-mono)' }}>
         <line x1="0" x2={plotW} y1={rsiY(70)} y2={rsiY(70)} stroke={grid} strokeDasharray="2 4" />
         <line x1="0" x2={plotW} y1={rsiY(30)} y2={rsiY(30)} stroke={grid} strokeDasharray="2 4" />
         <text x={plotW + 6} y={rsiY(70) + 3} fontSize="9" fill={txt}>70</text>
         <text x={plotW + 6} y={rsiY(30) + 3} fontSize="9" fill={txt}>30</text>
         <clipPath id="pc-rsi"><rect x="0" y="0" width={plotW} height="66" /></clipPath>
         <polyline clipPath="url(#pc-rsi)" points={rsiPts.join(' ')} fill="none" stroke="#a78bfa" strokeWidth="1.4" strokeLinejoin="round" />
-      </svg>
+      </svg>}
 
       {sourceLabel && (
         <div style={{ marginTop: 12, fontSize: 10, opacity: 0.5, fontFamily: 'var(--font-mono)' }}>{sourceLabel}</div>

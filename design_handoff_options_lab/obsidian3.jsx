@@ -524,6 +524,24 @@ const GRID_DEFAULTS = {
     { i: 'sessions',   x: 0, y: 79, w: 4, h: 8 },
     { i: 'dividends',  x: 0, y: 87, w: 4, h: 11 },
   ],
+  // Below the 關卡 hero: two columns, wide on the left.
+  levels2: [
+    { i: 'oi',         x: 0, y: 0,  w: 7, h: 13 },
+    { i: 'intraday',   x: 0, y: 13, w: 7, h: 12 },
+    { i: 'gex',        x: 0, y: 25, w: 7, h: 11 },
+    { i: 'pctrend',    x: 0, y: 36, w: 7, h: 14 },
+    { i: 'optinst',    x: 0, y: 50, w: 7, h: 16 },
+    { i: 'settlehist', x: 0, y: 66, w: 7, h: 12 },
+    { i: 'top20',      x: 0, y: 78, w: 7, h: 8 },
+    { i: 'keylevels',  x: 7, y: 0,  w: 5, h: 16 },
+    { i: 'range',      x: 7, y: 16, w: 5, h: 10 },
+    { i: 'optlarge',   x: 7, y: 26, w: 5, h: 14 },
+    { i: 'retail',     x: 7, y: 40, w: 5, h: 10 },
+    { i: 'sessions',   x: 7, y: 50, w: 5, h: 8 },
+    { i: 'twse',       x: 7, y: 58, w: 5, h: 11 },
+    { i: 'premarket',  x: 7, y: 69, w: 5, h: 8 },
+    { i: 'dividends',  x: 7, y: 77, w: 5, h: 11 },
+  ],
   chart: [{ i: 'kline', x: 0, y: 0, w: 12, h: 19 }],
   watch: [{ i: 'watch', x: 0, y: 0, w: 6, h: 21 }],
   chain: [
@@ -1051,7 +1069,7 @@ function Obsidian3() {
     );
   }
 
-  const gridTab = workspace === 'lab' ? (labView === 'iv' ? 'lab-iv' : null) : workspace;
+  const gridTab = workspace === 'lab' ? (labView === 'iv' ? 'lab-iv' : null) : workspace === 'levels' ? 'levels2' : workspace;
   const grid = { editing: layoutEdit && !!gridTab, resetToken: layoutReset };
   const qNow = quoteNow || (live && live.quote);
   // The change must describe the price the headline shows. spot is shared: the
@@ -2263,6 +2281,266 @@ function TwseFlowsPanel({ W, light = false }) {
   );
 }
 
+// ───────────────────────────────────────────── LEVELS HERO (2026-11 redesign)
+// The 關卡 page leads with one question — where are today's levels against the
+// price — answered by three cards side by side: the level ladder, the chart
+// with the same levels drawn on it, and four positioning numbers. Everything
+// else follows in 籌碼總覽 (cards) and 更多分析 (the adjustable grid).
+
+// Pivots on the chart: P, R1/R2, S1/S2 only (owner's call, 2026-11-04).
+const PIVOT_STYLE = { R2: 'var(--up)', R1: 'var(--up)', P: 'var(--muted)', S1: 'var(--down)', S2: 'var(--down)' };
+const PIVOT_HEX = { R2: '#ef5350', R1: '#ef5350', P: '#8b95a5', S1: '#26a69a', S2: '#26a69a' };
+function pivotLines(K) {
+  return K ? K.levels.filter((l) => PIVOT_HEX[l.key]).map((l) => ({ price: l.price, label: `${l.key} ${l.price.toLocaleString()}`, color: PIVOT_HEX[l.key] })) : [];
+}
+
+// Every level of today, high to low, with the price itself in its place.
+function heroLevels({ P, spot, L, K, cost }) {
+  const out = [];
+  const add = (key, name, note, price) => { if (Number.isFinite(price)) out.push({ key, name, note, price }); };
+  if (L.resistance) add('wallC', '壓力', 'Call 未平倉最大', L.resistance.strike);
+  if (L.support) add('wallP', '支撐', 'Put 未平倉最大', L.support.strike);
+  if (L.maxPain) add('mp', '最大痛苦點', '結算時買方最虧', L.maxPain.strike);
+  if (cost != null) add('cost', '成本線', '前日高低中點', cost);
+  if (K) {
+    const names = { R2: '壓力二', R1: '壓力一', P: '軸心', S1: '支撐一', S2: '支撐二' };
+    K.levels.filter((l) => names[l.key]).forEach((l) => add(l.key, l.key, names[l.key], l.price));
+  }
+  out.push({ key: 'spot', name: '現價', note: P.underlyingLabel || `${P.nameZh || P.name} 近月`, price: spot, spot: true });
+  return out.sort((a, b) => b.price - a.price || (a.spot ? 1 : -1));
+}
+
+function KeyLadderCard({ P, spot, L, K, cost }) {
+  const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
+  const rows = heroLevels({ P, spot, L, K, cost });
+  const above = rows.filter((r) => !r.spot && r.price > spot).pop();
+  const below = rows.filter((r) => !r.spot && r.price < spot)[0];
+  return (
+    <div className="card" style={{ padding: '18px 18px 10px', minWidth: 0 }}>
+      <div style={{ fontSize: 17, fontWeight: 700 }}>今日關鍵價位</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 10px' }}>
+        {above ? <>最近壓力 {above.name} <span style={{ color: 'var(--up)' }}>+{fmtP(above.price - spot)}</span></> : '上方沒有價位'}
+        {' · '}
+        {below ? <>最近支撐 {below.name} <span style={{ color: 'var(--down)' }}>−{fmtP(spot - below.price)}</span></> : '下方沒有價位'}
+      </div>
+      {rows.map((r) => {
+        const d = r.price - spot;
+        const col = r.spot ? 'var(--text)' : d > 0 ? 'var(--up)' : 'var(--down)';
+        return (
+          <div key={r.key} style={{
+            display: 'grid', gridTemplateColumns: '1fr auto 70px', alignItems: 'center', gap: 10,
+            padding: r.spot ? '10px 8px' : '8px 8px', margin: r.spot ? '4px 0' : 0, borderRadius: r.spot ? 10 : 0,
+            background: r.spot ? 'var(--chip)' : 'transparent', borderBottom: r.spot ? 'none' : '1px solid var(--border)',
+          }}>
+            <div style={{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <b style={{ fontSize: 13.5, fontWeight: 700, marginRight: 7 }}>{r.name}</b>
+              <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{r.note}</span>
+            </div>
+            <span className="mono tnum" style={{ fontSize: r.spot ? 19 : 17, fontWeight: 650, color: col }}>{fmtP(r.price)}</span>
+            <span className="mono tnum" style={{
+              justifySelf: 'end', width: 66, textAlign: 'center', padding: '4px 0', borderRadius: 6, fontSize: 12, fontWeight: 700,
+              background: r.spot ? 'var(--text)' : d > 0 ? 'var(--up)' : 'var(--down)', color: r.spot ? 'var(--bg)' : '#fff',
+            }}>{r.spot ? '現在' : `${d > 0 ? '+' : '−'}${fmtP(Math.abs(d))}`}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// 當日 / 日K / 週K / 月K. 當日 = one session's minute candles (1–60 分, 日盤 or
+// 全日盤 = the night session that opens the trading day plus the day session),
+// with today's pivots drawn across it.
+const HERO_TABS = [{ id: 'intra', label: '當日' }, { id: 'D', label: '日K' }, { id: 'W', label: '週K' }, { id: 'M', label: '月K' }];
+function HeroChartCard({ P, theme, I, K, bars, barsLive, live, barPeriodId, setBarPeriodId, barSession, setBarSession, cone }) {
+  const [tab, setTab] = uS('intra');
+  const [freq, setFreq] = uS(15);
+  const [full, setFull] = uS(true);
+  const hasIntra = !!(I && I.day && I.day.bars && I.day.bars.length);
+  const showIntra = tab === 'intra' && hasIntra;
+  const minuteBars = uM(() => {
+    if (!hasIntra) return null;
+    const night = full && I.night && I.night.bars ? I.night.bars : [];
+    return aggMinutes(night.concat(I.day.bars), freq).map((b) => ({ t: `${b[0].slice(0, 2)}:${b[0].slice(2, 4)}`, o: b[1], h: b[2], l: b[3], c: b[4], v: b[5] }));
+  }, [I, freq, full, hasIntra]);
+  const pickTab = (id) => { setTab(id); if (id !== 'intra') setBarPeriodId(id); };
+  const curTab = tab === 'intra' ? (hasIntra ? 'intra' : barPeriodId) : barPeriodId;
+  const date = I && I.date ? `${String(I.date).slice(4, 6)}/${String(I.date).slice(6, 8)}` : '';
+  const lines = pivotLines(K);
+  return (
+    <div className="card" style={{ padding: '16px 18px 14px', minWidth: 0 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <div className="utabs">
+          {HERO_TABS.map((t) => (t.id === 'intra' && !hasIntra) ? null : (
+            <button key={t.id} className={curTab === t.id ? 'on' : ''} onClick={() => pickTab(t.id)}>{t.label}</button>
+          ))}
+        </div>
+        <span className="mono" style={{ fontSize: 10.5, color: 'var(--muted)' }}>
+          {showIntra ? (I.source === 'sinopac-ticks' ? '● 永豐 即時分K' : `● 期交所逐筆 · ${date}`) : (barsLive ? `● ${liveLabel(live, P)}` : '○ 模擬')}
+        </span>
+      </div>
+      <div className="chips" style={{ margin: '12px 0 8px' }}>
+        {showIntra ? (<>
+          {INTRADAY_FREQS.map((f) => <button key={f} className={freq === f ? 'on' : ''} onClick={() => setFreq(f)}>{f}分</button>)}
+          <span className="sep" />
+          <button className={!full ? 'on' : ''} onClick={() => setFull(false)}>日盤</button>
+          <button className={full ? 'on' : ''} onClick={() => setFull(true)}>全日盤</button>
+        </>) : (<>
+          <button className={barSession === 'day' ? 'on' : ''} onClick={() => setBarSession('day')}>日盤</button>
+          <button className={barSession === 'full' ? 'on' : ''} onClick={() => setBarSession('full')}>全日盤</button>
+        </>)}
+      </div>
+      {showIntra && minuteBars && minuteBars.length >= 2
+        ? <PriceChart intraday bars={minuteBars} theme={theme} code={P.code} levels={lines} pctRef={K ? K.prev.c : null}
+            periodLabel={`${date} ${full ? '全日盤' : '日盤'} · ${freq}分K`} vw={640} vh={330} showRsi={false} />
+        : <PriceChart bars={bars} theme={theme} code={P.code} levels={lines} cone={cone}
+            periodLabel={`${(K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0]).label}K · ${barSession === 'full' ? '全日盤' : '日盤'}`} vw={640} vh={330} showRsi={false} />}
+      <div style={{ display: 'flex', gap: 14, fontSize: 11.5, color: 'var(--text2)', marginTop: 6, flexWrap: 'wrap' }}>
+        {[['壓力 R1 R2', 'var(--up)'], ['軸心 P', 'var(--muted)'], ['支撐 S1 S2', 'var(--down)']].map(([t, c]) => (
+          <span key={t}><i style={{ display: 'inline-block', width: 14, height: 0, borderTop: `2px dashed ${c}`, verticalAlign: 'middle', marginRight: 5 }} />{t}</span>
+        ))}
+        <span style={{ color: 'var(--muted)' }}>今日價位 · 由前一交易日高低收算出</span>
+      </div>
+    </div>
+  );
+}
+
+// A small line for a stat card (values only, newest last).
+function MiniSpark({ values, color = 'var(--blue)', w = 120, h = 30, base = null }) {
+  if (!values || values.length < 2) return null;
+  const lo = Math.min(...values, base != null ? base : Infinity), hi = Math.max(...values, base != null ? base : -Infinity);
+  const x = (i) => (i / (values.length - 1)) * (w - 4) + 2;
+  const y = (v) => h - 3 - ((v - lo) / Math.max(hi - lo, 1e-9)) * (h - 6);
+  const pts = values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  return (
+    <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ display: 'block' }} aria-hidden>
+      {base != null && <line x1="2" x2={w - 2} y1={y(base)} y2={y(base)} stroke="var(--border)" strokeDasharray="3 3" />}
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.6" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+function StatCard({ title, value, color, sub, spark }) {
+  return (
+    <div className="card" style={{ padding: '14px 18px 12px' }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text2)' }}>{title}</div>
+      <div className="mono tnum" style={{ fontSize: 26, fontWeight: 700, color: color || 'var(--text)', margin: '6px 0 2px' }}>{value}</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)' }}>{sub}</div>
+      {spark && <div style={{ marginTop: 8 }}>{spark}</div>}
+    </div>
+  );
+}
+const signed = (v) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toLocaleString()}`;
+
+// 籌碼總覽 — the reference app's 聰明錢 cards, one per group of traders: a big
+// headline number, two detail lines with 增倉 / 減倉 tags, the date, and a ring
+// showing how the group's option book splits.
+function Ring({ parts, size = 104, thick = 16, center, sub }) {
+  const tot = parts.reduce((a, p) => a + Math.max(0, p.v), 0);
+  const r = (size - thick) / 2, c = 2 * Math.PI * r;
+  let acc = 0;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flexShrink: 0 }} aria-hidden>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--chip)" strokeWidth={thick} />
+      {tot > 0 && parts.map((p, i) => {
+        const len = Math.max(0, p.v) / tot * c;
+        const el = <circle key={i} cx={size / 2} cy={size / 2} r={r} fill="none" stroke={p.color} strokeWidth={thick}
+          strokeDasharray={`${Math.max(0, len - 1.5)} ${c}`} strokeDashoffset={-acc} transform={`rotate(-90 ${size / 2} ${size / 2})`} />;
+        acc += len;
+        return el;
+      })}
+      {center && <text x="50%" y={sub ? '47%' : '53%'} textAnchor="middle" fontSize="13" fontWeight="700" fill="var(--text)" fontFamily="var(--font-mono)">{center}</text>}
+      {sub && <text x="50%" y="63%" textAnchor="middle" fontSize="9.5" fill="var(--muted)">{sub}</text>}
+    </svg>
+  );
+}
+function SmartCard({ title, big, bigColor, bigNote, lines, date, ring }) {
+  return (
+    <div className="card" style={{ padding: '18px 20px', display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 16, fontWeight: 700 }}>{title}</div>
+        <div style={{ margin: '6px 0 10px', display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+          <span className="mono tnum" style={{ fontSize: 24, fontWeight: 700, color: bigColor }}>{big}</span>
+          <span style={{ fontSize: 12.5, color: 'var(--text2)' }}>{bigNote}</span>
+        </div>
+        {lines.map((l, i) => (
+          <div key={i} style={{ display: 'grid', gridTemplateColumns: '64px 1fr auto', gap: 8, fontSize: 12.5, padding: '2px 0', alignItems: 'baseline' }}>
+            <span style={{ color: 'var(--text2)' }}>{l.k}</span>
+            <span className="mono tnum" style={{ color: 'var(--text)' }}>{l.v}</span>
+            {l.tag ? <span style={{ fontSize: 11.5, fontWeight: 600, color: l.tagColor }}>{l.tag}</span> : <span />}
+          </div>
+        ))}
+        {date && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>{date} 更新</div>}
+      </div>
+      {ring}
+    </div>
+  );
+}
+const tagOf = (chg) => (chg == null || chg === 0 ? null : chg > 0 ? { tag: `+${chg.toLocaleString()} 增倉`, tagColor: 'var(--up)' } : { tag: `−${Math.abs(chg).toLocaleString()} 減倉`, tagColor: 'var(--down)' });
+function SmartMoneyGrid({ X, M, L, P, spot, expiry }) {
+  const O = X && X.optpos;
+  const inst = O && O.inst, large = O && O.large;
+  const date = (d) => (d ? String(d).slice(5) : '');
+  const cards = [];
+  const INST = [['foreign', '外資'], ['trust', '投信'], ['dealer', '自營商']];
+  if (inst && inst.rows) {
+    INST.forEach(([k, name]) => {
+      const r = inst.rows[k];
+      if (!r) return;
+      const net = r.call.netOi - r.put.netOi; // >0: call-heavy (bullish lean)
+      const fut = k === 'foreign' && M && M.foreign ? M.foreign : null;
+      cards.push(<SmartCard key={k} title={`${name} · 臺指選擇權`}
+        big={signed(r.call.netOi)} bigColor={r.call.netOi >= 0 ? 'var(--up)' : 'var(--down)'} bigNote="買權淨未平倉（口）"
+        lines={[
+          { k: '買權淨', v: `${signed(r.call.netOi)} 口`, ...(tagOf(r.call.chgOi) || {}) },
+          { k: '賣權淨', v: `${signed(r.put.netOi)} 口`, ...(tagOf(r.put.chgOi) || {}) },
+          ...(fut ? [{ k: '期貨淨', v: `${signed(fut.net)} 口`, ...(tagOf(fut.chg) || {}) }] : []),
+        ]}
+        date={date(inst.date)}
+        ring={<Ring parts={[
+          { v: r.call.longOi, color: '#ef5350' }, { v: r.call.shortOi, color: 'rgba(239,83,80,0.38)' },
+          { v: r.put.longOi, color: '#26a69a' }, { v: r.put.shortOi, color: 'rgba(38,166,154,0.38)' },
+        ]} center={net >= 0 ? '偏多' : '偏空'} sub="買賣權部位" />} />);
+    });
+  }
+  if (large && large.filters && large.filters.all) {
+    const a = large.filters.all;
+    cards.push(<SmartCard key="large" title="大額交易人 · 前十大"
+      big={signed(a.call.top10.net)} bigColor={a.call.top10.net >= 0 ? 'var(--up)' : 'var(--down)'} bigNote="買權淨（口）"
+      lines={[
+        { k: '買權淨', v: `${signed(a.call.top10.net)} 口`, ...(tagOf(a.call.top10.chg) || {}) },
+        { k: '賣權淨', v: `${signed(a.put.top10.net)} 口`, ...(tagOf(a.put.top10.chg) || {}) },
+        { k: '佔市場', v: `買權 ${Math.abs(a.call.top10.netPct).toFixed(1)}% · 賣權 ${Math.abs(a.put.top10.netPct).toFixed(1)}%` },
+      ]}
+      date={date(large.date)}
+      ring={<Ring parts={[{ v: a.call.top10.buy, color: '#ef5350' }, { v: a.call.top10.sell, color: 'rgba(239,83,80,0.38)' }, { v: a.put.top10.buy, color: '#26a69a' }, { v: a.put.top10.sell, color: 'rgba(38,166,154,0.38)' }]}
+        center={`${Math.round(a.call.top10.sellPct)}%`} sub="買權賣方佔比" />} />);
+  }
+  if (M && M.retail && M.retail.MTX) {
+    const m = M.retail.MTX, t = M.retail.TMF;
+    cards.push(<SmartCard key="retail" title="散戶多空比"
+      big={`${m.ratio >= 0 ? '+' : ''}${m.ratio.toFixed(2)}%`} bigColor={m.ratio >= 0 ? 'var(--up)' : 'var(--down)'} bigNote={`小台 · 散戶${m.ratio >= 0 ? '偏多' : '偏空'}（反向看）`}
+      lines={[
+        { k: '小台', v: `${m.ratio.toFixed(2)}%`, ...(m.chg != null ? { tag: `${m.chg >= 0 ? '+' : '−'}${Math.abs(m.chg).toFixed(2)} 較前日`, tagColor: m.chg >= 0 ? 'var(--up)' : 'var(--down)' } : {}) },
+        ...(t ? [{ k: '微台', v: `${t.ratio.toFixed(2)}%`, ...(t.chg != null ? { tag: `${t.chg >= 0 ? '+' : '−'}${Math.abs(t.chg).toFixed(2)} 較前日`, tagColor: t.chg >= 0 ? 'var(--up)' : 'var(--down)' } : {}) }] : []),
+      ]}
+      date={date(m.date)}
+      ring={<Ring parts={[{ v: Math.max(0, 50 + m.ratio / 2), color: '#ef5350' }, { v: Math.max(0, 50 - m.ratio / 2), color: '#26a69a' }]} center={`${m.ratio.toFixed(0)}%`} sub="小台 多−空" />} />);
+  }
+  if (L && L.sigma1 != null) {
+    const fmtP = (v) => Math.round(v).toLocaleString();
+    cards.push(<SmartCard key="move" title="預期波動 · 到結算"
+      big={`±${fmtP(L.sigma1)}`} bigColor="var(--text)" bigNote={`點 · ${expiry.label} 剩 ${expiry.dte} 天`}
+      lines={[
+        { k: '1σ 區間', v: `${fmtP(spot - L.sigma1)} – ${fmtP(spot + L.sigma1)}` },
+        { k: '價平 IV', v: `${L.atmIv.toFixed(1)}%` },
+        ...(L.straddle != null ? [{ k: '價平和', v: window.fmtPx(L.straddle, P) }] : []),
+      ]}
+      ring={<Ring parts={[{ v: 68.3, color: 'var(--blue)' }, { v: 31.7, color: 'var(--chip)' }]} center="68%" sub="落在區間內" />} />);
+  }
+  if (!cards.length) return <div className="card" style={{ padding: 18, fontSize: 12, color: 'var(--muted)' }}>籌碼資料未載入（期交所每個交易日 16:30 後更新）。</div>;
+  return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))', gap: 14 }}>{cards}</div>;
+}
+
 function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expiry, levels: L, live, market: M, rangeLevels: R, dayBarsLive, gex: G, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D, grid, top20: T, intraday: I, keyLevels: K, twse: W, premarket: PM, extra = {}, history: H = null }) {
   const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
@@ -2448,9 +2726,39 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expi
     { i: 'dividends', title: '除息點數 · 各契約（推算）',
       right: gridCap(X.dividends ? `證交所 × 期交所 ${ymd(X.dividends.asOf)}` : ''), body: <DividendsPanel Dv={X.dividends} light={light} /> },
   ];
+  // The hero row carries the ladder, the chart and the headline numbers, so
+  // their old panels (strip / ladder / kline) leave the grid below.
+  const HERO_IDS = { strip: 1, ladder: 1, kline: 1 };
+  const rest = panels.filter((p) => !HERO_IDS[p.i]);
+  const fxSeries = H && H.fx ? H.fx.slice(-20).map((r) => r[1]) : null;
+  const retail = M && M.retail && M.retail.MTX;
   return (
     <div style={GRID_BODY}>
-      <PanelGrid tab="levels" panels={panels} defaults={GRID_DEFAULTS.levels} grid={grid} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(330px, 380px) minmax(0, 1fr) minmax(230px, 280px)', gap: 14, alignItems: 'start' }}>
+        <KeyLadderCard P={P} spot={spot} L={L} K={K} cost={cost} />
+        <HeroChartCard P={P} theme={theme} I={I} K={K} bars={bars} barsLive={barsLive} live={live}
+          barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId} barSession={barSession} setBarSession={setBarSession}
+          cone={L.atmIv ? { ivPct: L.atmIv, days: expiry.dte, label: expiry.label } : null} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <StatCard title="外資期貨淨部位" value={fx ? signed(fx.net) : '—'} color={fx ? (fx.net >= 0 ? 'var(--up)' : 'var(--down)') : undefined}
+            sub={fx ? <>較前日 {signed(fx.chg)} 口{asOf(fx)}</> : noMkt}
+            spark={fxSeries && fxSeries.length > 2 ? <MiniSpark values={fxSeries} color={fx && fx.net >= 0 ? 'var(--up)' : 'var(--down)'} /> : null} />
+          <StatCard title="P/C 未平倉比" value={pc ? pc.ratio.toFixed(2) : '—'}
+            sub={pc ? <>{pc.ratio >= 1 ? '高於 1：賣權較多' : '低於 1：買權較多'}{asOf(pc)}</> : noMkt}
+            spark={pc && pc.series && pc.series.length > 2 ? <MiniSpark values={pc.series.map((p) => p.ratio)} base={1} /> : null} />
+          <StatCard title="十大交易人淨部位" value={t10 ? signed(t10.net) : '—'} color={t10 ? (t10.net >= 0 ? 'var(--up)' : 'var(--down)') : undefined}
+            sub={t10 ? <>較前日 {signed(t10.chg)} 口{asOf(t10)}</> : noMkt} />
+          <StatCard title="散戶多空比 · 小台" value={retail ? `${retail.ratio.toFixed(2)}%` : '—'} color={retail ? (retail.ratio >= 0 ? 'var(--up)' : 'var(--down)') : undefined}
+            sub={retail ? `散戶${retail.ratio >= 0 ? '偏多' : '偏空'} → 反向指標` : noMkt}
+            spark={retail && retail.series && retail.series.length > 2 ? <MiniSpark values={retail.series.map((r) => r.ratio)} base={0} color="var(--text2)" /> : null} />
+          <a href="#chips" onClick={(e) => { e.preventDefault(); const el = document.getElementById('lv-chips'); if (el) el.scrollIntoView({ behavior: 'smooth' }); }}
+            style={{ fontSize: 13, color: 'var(--blue)', textAlign: 'right', textDecoration: 'none' }}>更多籌碼 ›</a>
+        </div>
+      </div>
+      <div id="lv-chips" className="sec-title">籌碼總覽<small>法人、大戶、散戶各自站哪邊 · 期交所前一交易日</small></div>
+      <SmartMoneyGrid X={X} M={M} L={L} P={P} spot={spot} expiry={expiry} />
+      <div className="sec-title">更多分析<small>右上「調整版面」可拖曳、縮放</small></div>
+      <PanelGrid tab="levels2" panels={rest} defaults={GRID_DEFAULTS.levels2} grid={grid} />
     </div>
   );
 }
