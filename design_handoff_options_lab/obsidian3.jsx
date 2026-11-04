@@ -195,8 +195,8 @@ function Eyebrow({ children, right, hk }) {
   );
 }
 
-// Left navigation rail (2026-11 redesign): icon + label per workspace, the
-// theme and help at the foot.
+// Left navigation rail (2026-11 redesign): icon + label per workspace, help at
+// the foot (the light / dark switch lives in the price header).
 const NAV_ICONS = {
   watch: <path d="M12 20.5s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.6a4.3 4.3 0 0 1 7.5 2.9c0 5.4-7.5 10-7.5 10z" />,
   levels: <><path d="M4 6h16M4 12h16M4 18h16" /><circle cx="15" cy="12" r="2.2" fill="currentColor" stroke="none" /></>,
@@ -220,10 +220,6 @@ function NavRail({ value, onChange, light, setTheme, onHelp, helpOpen }) {
         <button key={it.id} className={`rail-btn${value === it.id ? ' on' : ''}`} onClick={() => onChange(it.id)}>{icon(NAV_ICONS[it.id])}{it.label}</button>
       ))}
       <div style={{ flex: 1 }} />
-      <button className="rail-btn" onClick={() => setTheme(light ? 'dark' : 'light')} title="切換 淺色 / 深色">
-        {icon(light ? <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" /> : <><circle cx="12" cy="12" r="4" /><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4" /></>)}
-        {light ? '深色' : '淺色'}
-      </button>
       <button className={`rail-btn${helpOpen ? ' on' : ''}`} onClick={onHelp} title="說明 — 這些數字怎麼讀">
         {icon(<><circle cx="12" cy="12" r="9" /><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.1-2.4 3.6" /><circle cx="12" cy="17" r="0.6" fill="currentColor" /></>)}
         說明
@@ -235,6 +231,12 @@ function NavRail({ value, onChange, light, setTheme, onHelp, helpOpen }) {
 // The price header: product (menu) · big last price + change · the session's
 // high / low · data status. moomoo's quote header, in this app's words.
 function HeroQuote({ productId, P, spot, chg, scenario, open, setOpen, onPick, hl, status }) {
+  uE(() => {
+    if (!open) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
   const fmtSpot = (v) => v.toLocaleString(undefined, { maximumFractionDigits: v < 10 ? 3 : v < 1000 ? 2 : 0 });
   const col = chg == null ? 'var(--text)' : chg >= 0 ? 'var(--up)' : 'var(--down)';
   const pct = chg != null && spot - chg !== 0 ? chg / (spot - chg) * 100 : null;
@@ -1069,7 +1071,7 @@ function Obsidian3() {
     );
   }
 
-  const gridTab = workspace === 'lab' ? (labView === 'iv' ? 'lab-iv' : null) : workspace === 'levels' ? 'levels2' : workspace;
+  const gridTab = workspace === 'lab' ? (labView === 'iv' ? 'lab-iv' : null) : workspace === 'levels' ? 'levels2' : workspace === 'chart' ? null : workspace;
   const grid = { editing: layoutEdit && !!gridTab, resetToken: layoutReset };
   const qNow = quoteNow || (live && live.quote);
   // The change must describe the price the headline shows. spot is shared: the
@@ -1094,6 +1096,19 @@ function Obsidian3() {
       <NavRail value={workspace} onChange={setWorkspace} light={light} setTheme={setTheme} helpOpen={helpOpen}
         onHelp={() => { setHelpOpen((v) => !v); dismissHelpHint(); }} />
 
+      {/* First-visit hint, pointing at the rail's 說明 button */}
+      {!helpHintSeen && (
+        <div style={{
+          position: 'fixed', left: RAIL_W + 10, bottom: 34, zIndex: 40, whiteSpace: 'nowrap',
+          display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10,
+          background: 'var(--panel)', border: '1px solid rgba(240,192,104,0.6)', boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
+          fontSize: 12, fontWeight: 600, color: 'var(--text)',
+        }}>
+          ← 第一次用？按「說明」看每個數字怎麼讀
+          <button onClick={(e) => { e.stopPropagation(); dismissHelpHint(); }} title="關閉" style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 0, fontFamily: 'inherit' }}>×</button>
+        </div>
+      )}
+
       {/* Price header: product menu · big last price · session high / low · status chips · theme switch.
           Sits above the expiry row: the product menu inside must win the stacking order. */}
       <div style={{ position: 'absolute', top: 0, left: RAIL_W, right: 0, height: HEAD_H, display: 'flex', alignItems: 'center', gap: 16, padding: '0 22px', zIndex: 20 }}>
@@ -1114,19 +1129,7 @@ function Obsidian3() {
           </>)}
         />
         <div style={{ flex: 1 }} />
-        <DataQualityPill quality={quality} />
         <Seg items={[{ id: 'light', label: '淺色' }, { id: 'dark', label: '深色' }]} value={theme} onChange={setTheme} />
-        {!helpHintSeen && (
-          <div style={{
-            position: 'absolute', top: 'calc(100% - 6px)', left: 12, zIndex: 20, whiteSpace: 'nowrap',
-            display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 8,
-            background: 'rgba(240,192,104,0.16)', border: '1px solid rgba(240,192,104,0.4)',
-            fontSize: 10.5, fontWeight: 600, color: light ? '#8a6410' : '#f7d394',
-          }}>
-            ← 第一次用？按左下「說明」
-            <button onClick={(e) => { e.stopPropagation(); dismissHelpHint(); }} title="關閉" style={{ border: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 12, lineHeight: 1, padding: 0, fontFamily: 'inherit' }}>×</button>
-          </div>
-        )}
       </div>
 
       {/* Expiry row — tab-specific controls on the right */}
@@ -2352,7 +2355,7 @@ function KeyLadderCard({ P, spot, L, K, cost }) {
 // 全日盤 = the night session that opens the trading day plus the day session),
 // with today's pivots drawn across it.
 const HERO_TABS = [{ id: 'intra', label: '當日' }, { id: 'D', label: '日K' }, { id: 'W', label: '週K' }, { id: 'M', label: '月K' }];
-function HeroChartCard({ P, theme, I, K, bars, barsLive, live, barPeriodId, setBarPeriodId, barSession, setBarSession, cone }) {
+function HeroChartCard({ P, theme, I, K, bars, barsLive, live, barPeriodId, setBarPeriodId, barSession, setBarSession, cone, tall = false }) {
   const [tab, setTab] = uS('intra');
   const [freq, setFreq] = uS(15);
   const [full, setFull] = uS(true);
@@ -2363,10 +2366,26 @@ function HeroChartCard({ P, theme, I, K, bars, barsLive, live, barPeriodId, setB
     const night = full && I.night && I.night.bars ? I.night.bars : [];
     return aggMinutes(night.concat(I.day.bars), freq).map((b) => ({ t: `${b[0].slice(0, 2)}:${b[0].slice(2, 4)}`, o: b[1], h: b[2], l: b[3], c: b[4], v: b[5] }));
   }, [I, freq, full, hasIntra]);
+  // Draw the chart at the card's own pixel width: a fixed viewBox scaled
+  // down to a laptop-width card shrank its labels to ~6px.
+  const boxRef = uR(null);
+  const [boxW, setBoxW] = uS(640);
+  uE(() => {
+    const el = boxRef.current;
+    if (!el || !window.ResizeObserver) return undefined;
+    const ro = new ResizeObserver((es) => { const w = Math.round(es[0].contentRect.width); if (w > 0) setBoxW(w); });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const vw = Math.max(360, boxW);
+  // The K線 tab fills the window; the 關卡 card keeps a fixed height.
+  const vh = tall ? Math.max(360, (window.innerHeight || 900) - BODY_TOP - 330) : 360;
   const pickTab = (id) => { setTab(id); if (id !== 'intra') setBarPeriodId(id); };
   const curTab = tab === 'intra' ? (hasIntra ? 'intra' : barPeriodId) : barPeriodId;
   const date = I && I.date ? `${String(I.date).slice(4, 6)}/${String(I.date).slice(6, 8)}` : '';
-  const lines = pivotLines(K);
+  // Pivots are one session's levels: drawn on minute and day candles, not
+  // across weekly / monthly bars where they'd sit in one squashed band.
+  const lines = (showIntra || barPeriodId === 'D') ? pivotLines(K) : [];
   return (
     <div className="card" style={{ padding: '16px 18px 14px', minWidth: 0 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -2390,16 +2409,18 @@ function HeroChartCard({ P, theme, I, K, bars, barsLive, live, barPeriodId, setB
           <button className={barSession === 'full' ? 'on' : ''} onClick={() => setBarSession('full')}>全日盤</button>
         </>)}
       </div>
+      <div ref={boxRef} style={{ minWidth: 0 }}>
       {showIntra && minuteBars && minuteBars.length >= 2
         ? <PriceChart intraday bars={minuteBars} theme={theme} code={P.code} levels={lines} pctRef={K ? K.prev.c : null}
-            periodLabel={`${date} ${full ? '全日盤' : '日盤'} · ${freq}分K`} vw={640} vh={330} showRsi={false} />
+            periodLabel={`${date} ${full ? '全日盤' : '日盤'} · ${freq}分K`} vw={vw} vh={vh} showRsi={tall} />
         : <PriceChart bars={bars} theme={theme} code={P.code} levels={lines} cone={cone}
-            periodLabel={`${(K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0]).label}K · ${barSession === 'full' ? '全日盤' : '日盤'}`} vw={640} vh={330} showRsi={false} />}
+            periodLabel={`${(K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0]).label}K · ${barSession === 'full' ? '全日盤' : '日盤'}`} vw={vw} vh={vh} showRsi={tall} />}
+      </div>
       <div style={{ display: 'flex', gap: 14, fontSize: 11.5, color: 'var(--text2)', marginTop: 6, flexWrap: 'wrap' }}>
         {[['壓力 R1 R2', 'var(--up)'], ['軸心 P', 'var(--muted)'], ['支撐 S1 S2', 'var(--down)']].map(([t, c]) => (
           <span key={t}><i style={{ display: 'inline-block', width: 14, height: 0, borderTop: `2px dashed ${c}`, verticalAlign: 'middle', marginRight: 5 }} />{t}</span>
         ))}
-        <span style={{ color: 'var(--muted)' }}>今日價位 · 由前一交易日高低收算出</span>
+        <span style={{ color: 'var(--muted)' }}>{lines.length ? '今日價位 · 由前一交易日高低收算出' : '週K / 月K 不畫單日價位'}</span>
       </div>
     </div>
   );
@@ -2732,14 +2753,17 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expi
   const rest = panels.filter((p) => !HERO_IDS[p.i]);
   const fxSeries = H && H.fx ? H.fx.slice(-20).map((r) => r[1]) : null;
   const retail = M && M.retail && M.retail.MTX;
+  // Positioning (法人 / 大額 / 散戶) exists only for TAIFEX products; elsewhere
+  // the right column shows the option-implied move instead.
+  const hasChips = P.oiSource === 'taifex';
   return (
     <div style={GRID_BODY}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(330px, 380px) minmax(0, 1fr) minmax(230px, 280px)', gap: 14, alignItems: 'start' }}>
+      <div className="lv-hero">
         <KeyLadderCard P={P} spot={spot} L={L} K={K} cost={cost} />
         <HeroChartCard P={P} theme={theme} I={I} K={K} bars={bars} barsLive={barsLive} live={live}
           barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId} barSession={barSession} setBarSession={setBarSession}
           cone={L.atmIv ? { ivPct: L.atmIv, days: expiry.dte, label: expiry.label } : null} />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {hasChips ? (<div className="lv-stats">
           <StatCard title="外資期貨淨部位" value={fx ? signed(fx.net) : '—'} color={fx ? (fx.net >= 0 ? 'var(--up)' : 'var(--down)') : undefined}
             sub={fx ? <>較前日 {signed(fx.chg)} 口{asOf(fx)}</> : noMkt}
             spark={fxSeries && fxSeries.length > 2 ? <MiniSpark values={fxSeries} color={fx && fx.net >= 0 ? 'var(--up)' : 'var(--down)'} /> : null} />
@@ -2752,11 +2776,25 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expi
             sub={retail ? `散戶${retail.ratio >= 0 ? '偏多' : '偏空'} → 反向指標` : noMkt}
             spark={retail && retail.series && retail.series.length > 2 ? <MiniSpark values={retail.series.map((r) => r.ratio)} base={0} color="var(--text2)" /> : null} />
           <a href="#chips" onClick={(e) => { e.preventDefault(); const el = document.getElementById('lv-chips'); if (el) el.scrollIntoView({ behavior: 'smooth' }); }}
-            style={{ fontSize: 13, color: 'var(--blue)', textAlign: 'right', textDecoration: 'none' }}>更多籌碼 ›</a>
-        </div>
+            className="lv-more" style={{ fontSize: 13, color: 'var(--blue)', textAlign: 'right', textDecoration: 'none' }}>更多籌碼 ›</a>
+        </div>) : (<div className="lv-stats">
+          <StatCard title="預期波動 · 到結算" value={L.sigma1 != null ? `±${fmtP(Math.round(L.sigma1))}` : '—'}
+            sub={L.sigma1 != null ? `${fmtP(Math.round(spot - L.sigma1))} – ${fmtP(Math.round(spot + L.sigma1))} · ${expiry.label} 剩 ${expiry.dte} 天` : '沒有 IV'} />
+          <StatCard title="價平 IV" value={L.atmIv ? `${L.atmIv.toFixed(1)}%` : '—'} sub={L.atm ? `價平 ${fmtP(L.atm.strike)}` : '沒有鏈資料'} />
+          <StatCard title="價平和" value={L.straddle != null ? window.fmtPx(L.straddle, P) : '—'}
+            sub={L.straddle != null ? `市場預期到結算的波動幅度${straddleDelta != null ? ` · 較前日 ${straddleDelta > 0 ? '+' : '−'}${window.fmtPx(Math.abs(straddleDelta), P)}` : ''}` : '沒有鏈資料'} />
+        </div>)}
       </div>
-      <div id="lv-chips" className="sec-title">籌碼總覽<small>法人、大戶、散戶各自站哪邊 · 期交所前一交易日</small></div>
+      {hasChips && (<>
+      <div id="lv-chips" className="sec-title">籌碼總覽<small>法人、大戶、散戶各自站哪邊 · 期交所前一交易日</small>
+        <span style={{ flex: 1 }} />
+        <small style={{ display: 'inline-flex', gap: 12 }}>
+          {[['#ef5350', '買權 買方'], ['rgba(239,83,80,0.38)', '買權 賣方'], ['#26a69a', '賣權 買方'], ['rgba(38,166,154,0.38)', '賣權 賣方']].map(([c, t]) => (
+            <span key={t}><i style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 5, background: c, marginRight: 5 }} />{t}</span>))}
+        </small>
+      </div>
       <SmartMoneyGrid X={X} M={M} L={L} P={P} spot={spot} expiry={expiry} />
+      </>)}
       <div className="sec-title">更多分析<small>右上「調整版面」可拖曳、縮放</small></div>
       <PanelGrid tab="levels2" panels={rest} defaults={GRID_DEFAULTS.levels2} grid={grid} />
     </div>
@@ -2839,68 +2877,13 @@ function WatchWorkspace({ onPick, grid }) {
 
 // Top-level Chart tab (from the design): full-width candles + MA + RSI.
 // Desktop only — mobile keeps the K線 sub-tab inside Calc.
-function ChartWorkspace({ P, bars, barsLive, live, theme, light, barPeriodId, setBarPeriodId, barSession, setBarSession, cone = null, D, grid, keyLevels = null, dayBars = null, intraday: I = null }) {
-  const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
-  // Floor-trader pivots for the next session, from the last completed day
-  // (computeKeyLevels): P, R1/R2, S1/S2 only — R3/S3 sit too far out to matter
-  // on a normal day and crowd the scale.
-  const PIVOT_LINES = { R2: LEVEL_COLORS.up, R1: LEVEL_COLORS.up, P: '#cbd5e1', S1: LEVEL_COLORS.down, S2: LEVEL_COLORS.down };
-  const pivotLevels = keyLevels ? keyLevels.levels.filter((l) => PIVOT_LINES[l.key])
-    .map((l) => ({ price: l.price, label: `${l.key} ${l.price.toLocaleString()}`, color: PIVOT_LINES[l.key] })) : [];
-  // 當日 (day-trading) view: one session's 1- or 5-minute candles from the
-  // intraday feed (Shioaji live, else TAIFEX's tick file for the latest
-  // session), with the pivots computed from the session before that one.
-  const [intra, setIntra] = uS(null);           // null | '1' | '5'
-  const [intraSess, setIntraSess] = uS('day');  // 'day' | 'night'
-  const S = I && (intraSess === 'night' ? I.night : I.day);
-  const minuteBars = uM(() => {
-    if (!S || !S.bars || !S.bars.length) return null;
-    const one = S.bars.map((b) => ({ t: `${b[0].slice(0, 2)}:${b[0].slice(2, 4)}`, o: b[1], h: b[2], l: b[3], c: b[4], v: b[5] }));
-    if (intra !== '5') return one;
-    const out = [];
-    for (const b of one) {
-      const mm = +b.t.slice(3);
-      const key = `${b.t.slice(0, 3)}${String(mm - (mm % 5)).padStart(2, '0')}`;
-      const cur = out[out.length - 1];
-      if (cur && cur.t === key) { cur.h = Math.max(cur.h, b.h); cur.l = Math.min(cur.l, b.l); cur.c = b.c; cur.v += b.v; }
-      else out.push({ ...b, t: key });
-    }
-    return out;
-  }, [S, intra]);
-  const intraKey = uM(() => (I && I.date && dayBars ? computeKeyLevels({ bars: dayBars, today: String(I.date) }) : null), [I, dayBars]);
-  const showIntra = !!(intra && minuteBars && minuteBars.length >= 2);
-  const PIVOT_COLORS = { R2: LEVEL_COLORS.up, R1: LEVEL_COLORS.up, P: '#cbd5e1', S1: LEVEL_COLORS.down, S2: LEVEL_COLORS.down };
-  const pivotsOf = (K) => (K ? K.levels.filter((l) => PIVOT_COLORS[l.key])
-    .map((l) => ({ price: l.price, label: `${l.key} ${l.price.toLocaleString()}`, color: PIVOT_COLORS[l.key] })) : []);
-  const intraDate = I && I.date ? `${String(I.date).slice(4, 6)}/${String(I.date).slice(6, 8)}` : '';
-  const panels = [{
-    i: 'kline',
-    title: showIntra
-      ? <>K線 · {P.code} · 當日 {intra}分<span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4 }}>· {intraDate} {intraSess === 'night' ? '夜盤' : '日盤'}</span></>
-      : <>K線 · {P.code} · {per.label}K<span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4 }}>· {barsLive ? `近月 · ${liveLabel(live, P)}` : '模擬'}</span></>,
-    right: <div style={{ display: 'flex', gap: 8 }}>
-      {I && I.day && <Seg items={[{ id: '1', label: '1分' }, { id: '5', label: '5分' }]} value={intra} onChange={setIntra} />}
-      {showIntra
-        ? (I.night && I.night.bars && I.night.bars.length ? <Seg items={[{ id: 'day', label: '日盤' }, { id: 'night', label: '夜盤' }]} value={intraSess} onChange={setIntraSess} /> : null)
-        : <KSessionToggle value={barSession} onChange={setBarSession} />}
-      <Seg items={K_PERIODS} value={showIntra ? null : barPeriodId} onChange={(id) => { setIntra(null); setBarPeriodId(id); }} />
-    </div>,
-    body: showIntra
-      ? <PriceChart intraday levels={pivotsOf(intraKey)} pctRef={intraKey ? intraKey.prev.c : null}
-          bars={minuteBars} theme={theme} code={P.code}
-          periodLabel={`當日 ${intra}分K · ${intraDate} ${intraSess === 'night' ? '夜盤' : '日盤'}`}
-          sourceLabel={I.source === 'sinopac-ticks' ? '● 永豐 逐筆 — 當日分K' : `● 期交所逐筆檔 — ${intraDate} 分K（最近一個有資料的交易日）`} />
-      : <PriceChart cone={cone} levels={pivotLevels}
-          bars={bars} theme={theme} code={P.code}
-          periodLabel={`${per.label}K` + (barSession === 'full' ? ' · 全日盤' : ' · 日盤')}
-          sourceLabel={barsLive
-            ? `● ${liveLabel(live, P)} — 近月期貨日K`
-            : '○ 模擬 K 線 — 隨機漫步；接上本機代理（server/）才有真實行情'}
-        />,
-  }];
+function ChartWorkspace({ P, bars, barsLive, live, theme, barPeriodId, setBarPeriodId, barSession, setBarSession, cone = null, keyLevels = null, intraday: I = null }) {
+  // The 關卡 chart card at full size (with RSI): 當日 1–60 分 · 日盤 / 全日盤,
+  // or 日 / 週 / 月 K, today's pivots on minute and day candles.
   return (
     <div style={GRID_BODY}>
-      <PanelGrid tab="chart" panels={panels} defaults={GRID_DEFAULTS.chart} grid={grid} />
+      <HeroChartCard tall P={P} theme={theme} I={I} K={keyLevels} bars={bars} barsLive={barsLive} live={live}
+        barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId} barSession={barSession} setBarSession={setBarSession} cone={cone} />
     </div>
   );
 }
