@@ -8,3 +8,6 @@ server/.venv/
 
 # Shioaji writes a runtime log next to the process
 shioaji.log
+
+# Local SinoPac keys written by start-live.command — never commit
+server/.env
