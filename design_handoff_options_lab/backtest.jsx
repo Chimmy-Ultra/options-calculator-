@@ -331,20 +331,262 @@ function BtStat({ label, value, color, sub }) {
   );
 }
 
-// Natural-language box. Phase 2 (a Claude call that turns the description
-// into the strategy JSON above) needs an API key the owner supplies; until
-// then the box shows the idea and the form below does the work.
-function BtAsk() {
+// ── AI box: a Chinese description → the strategy JSON above, via Claude.
+// The owner's own API key is kept in this browser only (localStorage) and the
+// request goes straight from the browser to api.anthropic.com — no backend.
+// The SDK is loaded on first use (window.loadAnthropic, index.html).
+const BT_AI_KEY = 'optionsLab.anthropicKey.v1';
+const BT_AI_MODEL = 'claude-opus-5-5';
+const BT_AI_PRICE = { in: 4, out: 20, cacheW: 5, cacheR: 0.2 }; // US$ / 1M tokens, for the cost line only
+const btAiLoadKey = () => { try { return localStorage.getItem(BT_AI_KEY) || ''; } catch (e) { return ''; } };
+const BT_AI_SERIES_DOC = {
+  close: '當日收盤價（點）',
+  open: '當日開盤價（點）',
+  ma: 'N 日簡單移動平均（收盤價，點）',
+  ema: 'N 日指數移動平均（收盤價，點）',
+  hh: '前 N 個交易日（不含當天）的最高價（點）；close > hh 代表突破 N 日新高',
+  ll: '前 N 個交易日（不含當天）的最低價（點）；close < ll 代表跌破 N 日新低',
+  ret: '最近 N 日收盤漲跌幅（%，-2 代表跌 2%）',
+  gap: '當天開盤相對前一天收盤的跳空（%）',
+  rsi: 'Wilder RSI(N)，0–100',
+  range: '當天最高減最低（點）',
+  volume: '當天成交量（口）',
+  pc: '台指選擇權 P/C 未平倉比，用比值表示（1.2 代表 120%）',
+  fx: '外資台指期淨未平倉（口；正數淨多、負數淨空）',
+  fxChg: '外資台指期淨未平倉 N 日增減（口；正數代表變得更偏多）',
+  retail: '小台散戶多空比（%；正數散戶偏多、負數偏空）',
+  weekday: '星期幾（1 = 週一 … 5 = 週五）',
+};
+const BT_AI_SYSTEM = [
+  '你把台灣使用者用中文描述的台指期交易策略，轉成回測引擎看得懂的 JSON。只輸出符合 schema 的 JSON。',
+  '',
+  '資料：台指期近月日盤日 K（TX）。所有條件在每個交易日收盤時判斷。',
+  '',
+  '引擎規則：',
+  '- entry.all：全部成立（AND）的那天收盤後，隔天開盤進場。同一時間最多一筆部位，不加碼、不反手。整個策略只做多或只放空（side）。',
+  '- exit.stopLoss / exit.takeProfit：以進場價為準的點數，用當天最高最低判斷。',
+  '- exit.holdDays：持有到第 N 天收盤出場（進場那天算第 1 天）。',
+  '- exit.any：任一成立的那天收盤後，隔天開盤出場。',
+  '- 沒有給的出場條件填 null 或空陣列。',
+  '- contract：TX 大台（每點 200 元）、MTX 小台（每點 50 元）。沒講就用 MTX、qty 1。',
+  '- from / to：回測期間 YYYY/MM/DD，沒講就 null。',
+  '',
+  '條件格式：{ left: 序列, op, right: 序列或數字 }。op：> < >= <=，crossAbove = 今天在上面且昨天不在上面（向上穿越、站上），crossBelow = 跌破。',
+  '序列 { id, n }：n 只用在有 N 的序列，其他填 null。可用序列：',
+  ...BT_SERIES.map((s) => `- ${s.id}${s.n ? `（N，預設 ${s.n}）` : ''}：${BT_AI_SERIES_DOC[s.id] || s.label}`),
+  '',
+  '換算：',
+  '- 「站上 / 突破 / 跌破 某均線」用 crossAbove / crossBelow；「在均線之上 / 之下」用 > / <。',
+  '- 停損停利給百分比：用使用者訊息裡的最近收盤價換成點數（四捨五入到 10 點）。給金額：小台 ÷ 50、大台 ÷ 200 換成點數。',
+  '- 「黃金交叉」= 短均線 crossAbove 長均線；MACD 翻正 ≈ ema(12) crossAbove ema(26)。',
+  '- 使用者說「很高、偏多、大增」但沒給數字時，參考訊息裡的資料範圍選一個合理門檻。',
+  '',
+  'notes：用繁體中文短句列出你做的每個假設或換算（例如「「散戶很偏多」設為 > 30%」）；沒有就空陣列。',
+  'unsupported：描述裡引擎做不到、被你省略或近似的部分（例如「或」條件、分 K、KD、布林通道、選擇權、其他商品、加碼），一句一項；沒有就空陣列。',
+  '如果整段描述都不是可以回測的台指期策略（例如在問問題、選擇權組合、個股），ok 填 false，把原因寫在 notes，其他欄位照 schema 隨便填合法值。否則 ok 填 true。',
+  '如果使用者是在修改「目前的策略」（例如「停損改 200」「改成大台」），從目前的策略開始，只改他說的地方。',
+  'name：10 個字以內的繁體中文策略名稱。',
+].join('\n');
+const btAiNullable = (t) => ({ anyOf: [{ type: t }, { type: 'null' }] });
+const BT_AI_SERIES_SCHEMA = {
+  type: 'object',
+  properties: { id: { type: 'string', enum: BT_SERIES.map((s) => s.id) }, n: btAiNullable('integer') },
+  required: ['id', 'n'], additionalProperties: false,
+};
+const BT_AI_COND_SCHEMA = {
+  type: 'object',
+  properties: { left: BT_AI_SERIES_SCHEMA, op: { type: 'string', enum: BT_OPS.map((o) => o.id) }, right: { anyOf: [{ type: 'number' }, BT_AI_SERIES_SCHEMA] } },
+  required: ['left', 'op', 'right'], additionalProperties: false,
+};
+const BT_AI_SCHEMA = {
+  type: 'object',
+  properties: {
+    ok: { type: 'boolean' },
+    name: { type: 'string' },
+    side: { type: 'string', enum: ['long', 'short'] },
+    contract: { type: 'string', enum: Object.keys(BT_CONTRACTS) },
+    qty: { type: 'integer' },
+    entry: { type: 'object', properties: { all: { type: 'array', items: BT_AI_COND_SCHEMA } }, required: ['all'], additionalProperties: false },
+    exit: {
+      type: 'object',
+      properties: { holdDays: btAiNullable('integer'), stopLoss: btAiNullable('number'), takeProfit: btAiNullable('number'), any: { type: 'array', items: BT_AI_COND_SCHEMA } },
+      required: ['holdDays', 'stopLoss', 'takeProfit', 'any'], additionalProperties: false,
+    },
+    from: btAiNullable('string'),
+    to: btAiNullable('string'),
+    notes: { type: 'array', items: { type: 'string' } },
+    unsupported: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['ok', 'name', 'side', 'contract', 'qty', 'entry', 'exit', 'from', 'to', 'notes', 'unsupported'],
+  additionalProperties: false,
+};
+
+// What the model sees besides the fixed instructions: the data it can test
+// against (so thresholds land inside real ranges) and the strategy on screen.
+function btAiUserMsg(text, cur, D) {
+  const rng = (rows) => {
+    const v = (rows || []).map((r) => r[1]).filter((x) => x != null);
+    return v.length ? `${rows[0][0]} 起，最小 ${Math.min(...v)}、最大 ${Math.max(...v)}、最新 ${v[v.length - 1]}` : '沒有資料';
+  };
+  const last = D.bars[D.bars.length - 1];
+  const strip = ({ name, side, contract, qty, entry, exit, from, to }) => ({ name, side, contract, qty, entry, exit, from: from || null, to: to || null });
+  return [
+    `資料：日 K ${D.bars[0][0]} – ${last[0]}，最近收盤 ${last[4]} 點。`,
+    `pc：${rng(D.pc)}。fx：${rng(D.fx)}。retail：${rng(D.retail)}。`,
+    `目前畫面上的策略：${JSON.stringify(strip(cur))}`,
+    '',
+    `使用者的描述：${text}`,
+  ].join('\n');
+}
+
+// The schema guarantees the shape; this keeps what the engine can run.
+function btAiNormalize(o) {
+  const ids = new Set(BT_SERIES.map((s) => s.id)), ops = new Set(BT_OPS.map((x) => x.id));
+  const dropped = [];
+  const ser = (x) => {
+    if (!x || !ids.has(x.id)) return null;
+    const d = btDef(x.id);
+    return d.n ? { id: x.id, n: Math.max(1, Math.min(250, Math.round(x.n || d.n))) } : { id: x.id };
+  };
+  const cond = (c) => {
+    const left = ser(c.left), right = typeof c.right === 'number' ? (Number.isFinite(c.right) ? c.right : null) : ser(c.right);
+    if (!left || right == null || !ops.has(c.op)) { dropped.push('有一個條件格式不對，已略過'); return null; }
+    return { left, op: c.op, right };
+  };
+  const pos = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
+  const day = (v) => { const m = typeof v === 'string' && v.match(/^(\d{4})[/-](\d{2})[/-](\d{2})$/); return m ? `${m[1]}/${m[2]}/${m[3]}` : null; };
+  const st = {
+    name: String(o.name || 'AI 策略').slice(0, 20),
+    side: o.side === 'short' ? 'short' : 'long',
+    contract: BT_CONTRACTS[o.contract] ? o.contract : 'MTX',
+    qty: Math.max(1, Math.min(20, Math.round(o.qty) || 1)),
+    entry: { all: ((o.entry && o.entry.all) || []).map(cond).filter(Boolean) },
+    exit: {
+      holdDays: pos(o.exit && o.exit.holdDays) && Math.round(o.exit.holdDays),
+      stopLoss: pos(o.exit && o.exit.stopLoss),
+      takeProfit: pos(o.exit && o.exit.takeProfit),
+      any: ((o.exit && o.exit.any) || []).map(cond).filter(Boolean),
+    },
+    from: day(o.from), to: day(o.to),
+  };
+  return { ok: o.ok !== false && st.entry.all.length > 0, st, notes: (o.notes || []).concat(dropped), unsupported: o.unsupported || [] };
+}
+
+let btSdk = null;
+async function btAiParse(key, text, cur, D) {
+  if (!btSdk) {
+    if (!window.loadAnthropic) throw new Error('AI 元件載入器不在（請重新整理頁面）');
+    try { btSdk = await window.loadAnthropic(); } catch (e) { throw new Error('AI 元件載入失敗：可能是網路擋住了 jsdelivr / esm.sh，換個網路再試'); }
+  }
+  const SDK = btSdk;
+  const client = new SDK.default({ apiKey: key, dangerouslyAllowBrowser: true, maxRetries: 1 });
+  let res;
+  try {
+    res = await client.messages.create({
+      model: BT_AI_MODEL,
+      max_tokens: 8000,
+      cache_control: { type: 'ephemeral' },
+      system: BT_AI_SYSTEM,
+      output_config: { format: { type: 'json_schema', schema: BT_AI_SCHEMA } },
+      messages: [{ role: 'user', content: btAiUserMsg(text, cur, D) }],
+    });
+  } catch (e) {
+    if (e instanceof SDK.AuthenticationError) throw new Error('金鑰不對或已停用。到 Claude Console 的 API Keys 重新建立一把再貼上。');
+    if (e instanceof SDK.PermissionDeniedError) throw new Error('這把金鑰沒有權限使用這個模型。');
+    if (e instanceof SDK.RateLimitError) throw new Error('請求太頻繁或達到用量上限，稍等一下再試。');
+    if (e instanceof SDK.BadRequestError) throw new Error(`Anthropic 拒絕了這次請求（額度用完時也是這個錯誤）：${(e.error && e.error.error && e.error.error.message) || e.message}`);
+    if (e instanceof SDK.APIConnectionError) throw new Error('連不上 Anthropic，檢查一下網路再試。');
+    if (e instanceof SDK.InternalServerError) throw new Error('Anthropic 暫時忙碌，過一下再試。');
+    throw e;
+  }
+  const u = res.usage || {};
+  const cost = ((u.input_tokens || 0) * BT_AI_PRICE.in + (u.output_tokens || 0) * BT_AI_PRICE.out
+    + (u.cache_creation_input_tokens || 0) * BT_AI_PRICE.cacheW + (u.cache_read_input_tokens || 0) * BT_AI_PRICE.cacheR) / 1e6;
+  if (res.stop_reason === 'refusal') throw new Error('AI 拒絕處理這段描述，換個說法再試。');
+  if (res.stop_reason === 'max_tokens') throw new Error('描述太長，AI 沒寫完。縮短一點再試。');
+  const block = res.content.find((b) => b.type === 'text');
+  if (!block) throw new Error('AI 沒有回傳結果，再試一次。');
+  return { ...btAiNormalize(JSON.parse(block.text)), cost };
+}
+
+const BT_AI_EXAMPLES = [
+  '散戶多空比超過 30% 而且收盤跌破 20 日均線，隔天放空一口小台，停損 300 點，最多抱 5 天',
+  '外資淨空單比 5 天前多 5000 口以上就放空大台，停利 400 點、停損 200 點',
+  'RSI 跌破 25 就買進，RSI 回到 50 以上出場，停損 2%',
+];
+
+function BtAsk({ st, D, onApply }) {
+  const [text, setText] = btS('');
+  const [key, setKey] = btS(btAiLoadKey);
+  const [keyOpen, setKeyOpen] = btS(false);
+  const [draft, setDraft] = btS('');
+  const [busy, setBusy] = btS(false);
+  const [err, setErr] = btS('');
+  const [out, setOut] = btS(null); // { notes, unsupported, cost, prev, ok }
+  const saveKey = () => {
+    const k = draft.trim();
+    if (!k) return;
+    try { localStorage.setItem(BT_AI_KEY, k); } catch (e) { /* storage off: keep it for this visit */ }
+    setKey(k); setDraft(''); setKeyOpen(false); setErr('');
+  };
+  const dropKey = () => { try { localStorage.removeItem(BT_AI_KEY); } catch (e) { /* storage off */ } setKey(''); };
+  const run = async () => {
+    const t = text.trim();
+    if (!t || busy) return;
+    if (!key) { setKeyOpen(true); return; }
+    setBusy(true); setErr(''); setOut(null);
+    try {
+      const r = await btAiParse(key, t, st, D);
+      if (r.ok) { setOut({ ...r, prev: st }); onApply(r.st); } else setOut({ ...r, prev: null });
+    } catch (e) { setErr(e.message || String(e)); }
+    setBusy(false);
+  };
+  const link = { background: 'none', border: 'none', padding: 0, color: 'var(--blue)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12 };
   return (
     <div className="card" style={{ padding: '16px 18px', marginBottom: 14 }}>
-      <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 6 }}>✍️ 用中文描述你的策略<span style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginLeft: 8 }}>AI 解析 · 設定中</span></div>
+      <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 6 }}>✍️ 用中文描述你的策略<span style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginLeft: 8 }}>AI 會轉成下面的條件並直接回測</span></div>
       <div style={{ display: 'flex', gap: 10, alignItems: 'stretch' }}>
-        <textarea disabled rows={2}
-          placeholder="例：散戶多空比超過 30%，而且收盤跌破 20 日均線，隔天放空一口小台，停損 300 點，最多抱 5 天"
-          style={{ ...btInput, flex: 1, resize: 'none', fontSize: 13.5, lineHeight: 1.5, opacity: 0.7 }} />
-        <button disabled style={{ border: 'none', borderRadius: 10, padding: '0 18px', fontWeight: 800, fontSize: 14, background: 'var(--chip)', color: 'var(--muted)', fontFamily: 'inherit' }}>用 AI 解析並回測</button>
+        <textarea rows={2} value={text} onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) run(); }}
+          placeholder="例：散戶多空比超過 30%，而且收盤跌破 20 日均線，隔天放空一口小台，停損 300 點，最多抱 5 天（也可以說「停損改 200」來修改目前的策略）"
+          style={{ ...btInput, flex: 1, resize: 'vertical', fontSize: 13.5, lineHeight: 1.5 }} />
+        <button onClick={run} disabled={busy || !text.trim()}
+          style={{ border: 'none', borderRadius: 10, padding: '0 18px', fontWeight: 800, fontSize: 14, fontFamily: 'inherit', cursor: busy || !text.trim() ? 'default' : 'pointer',
+            background: busy || !text.trim() ? 'var(--chip)' : 'var(--blue)', color: busy || !text.trim() ? 'var(--muted)' : '#fff' }}>
+          {busy ? '解析中…' : '用 AI 解析並回測'}
+        </button>
       </div>
-      <div style={{ fontSize: 12, marginTop: 8, color: 'var(--text2)' }}>這一步需要接上 Claude API（第二階段）。現在請用下面的「策略設定」組合條件，或先點一個範例策略。</div>
+      <div className="chips" style={{ marginTop: 8 }}>
+        {BT_AI_EXAMPLES.map((x) => <button key={x} onClick={() => setText(x)} title={x}>{x.length > 22 ? `${x.slice(0, 22)}…` : x}</button>)}
+      </div>
+      {err && <div style={{ fontSize: 12.5, marginTop: 8, color: BT_UP }}>⚠️ {err}</div>}
+      {out && (
+        <div style={{ fontSize: 12.5, marginTop: 10, padding: '10px 12px', borderRadius: 10, background: 'var(--panel2)', lineHeight: 1.65 }}>
+          {!out.ok && <div style={{ fontWeight: 700 }}>這段描述沒辦法變成回測條件。</div>}
+          {out.notes.length > 0 && <div><b>{out.ok ? 'AI 的理解：' : '原因：'}</b>{out.notes.join('；')}</div>}
+          {out.unsupported.length > 0 && <div style={{ color: BT_GOLD }}><b>回測做不到、已省略的部分：</b>{out.unsupported.join('；')}</div>}
+          <div style={{ color: 'var(--muted)', marginTop: 2 }}>
+            {out.ok ? '已套用到下面的策略設定，可以再手動調整。' : ''}本次約 US${out.cost.toFixed(3)}
+            {out.prev && <> · <button style={link} onClick={() => { onApply(out.prev); setOut(null); }}>還原成上一個策略</button></>}
+          </div>
+        </div>
+      )}
+      <div style={{ fontSize: 12, marginTop: 8, color: 'var(--text2)' }}>
+        {key ? <>🔑 已設定 Claude API 金鑰（只存在這台瀏覽器）· <button style={link} onClick={() => setKeyOpen((v) => !v)}>更換</button> · <button style={link} onClick={dropKey}>移除</button></>
+          : <>🔑 第一次使用要先設定 Claude API 金鑰 · <button style={link} onClick={() => setKeyOpen((v) => !v)}>設定金鑰</button></>}
+      </div>
+      {keyOpen && (
+        <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', fontSize: 12, lineHeight: 1.7, color: 'var(--text2)' }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+            <input type="password" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveKey(); }}
+              placeholder="sk-ant-…" autoComplete="off" spellCheck={false} style={{ ...btInput, flex: 1 }} />
+            <button onClick={saveKey} disabled={!draft.trim()} style={{ ...btInput, cursor: 'pointer', fontWeight: 700 }}>儲存</button>
+          </div>
+          金鑰到 <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--blue)' }}>Claude Console → API Keys</a> 建立。
+          Max 方案每月附的 API 額度要先在 claude.ai 的「設定 → 帳單」連結 Console 組織才會入帳。
+          金鑰只存在這台瀏覽器，解析時直接送到 Anthropic，不經過這個網站的伺服器；建議在 Console 開一個專用 workspace 並設每月上限。
+        </div>
+      )}
     </div>
   );
 }
@@ -369,7 +611,7 @@ function BacktestWorkspace({ P, light }) {
   const ct = BT_CONTRACTS[st.contract] || BT_CONTRACTS.MTX;
   return (
     <div style={{ maxWidth: 1400 }}>
-      <BtAsk />
+      <BtAsk st={st} D={D} onApply={(x) => setSt(JSON.parse(JSON.stringify(x)))} />
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(420px, 520px) minmax(0, 1fr)', gap: 14, alignItems: 'start' }}>
         <div className="card" style={{ padding: '16px 18px' }}>
           <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 8 }}>⚙️ 策略設定</div>

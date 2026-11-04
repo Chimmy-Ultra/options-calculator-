@@ -51,6 +51,11 @@
 <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
 <!-- Adjustable panel grid (UMD; exposes window.ReactGridLayout). Missing = panels stack in their default order. -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-grid-layout/1.5.0/react-grid-layout.min.js"></script>
+<!-- Claude SDK for the 回測 AI box — fetched only when that box is used, never on page load. -->
+<script type="module">
+window.loadAnthropic = () => import('https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@1.0.0/+esm')
+  .catch(() => import('https://esm.sh/@anthropic-ai/sdk@1.0.0'));
+</script>
 <script src="surface3d.js"></script>
 
 <script src="iv-surface.js"></script>
