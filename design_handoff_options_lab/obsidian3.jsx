@@ -549,6 +549,17 @@ function Obsidian3() {
     const v = (s && Number.isFinite(s.spot)) ? s.spot : P0.defaultSpot;
     return Math.max(P0.spotMin, Math.min(P0.spotMax, v));
   });
+  // Live polling follows the market only while the spot still sits on the
+  // last price it applied: once the user drags the slider, types a price or
+  // runs a stress test, the 10s quote stops writing over it (Reset, which
+  // returns to the market price, resumes following).
+  const spotRef = uR(spot);
+  spotRef.current = spot;
+  const mktSpotRef = uR(null);
+  const followSpot = (p) => {
+    if (mktSpotRef.current == null || spotRef.current === mktSpotRef.current) setSpot(p);
+    mktSpotRef.current = p;
+  };
   const [iv, setIv] = uS(() => {
     const s = readSaved();
     const P0 = window.getProduct(initialProductId());
@@ -595,6 +606,7 @@ function Obsidian3() {
     setLastLiveAt(null);
     setExpiryId(e0.id);
     setSpot(p.defaultSpot);
+    mktSpotRef.current = null;
     setSpotUnderlying(null);
     setIv(p.defaultIv);
     autoLegs.current = defaultLegsFor(p, e0.dte);
@@ -636,7 +648,7 @@ function Obsidian3() {
         window.LiveData.expiries(P.id),
       ]);
       if (dead) return;
-      if (quote && quote.last > 0) { setSpot(quote.last); setLastLiveAt(Date.now()); }
+      if (quote && quote.last > 0) { setSpot(quote.last); mktSpotRef.current = quote.last; setLastLiveAt(Date.now()); }
       if (exps && exps.length) setExpiryId(exps[0].id);
       // K 棒交給下面的專屬 effect 抓（換週期會重抓，避免重複邏輯）。
       setLive({ quote, expiries: exps && exps.length ? exps : null, health });
@@ -692,7 +704,7 @@ function Obsidian3() {
       const chain = await window.LiveData.chain(P.id, expiryId);
       if (dead || !chain || !chain.rows || !chain.rows.length) return;
       setLiveRows(chain.rows);
-      if (chain.underlying && chain.underlying.price > 0) { setSpot(chain.underlying.price); setSpotUnderlying(chain.underlying); }
+      if (chain.underlying && chain.underlying.price > 0) { setSpot(chain.underlying.price); mktSpotRef.current = chain.underlying.price; setSpotUnderlying(chain.underlying); }
       setLastLiveAt(Date.now());
     })();
     // Full-range open interest for the Levels walls (TAIFEX daily report — the
@@ -720,7 +732,7 @@ function Obsidian3() {
       if (document.hidden) return;
       const q = await window.LiveData.quote(P.id);
       if (dead || !q || !(q.last > 0)) return;
-      setSpot(q.last);
+      followSpot(q.last);
       setQuoteNow(q);
       setLastLiveAt(Date.now());
     };
@@ -729,7 +741,7 @@ function Obsidian3() {
       const chain = await window.LiveData.chain(P.id, expiryId);
       if (dead || !chain || !chain.rows || !chain.rows.length) return;
       setLiveRows(chain.rows);
-      if (chain.underlying && chain.underlying.price > 0) { setSpot(chain.underlying.price); setSpotUnderlying(chain.underlying); }
+      if (chain.underlying && chain.underlying.price > 0) { followSpot(chain.underlying.price); setSpotUnderlying(chain.underlying); }
       setLastLiveAt(Date.now());
     };
     const pullIntraday = async () => {
