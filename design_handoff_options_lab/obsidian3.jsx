@@ -1082,7 +1082,7 @@ function Obsidian3() {
       )}
       {workspace === 'chart' && (
         <ChartWorkspace
-          P={P} bars={bars} barsLive={!!liveBars} live={live} theme={theme} light={light}
+          P={P} bars={bars} barsLive={!!liveBars} live={live} theme={theme} light={light} keyLevels={keyLevels} dayBars={dayBars} intraday={intradayData}
           barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
           barSession={barSession} setBarSession={setBarSession}
           cone={levels.atmIv ? { ivPct: levels.atmIv, days: expiry.dte, label: expiry.label } : null}
@@ -2437,13 +2437,58 @@ function WatchWorkspace({ onPick, grid }) {
 
 // Top-level Chart tab (from the design): full-width candles + MA + RSI.
 // Desktop only — mobile keeps the K線 sub-tab inside Calc.
-function ChartWorkspace({ P, bars, barsLive, live, theme, light, barPeriodId, setBarPeriodId, barSession, setBarSession, cone = null, D, grid }) {
+function ChartWorkspace({ P, bars, barsLive, live, theme, light, barPeriodId, setBarPeriodId, barSession, setBarSession, cone = null, D, grid, keyLevels = null, dayBars = null, intraday: I = null }) {
   const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
+  // Floor-trader pivots for the next session, from the last completed day
+  // (computeKeyLevels): P, R1/R2, S1/S2 only — R3/S3 sit too far out to matter
+  // on a normal day and crowd the scale.
+  const PIVOT_LINES = { R2: LEVEL_COLORS.up, R1: LEVEL_COLORS.up, P: '#cbd5e1', S1: LEVEL_COLORS.down, S2: LEVEL_COLORS.down };
+  const pivotLevels = keyLevels ? keyLevels.levels.filter((l) => PIVOT_LINES[l.key])
+    .map((l) => ({ price: l.price, label: `${l.key} ${l.price.toLocaleString()}`, color: PIVOT_LINES[l.key] })) : [];
+  // 當日 (day-trading) view: one session's 1- or 5-minute candles from the
+  // intraday feed (Shioaji live, else TAIFEX's tick file for the latest
+  // session), with the pivots computed from the session before that one.
+  const [intra, setIntra] = uS(null);           // null | '1' | '5'
+  const [intraSess, setIntraSess] = uS('day');  // 'day' | 'night'
+  const S = I && (intraSess === 'night' ? I.night : I.day);
+  const minuteBars = uM(() => {
+    if (!S || !S.bars || !S.bars.length) return null;
+    const one = S.bars.map((b) => ({ t: `${b[0].slice(0, 2)}:${b[0].slice(2, 4)}`, o: b[1], h: b[2], l: b[3], c: b[4], v: b[5] }));
+    if (intra !== '5') return one;
+    const out = [];
+    for (const b of one) {
+      const mm = +b.t.slice(3);
+      const key = `${b.t.slice(0, 3)}${String(mm - (mm % 5)).padStart(2, '0')}`;
+      const cur = out[out.length - 1];
+      if (cur && cur.t === key) { cur.h = Math.max(cur.h, b.h); cur.l = Math.min(cur.l, b.l); cur.c = b.c; cur.v += b.v; }
+      else out.push({ ...b, t: key });
+    }
+    return out;
+  }, [S, intra]);
+  const intraKey = uM(() => (I && I.date && dayBars ? computeKeyLevels({ bars: dayBars, today: String(I.date) }) : null), [I, dayBars]);
+  const showIntra = !!(intra && minuteBars && minuteBars.length >= 2);
+  const PIVOT_COLORS = { R2: LEVEL_COLORS.up, R1: LEVEL_COLORS.up, P: '#cbd5e1', S1: LEVEL_COLORS.down, S2: LEVEL_COLORS.down };
+  const pivotsOf = (K) => (K ? K.levels.filter((l) => PIVOT_COLORS[l.key])
+    .map((l) => ({ price: l.price, label: `${l.key} ${l.price.toLocaleString()}`, color: PIVOT_COLORS[l.key] })) : []);
+  const intraDate = I && I.date ? `${String(I.date).slice(4, 6)}/${String(I.date).slice(6, 8)}` : '';
   const panels = [{
     i: 'kline',
-    title: <>K線 · {P.code} · {per.label}K<span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4 }}>· {barsLive ? `近月 · ${liveLabel(live, P)}` : '模擬'}</span></>,
-    right: <div style={{ display: 'flex', gap: 8 }}><KSessionToggle value={barSession} onChange={setBarSession} /><KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} /></div>,
-    body: <PriceChart cone={cone}
+    title: showIntra
+      ? <>K線 · {P.code} · 當日 {intra}分<span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4 }}>· {intraDate} {intraSess === 'night' ? '夜盤' : '日盤'}</span></>
+      : <>K線 · {P.code} · {per.label}K<span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4 }}>· {barsLive ? `近月 · ${liveLabel(live, P)}` : '模擬'}</span></>,
+    right: <div style={{ display: 'flex', gap: 8 }}>
+      {I && I.day && <Seg items={[{ id: '1', label: '1分' }, { id: '5', label: '5分' }]} value={intra} onChange={setIntra} />}
+      {showIntra
+        ? (I.night && I.night.bars && I.night.bars.length ? <Seg items={[{ id: 'day', label: '日盤' }, { id: 'night', label: '夜盤' }]} value={intraSess} onChange={setIntraSess} /> : null)
+        : <KSessionToggle value={barSession} onChange={setBarSession} />}
+      <Seg items={K_PERIODS} value={showIntra ? null : barPeriodId} onChange={(id) => { setIntra(null); setBarPeriodId(id); }} />
+    </div>,
+    body: showIntra
+      ? <PriceChart intraday levels={pivotsOf(intraKey)} pctRef={intraKey ? intraKey.prev.c : null}
+          bars={minuteBars} theme={theme} code={P.code}
+          periodLabel={`當日 ${intra}分K · ${intraDate} ${intraSess === 'night' ? '夜盤' : '日盤'}`}
+          sourceLabel={I.source === 'sinopac-ticks' ? '● 永豐 逐筆 — 當日分K' : `● 期交所逐筆檔 — ${intraDate} 分K（最近一個有資料的交易日）`} />
+      : <PriceChart cone={cone} levels={pivotLevels}
           bars={bars} theme={theme} code={P.code}
           periodLabel={`${per.label}K` + (barSession === 'full' ? ' · 全日盤' : ' · 日盤')}
           sourceLabel={barsLive
