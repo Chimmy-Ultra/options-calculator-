@@ -2517,7 +2517,7 @@ function SmartCard({ title, big, bigColor, bigNote, lines, date, ring }) {
   );
 }
 const tagOf = (chg) => (chg == null || chg === 0 ? null : chg > 0 ? { tag: `+${chg.toLocaleString()} 增倉`, tagColor: 'var(--up)' } : { tag: `−${Math.abs(chg).toLocaleString()} 減倉`, tagColor: 'var(--down)' });
-function SmartMoneyGrid({ X, M, L, P, spot, expiry }) {
+function SmartMoneyGrid({ X, M, L, P, spot, expiry, G }) {
   const O = X && X.optpos;
   const inst = O && O.inst, large = O && O.large;
   const date = (d) => (d ? String(d).slice(5) : '');
@@ -2566,6 +2566,24 @@ function SmartMoneyGrid({ X, M, L, P, spot, expiry }) {
       ]}
       date={date(m.date)}
       ring={<Ring parts={[{ v: Math.max(0, 50 + m.ratio / 2), color: '#ef5350' }, { v: Math.max(0, 50 - m.ratio / 2), color: '#26a69a' }]} center={`${m.ratio.toFixed(0)}%`} sub="小台 多−空" />} />);
+  }
+  // Dealer gamma regime for the expiry on screen (computeGex): above the
+  // zero-gamma level dealers' hedging leans against the move, below it chases.
+  if (G && G.rows && G.rows.length) {
+    const fmtP = (v) => Math.round(v).toLocaleString();
+    const above = G.flip != null ? spot >= G.flip : G.total >= 0;
+    const callG = G.rows.reduce((a, x) => a + x.call, 0), putG = -G.rows.reduce((a, x) => a + x.put, 0);
+    const dist = G.flip != null ? (spot / G.flip - 1) * 100 : null;
+    cards.push(<SmartCard key="gex" title={`Gamma 環境 · ${expiry.label}`}
+      big={above ? '正 Gamma' : '負 Gamma'} bigColor={above ? 'var(--blue)' : '#f0a020'}
+      bigNote={above ? '造市商避險壓抑波動，偏區間盤' : '造市商避險追價，波動容易放大'}
+      lines={[
+        ...(G.flip != null ? [{ k: '零 Gamma', v: fmtP(G.flip), tag: `現價${dist >= 0 ? '高' : '低'} ${Math.abs(dist).toFixed(1)}%`, tagColor: 'var(--text2)' }] : []),
+        ...(G.callWall && G.callWall.call > 0 ? [{ k: 'Call 牆', v: fmtP(G.callWall.strike), tag: '上方壓力', tagColor: 'var(--up)' }] : []),
+        ...(G.putWall && G.putWall.put < 0 ? [{ k: 'Put 牆', v: fmtP(G.putWall.strike), tag: '下方支撐', tagColor: 'var(--down)' }] : []),
+        { k: '總 GEX', v: `${fmtBig(G.total, P)} / 1%` },
+      ]}
+      ring={<Ring parts={[{ v: callG, color: '#ef5350' }, { v: putG, color: '#26a69a' }]} center={`${Math.round(callG / ((callG + putG) || 1) * 100)}%`} sub="Call γ 佔比" />} />);
   }
   if (L && L.sigma1 != null) {
     const fmtP = (v) => Math.round(v).toLocaleString();
@@ -2820,7 +2838,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expi
             <span key={t}><i style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 5, background: c, marginRight: 5 }} />{t}</span>))}
         </small>
       </div>
-      <SmartMoneyGrid X={X} M={M} L={L} P={P} spot={spot} expiry={expiry} />
+      <SmartMoneyGrid X={X} M={M} L={L} P={P} spot={spot} expiry={expiry} G={G} />
       </>)}
       <div className="sec-title">更多分析<small>右上「調整版面」可拖曳、縮放</small></div>
       <PanelGrid tab="levels2" panels={rest} defaults={GRID_DEFAULTS.levels2} grid={grid} />
