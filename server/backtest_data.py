@@ -34,6 +34,7 @@ UPDATE_DAYS = 15
 PAUSE_S = 1.0
 INST_CHUNK_DAYS = 90     # the institutional download serves four months+ per request
 SERIES = ("bars", "pc", "fx", "retail")
+TMF_LISTED = date(2024, 7, 29)   # 微型臺指期貨's first session; before it the download answers an error page
 
 
 def _d(s: str) -> date:
@@ -52,13 +53,37 @@ def _chunks(start: date, end: date, days: int):
         start = e + timedelta(days=1)
 
 
+def _months(start: date, end: date):
+    """Calendar-month windows. The daily-report downloads cap a request at one
+    calendar month, not 30 days: 2021/01/31-03/01 and 2022/02/25-03/26 both
+    answered an error page while every other 30-day window loaded."""
+    while start <= end:
+        nxt = date(start.year + start.month // 12, start.month % 12 + 1, 1)
+        e = min(nxt - timedelta(days=1), end)
+        yield start, e
+        start = e + timedelta(days=1)
+
+
 def fut_rows(commodity: str, start: date, end: date) -> list:
-    """taifex._parse_fut_rows over [start, end] in 30-day requests (the download's limit)."""
+    """taifex._parse_fut_rows over [start, end] one calendar month per request (the download's limit)."""
     out = []
-    for s, e in _chunks(start, end, 30):
-        out += tx._parse_fut_rows(tx._fetch_csv(s, e, url=tx.FUT_CSV_URL, commodity=commodity), commodity)
+    for s, e in _months(start, end):
+        out += _retry(lambda: tx._parse_fut_rows(tx._fetch_csv(s, e, url=tx.FUT_CSV_URL, commodity=commodity), commodity))
         time.sleep(PAUSE_S)
     return out
+
+
+def _retry(fn, tries: int = 3):
+    """A long walk meets the odd error page in place of a table (one TX window
+    in the first full build; the same request answered normally a minute
+    later), so a window is retried after 10 s and 30 s before giving up."""
+    for i in range(tries):
+        try:
+            return fn()
+        except ValueError:
+            if i == tries - 1:
+                raise
+            time.sleep(10 if i == 0 else 30)
 
 
 def bar_rows(rows: list) -> list:
@@ -81,14 +106,14 @@ def _last_trading_on_or_before(days: list, d: date) -> date | None:
 
 
 def pc_rows(start: date, end: date, trading: list) -> list:
-    """[date, ratio] from pcRatioDown in 30-day windows. Columns are matched by
+    """[date, ratio] from pcRatioDown one calendar month per request. Columns are matched by
     name and checked against putOi / callOi as in taifex._fetch_pc_ratio_csv."""
     out = {}
-    for s, e in _chunks(start, end, 30):
+    for s, e in _months(start, end):
         e = _last_trading_on_or_before(trading, e)
         if e is None or e < s:
             continue
-        rows = tx._post_csv(tx.PC_CSV_URL, {"queryStartDate": s.strftime("%Y/%m/%d"), "queryEndDate": e.strftime("%Y/%m/%d")})
+        rows = _retry(lambda: tx._post_csv(tx.PC_CSV_URL, {"queryStartDate": s.strftime("%Y/%m/%d"), "queryEndDate": e.strftime("%Y/%m/%d")}))
         time.sleep(PAUSE_S)
 
         def col(r, test):
@@ -119,11 +144,12 @@ def institutional(start: date, end: date, trading: list) -> dict:
         if e is None or e < s:
             continue
         for cid in tx.INST_IDS:
+            form = {"queryType": "1", "queryStartDate": s.strftime("%Y/%m/%d"),
+                    "queryEndDate": e.strftime("%Y/%m/%d"), "commodityId": cid}
             try:
-                rows = tx._post_csv(tx.INST_CSV_URL, {"queryType": "1", "queryStartDate": s.strftime("%Y/%m/%d"),
-                                                      "queryEndDate": e.strftime("%Y/%m/%d"), "commodityId": cid})
+                rows = _retry(lambda: tx._post_csv(tx.INST_CSV_URL, form), tries=1 if cid == "TMF" and e < TMF_LISTED else 3)
             except ValueError:
-                if cid == "TMF":
+                if cid == "TMF" and s < TMF_LISTED:
                     continue
                 raise
             finally:
