@@ -204,10 +204,12 @@ const NAV_ICONS = {
   chart: <><path d="M7 4v16M17 6v13M12 8v9" /><rect x="5" y="8" width="4" height="7" rx="1" /><rect x="15" y="9" width="4" height="6" rx="1" /><rect x="10" y="10.5" width="4" height="4" rx="1" /></>,
   calc: <><path d="M4 19l5-6 4 3 7-9" /><path d="M15 7h5v5" /></>,
   lab: <><path d="M9.5 3.5h5M10.5 3.5v6L5 18.5a1.5 1.5 0 0 0 1.3 2h11.4a1.5 1.5 0 0 0 1.3-2L13.5 9.5v-6" /><path d="M7.5 14.5h9" /></>,
+  backtest: <><path d="M4 4v16h16" /><path d="M7 15l4-4 3 3 5-6" /><circle cx="19" cy="8" r="1.4" fill="currentColor" stroke="none" /></>,
 };
 const NAV_ITEMS = [
   { id: 'watch', label: '自選' }, { id: 'levels', label: '關卡' }, { id: 'chain', label: '報價表' },
   { id: 'chart', label: 'K線' }, { id: 'calc', label: '策略' }, { id: 'lab', label: '實驗室' },
+  { id: 'backtest', label: '回測' },
 ];
 function NavRail({ value, onChange, light, setTheme, onHelp, helpOpen }) {
   const icon = (d) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{d}</svg>;
@@ -589,7 +591,7 @@ function Obsidian3() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [workspace, setWorkspace] = uS(() => {
     const s = readSaved();
-    return (s && ['watch', 'levels', 'chain', 'chart', 'calc', 'lab', 'iv', 'pricer'].includes(s.workspace)) ? s.workspace : 'levels';
+    return (s && ['watch', 'levels', 'chain', 'chart', 'calc', 'lab', 'iv', 'pricer', 'backtest'].includes(s.workspace)) ? s.workspace : 'levels';
   });
   // Lab sub-view: '3d' P&L surface | 'iv' IV surface. A workspace saved as the
   // old top-level 'iv' tab lands on the IV sub-view.
@@ -912,7 +914,7 @@ function Obsidian3() {
   // On phone/fold, Compare is the only desktop-exclusive workspace (it needs the
   // multi-card grid to be useful). IV Surface is now mobile-friendly so it stays.
   uE(() => {
-    if (vp.layout !== 'desk' && (workspace === 'compare' || workspace === 'chart' || workspace === 'levels' || workspace === 'lab' || workspace === 'watch')) setWorkspace('calc');
+    if (vp.layout !== 'desk' && (workspace === 'compare' || workspace === 'chart' || workspace === 'levels' || workspace === 'lab' || workspace === 'watch' || workspace === 'backtest')) setWorkspace('calc');
   }, [vp.layout]);
   // Desktop: Pricer/Compare tabs removed — redirect stale state to Chain; the
   // old IV Surface tab lives in Lab now.
@@ -1073,7 +1075,7 @@ function Obsidian3() {
     );
   }
 
-  const gridTab = workspace === 'lab' ? (labView === 'iv' ? 'lab-iv' : null) : workspace === 'levels' ? 'levels2' : workspace === 'chart' ? null : workspace;
+  const gridTab = workspace === 'lab' ? (labView === 'iv' ? 'lab-iv' : null) : workspace === 'levels' ? 'levels2' : (workspace === 'chart' || workspace === 'backtest') ? null : workspace;
   const grid = { editing: layoutEdit && !!gridTab, resetToken: layoutReset };
   const qNow = quoteNow || (live && live.quote);
   // The change must describe the price the headline shows. spot is shared: the
@@ -1205,6 +1207,10 @@ function Obsidian3() {
           cone={levels.atmIv ? { ivPct: levels.atmIv, days: expiry.dte, label: expiry.label } : null}
           D={D} grid={grid}
         />
+      )}
+
+      {workspace === 'backtest' && window.BacktestWorkspace && (
+        <div style={GRID_BODY}><window.BacktestWorkspace P={P} light={light} /></div>
       )}
 
       {/* Global collapsible What-if rail — on every tab */}
