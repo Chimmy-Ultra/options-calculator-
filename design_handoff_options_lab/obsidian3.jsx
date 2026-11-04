@@ -159,18 +159,21 @@ function initialProductId() {
   return (s && s.productId && window.PRODUCTS.some((p) => p.id === s.productId)) ? s.productId : 'txo';
 }
 
-function Glass2({ tone = 'panel', radius = 0, padding = 12, style, children, ...rest }) {
-  // Flat terminal panel: solid ground, 1px border, square corners. `tone`
-  // picks the ground (panel / chip / raised share the second shade). The
-  // padding is exported as CSS variables so an Eyebrow inside can bleed to
-  // the edges as the panel's header bar.
+function Glass2({ tone = 'panel', radius = null, padding = 12, style, children, ...rest }) {
+  // Card: solid ground, rounded, a hairline edge in dark and a soft shadow in
+  // light (tokens.css). `tone` picks the ground (panel / chip / raised share
+  // the second shade). The padding is exported as CSS variables for content
+  // that wants to bleed to the edges.
   const pad = typeof padding === 'number' ? `${padding}px` : String(padding);
   const parts = pad.trim().split(/\s+/);
   const ppy = parts[0], ppx = parts.length > 1 ? parts[1] : parts[0];
   return (
     <div className={`g2 g2-${tone}`} style={{
       padding, position: 'relative', overflow: 'hidden', color: 'var(--text)',
-      background: tone === 'panel' ? 'var(--panel)' : 'var(--panel2)', border: '1px solid var(--border)',
+      background: tone === 'panel' ? 'var(--panel)' : 'var(--panel2)',
+      border: `1px solid ${tone === 'panel' ? 'var(--card-border)' : 'var(--border)'}`,
+      borderRadius: radius != null ? radius : (tone === 'panel' ? 'var(--radius)' : 10),
+      boxShadow: tone === 'panel' ? 'var(--shadow)' : 'none',
       '--ppx': ppx, '--ppy': ppy, ...style,
     }} {...rest}>
       {children}
@@ -181,14 +184,101 @@ function Glass2({ tone = 'panel', radius = 0, padding = 12, style, children, ...
 function Eyebrow({ children, right, hk }) {
   const HT = window.HelpTip; // desktop-only hover help (⑧a); pass hk to enable
   const label = (hk && HT) ? <HT k={hk}>{children}</HT> : children;
-  // The panel's header bar: bleeds to the panel edges (see Glass2's --ppx/--ppy).
+  // The card's title row: a plain heading (no bar), controls / source on the right.
   return (
     <div className="pg-handle" style={{
-      display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, minHeight: 30, padding: '0 12px',
-      margin: 'calc(-1 * var(--ppy, 12px)) calc(-1 * var(--ppx, 12px)) 10px', background: 'var(--panel2)', borderBottom: '1px solid var(--border)',
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, minHeight: 28, margin: '0 0 10px',
     }}>
-      <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.5, whiteSpace: 'nowrap', textTransform: 'none' }}>{label}</span>
+      <span style={{ fontSize: 14, fontWeight: 700, whiteSpace: 'nowrap', textTransform: 'none', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
       <span className="mono tnum" style={{ fontSize: 10.5, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, whiteSpace: 'nowrap' }}>{right}</span>
+    </div>
+  );
+}
+
+// Left navigation rail (2026-11 redesign): icon + label per workspace, help at
+// the foot (the light / dark switch lives in the price header).
+const NAV_ICONS = {
+  watch: <path d="M12 20.5s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.6a4.3 4.3 0 0 1 7.5 2.9c0 5.4-7.5 10-7.5 10z" />,
+  levels: <><path d="M4 6h16M4 12h16M4 18h16" /><circle cx="15" cy="12" r="2.2" fill="currentColor" stroke="none" /></>,
+  chain: <><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><path d="M3.5 9.5h17M3.5 14.5h17M10 4.5v15" /></>,
+  chart: <><path d="M7 4v16M17 6v13M12 8v9" /><rect x="5" y="8" width="4" height="7" rx="1" /><rect x="15" y="9" width="4" height="6" rx="1" /><rect x="10" y="10.5" width="4" height="4" rx="1" /></>,
+  calc: <><path d="M4 19l5-6 4 3 7-9" /><path d="M15 7h5v5" /></>,
+  lab: <><path d="M9.5 3.5h5M10.5 3.5v6L5 18.5a1.5 1.5 0 0 0 1.3 2h11.4a1.5 1.5 0 0 0 1.3-2L13.5 9.5v-6" /><path d="M7.5 14.5h9" /></>,
+};
+const NAV_ITEMS = [
+  { id: 'watch', label: '自選' }, { id: 'levels', label: '關卡' }, { id: 'chain', label: '報價表' },
+  { id: 'chart', label: 'K線' }, { id: 'calc', label: '策略' }, { id: 'lab', label: '實驗室' },
+];
+function NavRail({ value, onChange, light, setTheme, onHelp, helpOpen }) {
+  const icon = (d) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{d}</svg>;
+  return (
+    <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: RAIL_W, zIndex: 22, background: 'var(--panel)', borderRight: '1px solid var(--border)',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '18px 0 14px', gap: 4 }}>
+      <div title="Options Lab" style={{ width: 36, height: 36, borderRadius: 11, marginBottom: 16, background: 'linear-gradient(135deg, #2f6bff, #7c5cff)',
+        display: 'grid', placeItems: 'center', color: '#fff', fontSize: 13, fontWeight: 800, letterSpacing: -0.5 }}>OL</div>
+      {NAV_ITEMS.map((it) => (
+        <button key={it.id} className={`rail-btn${value === it.id ? ' on' : ''}`} onClick={() => onChange(it.id)}>{icon(NAV_ICONS[it.id])}{it.label}</button>
+      ))}
+      <div style={{ flex: 1 }} />
+      <button className={`rail-btn${helpOpen ? ' on' : ''}`} onClick={onHelp} title="說明 — 這些數字怎麼讀">
+        {icon(<><circle cx="12" cy="12" r="9" /><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.1-2.4 3.6" /><circle cx="12" cy="17" r="0.6" fill="currentColor" /></>)}
+        說明
+      </button>
+    </div>
+  );
+}
+
+// The price header: product (menu) · big last price + change · the session's
+// high / low · data status. moomoo's quote header, in this app's words.
+function HeroQuote({ productId, P, spot, chg, scenario, open, setOpen, onPick, hl, status }) {
+  uE(() => {
+    if (!open) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+  const fmtSpot = (v) => v.toLocaleString(undefined, { maximumFractionDigits: v < 10 ? 3 : v < 1000 ? 2 : 0 });
+  const col = chg == null ? 'var(--text)' : chg >= 0 ? 'var(--up)' : 'var(--down)';
+  const pct = chg != null && spot - chg !== 0 ? chg / (spot - chg) * 100 : null;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 34, minWidth: 0 }}>
+      <div style={{ position: 'relative', flexShrink: 0 }}>
+        {open && <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 25 }} />}
+        <div onClick={() => setOpen(!open)} title="切換商品" style={{ cursor: 'pointer' }}>
+          <div style={{ fontSize: 19, fontWeight: 700, whiteSpace: 'nowrap' }}>{P.nameZh || P.name}
+            <span style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--text2)', marginLeft: 8 }}>{P.code} ▾</span></div>
+          <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 5, display: 'flex', alignItems: 'center', gap: 10, whiteSpace: 'nowrap' }}>{status}</div>
+        </div>
+        {open && (
+          <div className="card" style={{ position: 'absolute', top: 'calc(100% + 10px)', left: 0, zIndex: 30, width: 270, padding: 6, display: 'flex', flexDirection: 'column', gap: 2, boxShadow: '0 12px 32px rgba(0,0,0,0.25)' }}>
+            {window.PRODUCTS.map((p) => (
+              <button key={p.id} onClick={() => onPick(p.id)} style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', border: 'none', borderRadius: 9, textAlign: 'left', cursor: 'pointer',
+                background: p.id === productId ? 'var(--chip)' : 'transparent', color: 'inherit', fontFamily: 'inherit',
+              }}>
+                <span className="mono" style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 6, background: 'var(--chip)', minWidth: 34, textAlign: 'center' }}>{p.code}</span>
+                <span style={{ fontSize: 12, flex: 1 }}>{p.nameZh || p.name}<span style={{ color: 'var(--muted)', marginLeft: 6, fontSize: 11 }}>{p.name}</span></span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexShrink: 0 }}>
+        <span className="mono tnum" style={{ fontSize: 40, fontWeight: 700, color: col, letterSpacing: -1, lineHeight: 1 }}>
+          {fmtSpot(spot)}{chg != null && <span style={{ fontSize: 28, marginLeft: 6 }}>{chg >= 0 ? '↑' : '↓'}</span>}
+        </span>
+        <span className="mono tnum" style={{ fontSize: 16, fontWeight: 600, color: col, whiteSpace: 'nowrap' }}>
+          {chg != null ? <>{chg >= 0 ? '+' : '−'}{fmtSpot(Math.abs(chg))}{pct != null ? `  ${pct >= 0 ? '+' : '−'}${Math.abs(pct).toFixed(2)}%` : ''}</>
+            : scenario ? <span style={{ color: 'var(--gold)', fontSize: 13 }}>模擬價位</span> : null}
+        </span>
+      </div>
+      {hl && (
+        <div className="mono tnum" style={{ display: 'grid', gridTemplateColumns: 'auto auto', gap: '3px 14px', fontSize: 12.5, color: 'var(--text2)', flexShrink: 0 }}>
+          <span>最高</span><b style={{ color: 'var(--up)', textAlign: 'right' }}>{fmtSpot(hl.high)}</b>
+          <span>最低</span><b style={{ color: 'var(--down)', textAlign: 'right' }}>{fmtSpot(hl.low)}</b>
+          {hl.vol > 0 && <><span>成交量</span><b style={{ color: 'var(--text)', textAlign: 'right' }}>{Math.round(hl.vol).toLocaleString()}</b></>}
+        </div>
+      )}
     </div>
   );
 }
@@ -268,13 +358,13 @@ function ExpiryStrip({ value, onChange, expiries = TXO_EXPIRIES }) {
         const isMonthly = e.type === 'monthly';
         return (
           <button key={e.id} onClick={() => onChange(e.id)} style={{
-            display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', height: 26, flexShrink: 0,
-            border: `1px solid ${active ? 'var(--gold)' : 'var(--border)'}`, background: active ? 'rgba(240,192,104,0.12)' : 'transparent',
-            color: active ? 'var(--text)' : 'var(--text2)', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit',
+            display: 'flex', alignItems: 'center', gap: 6, padding: '0 12px', height: 28, flexShrink: 0, borderRadius: 999,
+            border: 'none', background: active ? 'var(--text)' : 'var(--chip)',
+            color: active ? 'var(--bg)' : 'var(--text2)', fontSize: 11.5, fontWeight: active ? 700 : 500, cursor: 'pointer', fontFamily: 'inherit',
           }}>
-            <span className="mono tnum" style={{ fontWeight: 600 }}>{e.date}</span>
+            <span className="mono tnum" style={{ fontWeight: 700 }}>{e.date}</span>
             <span>{isMonthly ? '月選' : e.label}</span>
-            {e.dte != null && <span className="mono tnum" style={{ color: 'var(--muted)' }}>{e.dte}天</span>}
+            {e.dte != null && <span className="mono tnum" style={{ opacity: 0.6 }}>{e.dte}天</span>}
           </button>
         );
       })}
@@ -309,16 +399,16 @@ function KSessionToggle({ value, onChange }) {
 function WhatIfRail({ P, spot, setSpot, spotMin, spotMax, iv, setIv, open, setOpen, theme, light }) {
   if (!open) {
     return (
-      <Glass2 tone="chip" padding="7px 12px" onClick={() => setOpen(true)}
-        style={{ position: 'fixed', bottom: 12, right: 12, zIndex: 15, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+      <Glass2 tone="chip" radius={999} padding="8px 14px" onClick={() => setOpen(true)}
+        style={{ position: 'fixed', bottom: 14, right: 16, boxShadow: '0 4px 14px rgba(0,0,0,0.12)', zIndex: 15, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', whiteSpace: 'nowrap' }}>
         <span style={{ fontSize: 11, fontWeight: 700 }}>模擬情境</span>
         <span className="tnum" style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'var(--font-mono)' }}>{P.code} {spot.toLocaleString()} · IV {iv}%</span>
       </Glass2>
     );
   }
   return (
-    <Glass2 tone="raised" padding="10px 16px"
-      style={{ position: 'fixed', bottom: 12, right: 12, zIndex: 15, width: 520, maxWidth: 'calc(100vw - 24px)', display: 'grid', gridTemplateColumns: 'auto 1fr 1fr', gap: 18, alignItems: 'center', boxShadow: '0 12px 28px rgba(0,0,0,0.45)' }}>
+    <Glass2 tone="raised" radius={16} padding="12px 18px"
+      style={{ position: 'fixed', bottom: 14, right: 16, zIndex: 15, width: 520, maxWidth: 'calc(100vw - 24px)', display: 'grid', gridTemplateColumns: 'auto 1fr 1fr', gap: 18, alignItems: 'center', boxShadow: '0 12px 28px rgba(0,0,0,0.45)' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
         <span style={{ fontSize: 11, fontWeight: 700 }}>模擬情境</span>
         <button onClick={() => setOpen(false)} title="收合" style={{ fontSize: 13, lineHeight: 1, padding: '2px 7px', border: '1px solid var(--border)', background: 'transparent', color: 'inherit', cursor: 'pointer', fontFamily: 'inherit' }}>×</button>
@@ -400,7 +490,7 @@ function PanelGrid({ tab, panels, defaults, grid }) {
   };
   const item = (p) => (
     <div key={p.i} className="pg-item">
-      <Glass2 tone={p.tone || 'panel'} padding={p.pad != null ? p.pad : 12}>
+      <Glass2 tone={p.tone || 'panel'} padding={p.pad != null ? Math.max(p.pad, 12) : 16}>
         <Eyebrow hk={p.hk} right={p.right}>{p.title}</Eyebrow>
         <div className="pg-body">{p.body}</div>
       </Glass2>
@@ -408,7 +498,7 @@ function PanelGrid({ tab, panels, defaults, grid }) {
   );
   if (!RGL) return <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{panels.map(item)}</div>;
   return (
-    <RGL className={`pg${editing ? ' pg-editing' : ''}`} layout={layout} cols={12} rowHeight={30} margin={[8, 8]} containerPadding={[0, 0]}
+    <RGL className={`pg${editing ? ' pg-editing' : ''}`} layout={layout} cols={12} rowHeight={30} margin={[14, 14]} containerPadding={[0, 0]}
       isDraggable={editing} isResizable={editing} draggableHandle=".pg-handle" compactType="vertical" onLayoutChange={onLayoutChange}>
       {panels.map(item)}
     </RGL>
@@ -435,6 +525,24 @@ const GRID_DEFAULTS = {
     { i: 'retail',     x: 0, y: 69, w: 4, h: 10 },
     { i: 'sessions',   x: 0, y: 79, w: 4, h: 8 },
     { i: 'dividends',  x: 0, y: 87, w: 4, h: 11 },
+  ],
+  // Below the 關卡 hero: two columns, wide on the left.
+  levels2: [
+    { i: 'oi',         x: 0, y: 0,  w: 7, h: 13 },
+    { i: 'intraday',   x: 0, y: 13, w: 7, h: 12 },
+    { i: 'gex',        x: 0, y: 25, w: 7, h: 11 },
+    { i: 'pctrend',    x: 0, y: 36, w: 7, h: 14 },
+    { i: 'optinst',    x: 0, y: 50, w: 7, h: 16 },
+    { i: 'settlehist', x: 0, y: 66, w: 7, h: 12 },
+    { i: 'top20',      x: 0, y: 78, w: 7, h: 8 },
+    { i: 'keylevels',  x: 7, y: 0,  w: 5, h: 16 },
+    { i: 'range',      x: 7, y: 16, w: 5, h: 10 },
+    { i: 'optlarge',   x: 7, y: 26, w: 5, h: 14 },
+    { i: 'retail',     x: 7, y: 40, w: 5, h: 10 },
+    { i: 'sessions',   x: 7, y: 50, w: 5, h: 8 },
+    { i: 'twse',       x: 7, y: 58, w: 5, h: 11 },
+    { i: 'premarket',  x: 7, y: 69, w: 5, h: 8 },
+    { i: 'dividends',  x: 7, y: 77, w: 5, h: 11 },
   ],
   chart: [{ i: 'kline', x: 0, y: 0, w: 12, h: 19 }],
   watch: [{ i: 'watch', x: 0, y: 0, w: 6, h: 21 }],
@@ -471,7 +579,11 @@ const gridCap = (txt) => <span className="mono" style={{ fontSize: 9, opacity: 0
 // Max profit / loss text: an unbounded side reads 無上限 rather than a number.
 const fmtCap = (v, P, plus = false) => (Number.isFinite(v) ? `${plus ? '+' : ''}${P.cur}${Math.round(v).toLocaleString()}` : '無上限');
 const expCap = (e) => `${e.date} ${e.type === 'monthly' ? '月選' : e.label} · ${e.dte} 天`;
-const GRID_BODY = { position: 'absolute', top: 90, left: 12, right: 12, bottom: 12, zIndex: 5, overflowY: 'auto', overflowX: 'hidden' };
+// Desktop shell geometry: a left rail, the price header, the expiry row, then
+// the workspace body (scrolls on its own).
+const RAIL_W = 80, HEAD_H = 84, EXP_H = 46;
+const BODY_TOP = HEAD_H + EXP_H + 6;
+const GRID_BODY = { position: 'absolute', top: BODY_TOP, left: RAIL_W + 18, right: 18, bottom: 14, zIndex: 5, overflowY: 'auto', overflowX: 'hidden' };
 
 function Obsidian3() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
@@ -959,7 +1071,7 @@ function Obsidian3() {
     );
   }
 
-  const gridTab = workspace === 'lab' ? (labView === 'iv' ? 'lab-iv' : null) : workspace;
+  const gridTab = workspace === 'lab' ? (labView === 'iv' ? 'lab-iv' : null) : workspace === 'levels' ? 'levels2' : workspace === 'chart' ? null : workspace;
   const grid = { editing: layoutEdit && !!gridTab, resetToken: layoutReset };
   const qNow = quoteNow || (live && live.quote);
   // The change must describe the price the headline shows. spot is shared: the
@@ -969,56 +1081,59 @@ function Obsidian3() {
   const spotChgTop = (qNow && qNow.last > 0 && qNow.close > 0 && spot === qNow.last) ? qNow.last - qNow.close
     : (spotUnderlying && spotUnderlying.price === spot && spotUnderlying.prevClose > 0) ? spot - spotUnderlying.prevClose : null;
   const spotScenario = !!live && !(qNow && spot === qNow.last) && !(spotUnderlying && spot === spotUnderlying.price);
+  // The header's 最高 / 最低 / 成交量: the live quote's session range when the
+  // source reports one, else the latest day bar of the real series. A
+  // scenario price or mock data shows none.
+  const lastDay = liveDayBars && liveDayBars.length ? liveDayBars[liveDayBars.length - 1] : null;
+  const headHL = spotScenario ? null
+    : (qNow && qNow.high > 0 && qNow.low > 0) ? { high: qNow.high, low: qNow.low, vol: qNow.volume || 0 }
+    : lastDay ? { high: lastDay.h, low: lastDay.l, vol: lastDay.v || 0 } : null;
   return (
     <div style={{
       width: '100%', minHeight: '100vh', position: 'relative', overflow: 'hidden',
       fontFamily: 'var(--font-display)', color: 'var(--text)', background: 'var(--bg)', fontSize: 12,
     }}>
-      {/* Top bar: brand · tabs · (right) product + price, data source, settlement, theme, help.
+      <NavRail value={workspace} onChange={setWorkspace} light={light} setTheme={setTheme} helpOpen={helpOpen}
+        onHelp={() => { setHelpOpen((v) => !v); dismissHelpHint(); }} />
+
+      {/* First-visit hint, pointing at the rail's 說明 button */}
+      {!helpHintSeen && (
+        <div style={{
+          position: 'fixed', left: RAIL_W + 10, bottom: 34, zIndex: 40, whiteSpace: 'nowrap',
+          display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10,
+          background: 'var(--panel)', border: '1px solid rgba(240,192,104,0.6)', boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
+          fontSize: 12, fontWeight: 600, color: 'var(--text)',
+        }}>
+          ← 第一次用？按「說明」看每個數字怎麼讀
+          <button onClick={(e) => { e.stopPropagation(); dismissHelpHint(); }} title="關閉" style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 0, fontFamily: 'inherit' }}>×</button>
+        </div>
+      )}
+
+      {/* Price header: product menu · big last price · session high / low · status chips · theme switch.
           Sits above the expiry row: the product menu inside must win the stacking order. */}
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 44, display: 'flex', alignItems: 'stretch', gap: 12, padding: '0 12px', background: 'var(--panel2)', borderBottom: '1px solid var(--border)', zIndex: 20 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingRight: 12, borderRight: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
-          <div style={{ width: 10, height: 10, background: 'var(--gold)' }} />
-          <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: 0.5 }}>Options Lab</span>
-        </div>
-        <WorkspaceTabs value={workspace} onChange={setWorkspace} />
+      <div style={{ position: 'absolute', top: 0, left: RAIL_W, right: 0, height: HEAD_H, display: 'flex', alignItems: 'center', gap: 16, padding: '0 22px', zIndex: 20 }}>
+        <HeroQuote
+          productId={productId} P={P} spot={spot} chg={spotChgTop} scenario={spotScenario}
+          open={prodMenuOpen} setOpen={setProdMenuOpen} hl={headHL}
+          onPick={(id) => { switchProduct(id); setProdMenuOpen(false); }}
+          status={(<>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+              title={live ? (live.health && live.health.source === 'eod' ? `${P.live === 'ib' ? 'IB 快照' : '期交所前一交易日'}資料（${live.health.asOf}），沒有即時報價` : `${BROKER[P.live]} 已連線`) : '沒有本機資料代理 — 模擬資料'}>
+              <span style={{ width: 7, height: 7, borderRadius: 4, background: live ? 'var(--down)' : 'var(--muted)' }} />
+              {P.live ? liveLabelZh(live, P) : '模擬'}
+              {live && P.live && !(live.health && live.health.source === 'eod') && <FreshnessChip lastLiveAt={lastLiveAt} />}
+            </span>
+            <span>·</span>
+            {dte <= 0 ? <span style={{ color: 'var(--up)', fontWeight: 700 }}>今天結算 · {P.settleNote || '13:30'}</span>
+              : <span>{expiry.type === 'monthly' ? '月選' : expiry.label} {expiry.date} 結算 · 剩 {dte} 天</span>}
+          </>)}
+        />
         <div style={{ flex: 1 }} />
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexShrink: 0 }}>
-          <ProductDropdown
-            productId={productId} P={P} spot={spot} chg={spotChgTop} scenario={spotScenario} live={live}
-            open={prodMenuOpen} setOpen={setProdMenuOpen}
-            onPick={(id) => { switchProduct(id); setProdMenuOpen(false); }}
-          />
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', border: '1px solid var(--border)', fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap' }}
-            title={live ? (live.health && live.health.source === 'eod' ? `${P.live === 'ib' ? 'IB 快照' : '期交所前一交易日'}資料（${live.health.asOf}），沒有即時報價` : `${BROKER[P.live]} 已連線`) : '沒有本機資料代理 — 模擬資料'}>
-            <span style={{ width: 6, height: 6, borderRadius: 3, background: live ? '#26a69a' : 'var(--muted)' }} />
-            {P.live ? liveLabelZh(live, P) : '模擬'}
-            {live && P.live && !(live.health && live.health.source === 'eod') && <FreshnessChip lastLiveAt={lastLiveAt} />}
-          </div>
-          <DataQualityPill quality={quality} />
-          <SettlementCountdown dte={dte} note={P.settleNote} />
-          <button onClick={() => setTheme(light ? 'dark' : 'light')} title="切換 亮色 / 深色" style={{ padding: '4px 8px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text2)', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
-            {light ? '☀ 亮色' : '☾ 深色'}
-          </button>
-          <div style={{ position: 'relative', flexShrink: 0 }}>
-            <button onClick={() => { setHelpOpen((v) => !v); dismissHelpHint(); }} title="說明 — 這些數字怎麼讀" style={{ padding: '4px 9px', border: `1px solid ${helpOpen ? 'var(--gold)' : 'var(--border)'}`, background: 'transparent', color: 'var(--text)', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>?</button>
-            {!helpHintSeen && (
-              <div style={{
-                position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 20, whiteSpace: 'nowrap',
-                display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
-                background: 'rgba(240,192,104,0.16)', border: '1px solid rgba(240,192,104,0.4)',
-                fontSize: 10, fontWeight: 600, color: light ? '#8a6410' : '#f7d394',
-              }}>
-                第一次用？按 <b>?</b> 看說明
-                <button onClick={(e) => { e.stopPropagation(); dismissHelpHint(); }} title="關閉" style={{ border: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 12, lineHeight: 1, padding: 0, fontFamily: 'inherit' }}>×</button>
-              </div>
-            )}
-          </div>
-        </div>
+        <Seg items={[{ id: 'light', label: '淺色' }, { id: 'dark', label: '深色' }]} value={theme} onChange={setTheme} />
       </div>
 
-      {/* Expiry row — second row; tab-specific controls on the right */}
-      <div style={{ position: 'absolute', top: 44, left: 0, right: 0, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '0 12px', borderBottom: '1px solid var(--border)', zIndex: 10 }}>
+      {/* Expiry row — tab-specific controls on the right */}
+      <div style={{ position: 'absolute', top: HEAD_H, left: RAIL_W, right: 0, height: EXP_H, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '0 18px', zIndex: 10 }}>
         <ExpiryStrip value={expiryId} onChange={setExpiryId} expiries={expiries} />
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {workspace === 'lab' && <LabToggle value={labView} onChange={setLabView} />}
@@ -1279,12 +1394,12 @@ function LabSurface({ P, theme = 'dark', light = false, t, spot, dte, legs, hove
   }, [hover, spot, dte, P]);
   return (
     <>
-      <div style={{ position: 'absolute', inset: '110px 0 0 0' }}>
+      <div style={{ position: 'absolute', inset: `${BODY_TOP - 10}px 0 0 ${RAIL_W}px` }}>
         <Surface3DMount theme={theme} height="100%" scheme={t.scheme} onHover={setHover} />
       </div>
       {hoverInfo && (
         <div style={{
-          position: 'absolute', top: 130, left: '50%', transform: 'translateX(-50%)', zIndex: 6,
+          position: 'absolute', top: BODY_TOP + 20, left: `calc(50% + ${RAIL_W / 2}px)`, transform: 'translateX(-50%)', zIndex: 6,
           padding: '8px 14px', borderRadius: 0,
           background: 'rgba(20,24,34,0.85)', backdropFilter: 'blur(20px)',
           border: '1px solid rgba(255,255,255,0.12)',
@@ -1300,7 +1415,7 @@ function LabSurface({ P, theme = 'dark', light = false, t, spot, dte, legs, hove
           </span>
         </div>
       )}
-      <Glass2 tone="panel" padding={D.panelPad} style={{ position: 'absolute', bottom: 24, left: 24, zIndex: 5, width: 300 }}>
+      <Glass2 tone="panel" padding={D.panelPad} style={{ position: 'absolute', bottom: 24, left: RAIL_W + 24, zIndex: 5, width: 300 }}>
         <Eyebrow right={<span className="mono" style={{ fontSize: 9, opacity: 0.5 }}>{P.code} · {dte} 天</span>}>3D 損益曲面</Eyebrow>
         <div style={{ fontSize: 11, lineHeight: 1.6, opacity: 0.8 }}>
           橫軸＝標的價格，縱深＝時間流逝（前緣今天、後緣到期），高度與顏色＝損益。拖曳旋轉、滾輪縮放。
@@ -1859,7 +1974,7 @@ function Spark({ series, w = 96, h = 30, light = false }) {
 function LevelTile({ label, hk, value, sub, color, right, light }) {
   const HT = window.HelpTip;
   return (
-    <Glass2 tone="chip" radius={0} padding="10px 12px" style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+    <Glass2 tone="chip" radius={12} padding="10px 12px" style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
       <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.62, marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {(hk && HT) ? <HT k={hk}>{label}</HT> : label}
@@ -2169,6 +2284,284 @@ function TwseFlowsPanel({ W, light = false }) {
   );
 }
 
+// ───────────────────────────────────────────── LEVELS HERO (2026-11 redesign)
+// The 關卡 page leads with one question — where are today's levels against the
+// price — answered by three cards side by side: the level ladder, the chart
+// with the same levels drawn on it, and four positioning numbers. Everything
+// else follows in 籌碼總覽 (cards) and 更多分析 (the adjustable grid).
+
+// Pivots on the chart: P, R1/R2, S1/S2 only (owner's call, 2026-11-04).
+const PIVOT_STYLE = { R2: 'var(--up)', R1: 'var(--up)', P: 'var(--muted)', S1: 'var(--down)', S2: 'var(--down)' };
+const PIVOT_HEX = { R2: '#ef5350', R1: '#ef5350', P: '#8b95a5', S1: '#26a69a', S2: '#26a69a' };
+function pivotLines(K) {
+  return K ? K.levels.filter((l) => PIVOT_HEX[l.key]).map((l) => ({ price: l.price, label: `${l.key} ${l.price.toLocaleString()}`, color: PIVOT_HEX[l.key] })) : [];
+}
+
+// Every level of today, high to low, with the price itself in its place.
+function heroLevels({ P, spot, L, K, cost }) {
+  const out = [];
+  const add = (key, name, note, price) => { if (Number.isFinite(price)) out.push({ key, name, note, price }); };
+  if (L.resistance) add('wallC', '壓力', 'Call 未平倉最大', L.resistance.strike);
+  if (L.support) add('wallP', '支撐', 'Put 未平倉最大', L.support.strike);
+  if (L.maxPain) add('mp', '最大痛苦點', '結算時買方最虧', L.maxPain.strike);
+  if (cost != null) add('cost', '成本線', '前日高低中點', cost);
+  if (K) {
+    const names = { R2: '壓力二', R1: '壓力一', P: '軸心', S1: '支撐一', S2: '支撐二' };
+    K.levels.filter((l) => names[l.key]).forEach((l) => add(l.key, l.key, names[l.key], l.price));
+  }
+  out.push({ key: 'spot', name: '現價', note: P.underlyingLabel || `${P.nameZh || P.name} 近月`, price: spot, spot: true });
+  return out.sort((a, b) => b.price - a.price || (a.spot ? 1 : -1));
+}
+
+function KeyLadderCard({ P, spot, L, K, cost }) {
+  const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
+  const rows = heroLevels({ P, spot, L, K, cost });
+  const above = rows.filter((r) => !r.spot && r.price > spot).pop();
+  const below = rows.filter((r) => !r.spot && r.price < spot)[0];
+  return (
+    <div className="card" style={{ padding: '18px 18px 10px', minWidth: 0 }}>
+      <div style={{ fontSize: 17, fontWeight: 700 }}>今日關鍵價位</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 10px' }}>
+        {above ? <>最近壓力 {above.name} <span style={{ color: 'var(--up)' }}>+{fmtP(above.price - spot)}</span></> : '上方沒有價位'}
+        {' · '}
+        {below ? <>最近支撐 {below.name} <span style={{ color: 'var(--down)' }}>−{fmtP(spot - below.price)}</span></> : '下方沒有價位'}
+      </div>
+      {rows.map((r) => {
+        const d = r.price - spot;
+        const col = r.spot ? 'var(--text)' : d > 0 ? 'var(--up)' : 'var(--down)';
+        return (
+          <div key={r.key} style={{
+            display: 'grid', gridTemplateColumns: '1fr auto 70px', alignItems: 'center', gap: 10,
+            padding: r.spot ? '10px 8px' : '8px 8px', margin: r.spot ? '4px 0' : 0, borderRadius: r.spot ? 10 : 0,
+            background: r.spot ? 'var(--chip)' : 'transparent', borderBottom: r.spot ? 'none' : '1px solid var(--border)',
+          }}>
+            <div style={{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <b style={{ fontSize: 13.5, fontWeight: 700, marginRight: 7 }}>{r.name}</b>
+              <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{r.note}</span>
+            </div>
+            <span className="mono tnum" style={{ fontSize: r.spot ? 19 : 17, fontWeight: 650, color: col }}>{fmtP(r.price)}</span>
+            <span className="mono tnum" style={{
+              justifySelf: 'end', width: 66, textAlign: 'center', padding: '4px 0', borderRadius: 6, fontSize: 12, fontWeight: 700,
+              background: r.spot ? 'var(--text)' : d > 0 ? 'var(--up)' : 'var(--down)', color: r.spot ? 'var(--bg)' : '#fff',
+            }}>{r.spot ? '現在' : `${d > 0 ? '+' : '−'}${fmtP(Math.abs(d))}`}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// 當日 / 日K / 週K / 月K. 當日 = one session's minute candles (1–60 分, 日盤 or
+// 全日盤 = the night session that opens the trading day plus the day session),
+// with today's pivots drawn across it.
+const HERO_TABS = [{ id: 'intra', label: '當日' }, { id: 'D', label: '日K' }, { id: 'W', label: '週K' }, { id: 'M', label: '月K' }];
+function HeroChartCard({ P, theme, I, K, bars, barsLive, live, barPeriodId, setBarPeriodId, barSession, setBarSession, cone, tall = false }) {
+  const [tab, setTab] = uS('intra');
+  const [freq, setFreq] = uS(15);
+  const [full, setFull] = uS(true);
+  const hasIntra = !!(I && I.day && I.day.bars && I.day.bars.length);
+  const showIntra = tab === 'intra' && hasIntra;
+  const minuteBars = uM(() => {
+    if (!hasIntra) return null;
+    const night = full && I.night && I.night.bars ? I.night.bars : [];
+    return aggMinutes(night.concat(I.day.bars), freq).map((b) => ({ t: `${b[0].slice(0, 2)}:${b[0].slice(2, 4)}`, o: b[1], h: b[2], l: b[3], c: b[4], v: b[5] }));
+  }, [I, freq, full, hasIntra]);
+  // Draw the chart at the card's own pixel width: a fixed viewBox scaled
+  // down to a laptop-width card shrank its labels to ~6px.
+  const boxRef = uR(null);
+  const [boxW, setBoxW] = uS(640);
+  uE(() => {
+    const el = boxRef.current;
+    if (!el || !window.ResizeObserver) return undefined;
+    const ro = new ResizeObserver((es) => { const w = Math.round(es[0].contentRect.width); if (w > 0) setBoxW(w); });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const vw = Math.max(360, boxW);
+  // The K線 tab fills the window; the 關卡 card keeps a fixed height.
+  const vh = tall ? Math.max(360, (window.innerHeight || 900) - BODY_TOP - 330) : 360;
+  const pickTab = (id) => { setTab(id); if (id !== 'intra') setBarPeriodId(id); };
+  const curTab = tab === 'intra' ? (hasIntra ? 'intra' : barPeriodId) : barPeriodId;
+  const date = I && I.date ? `${String(I.date).slice(4, 6)}/${String(I.date).slice(6, 8)}` : '';
+  // Pivots are one session's levels: drawn on minute and day candles, not
+  // across weekly / monthly bars where they'd sit in one squashed band.
+  const lines = (showIntra || barPeriodId === 'D') ? pivotLines(K) : [];
+  return (
+    <div className="card" style={{ padding: '16px 18px 14px', minWidth: 0 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <div className="utabs">
+          {HERO_TABS.map((t) => (t.id === 'intra' && !hasIntra) ? null : (
+            <button key={t.id} className={curTab === t.id ? 'on' : ''} onClick={() => pickTab(t.id)}>{t.label}</button>
+          ))}
+        </div>
+        <span className="mono" style={{ fontSize: 10.5, color: 'var(--muted)' }}>
+          {showIntra ? (I.source === 'sinopac-ticks' ? '● 永豐 即時分K' : `● 期交所逐筆 · ${date}`) : (barsLive ? `● ${liveLabel(live, P)}` : '○ 模擬')}
+        </span>
+      </div>
+      <div className="chips" style={{ margin: '12px 0 8px' }}>
+        {showIntra ? (<>
+          {INTRADAY_FREQS.map((f) => <button key={f} className={freq === f ? 'on' : ''} onClick={() => setFreq(f)}>{f}分</button>)}
+          <span className="sep" />
+          <button className={!full ? 'on' : ''} onClick={() => setFull(false)}>日盤</button>
+          <button className={full ? 'on' : ''} onClick={() => setFull(true)}>全日盤</button>
+        </>) : (<>
+          <button className={barSession === 'day' ? 'on' : ''} onClick={() => setBarSession('day')}>日盤</button>
+          <button className={barSession === 'full' ? 'on' : ''} onClick={() => setBarSession('full')}>全日盤</button>
+        </>)}
+      </div>
+      <div ref={boxRef} style={{ minWidth: 0 }}>
+      {showIntra && minuteBars && minuteBars.length >= 2
+        ? <PriceChart intraday bars={minuteBars} theme={theme} code={P.code} levels={lines} pctRef={K ? K.prev.c : null}
+            periodLabel={`${date} ${full ? '全日盤' : '日盤'} · ${freq}分K`} vw={vw} vh={vh} showRsi={tall} />
+        : <PriceChart bars={bars} theme={theme} code={P.code} levels={lines} cone={cone}
+            periodLabel={`${(K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0]).label}K · ${barSession === 'full' ? '全日盤' : '日盤'}`} vw={vw} vh={vh} showRsi={tall} />}
+      </div>
+      <div style={{ display: 'flex', gap: 14, fontSize: 11.5, color: 'var(--text2)', marginTop: 6, flexWrap: 'wrap' }}>
+        {[['壓力 R1 R2', 'var(--up)'], ['軸心 P', 'var(--muted)'], ['支撐 S1 S2', 'var(--down)']].map(([t, c]) => (
+          <span key={t}><i style={{ display: 'inline-block', width: 14, height: 0, borderTop: `2px dashed ${c}`, verticalAlign: 'middle', marginRight: 5 }} />{t}</span>
+        ))}
+        <span style={{ color: 'var(--muted)' }}>{lines.length ? '今日價位 · 由前一交易日高低收算出' : '週K / 月K 不畫單日價位'}</span>
+      </div>
+    </div>
+  );
+}
+
+// A small line for a stat card (values only, newest last).
+function MiniSpark({ values, color = 'var(--blue)', w = 120, h = 30, base = null }) {
+  if (!values || values.length < 2) return null;
+  const lo = Math.min(...values, base != null ? base : Infinity), hi = Math.max(...values, base != null ? base : -Infinity);
+  const x = (i) => (i / (values.length - 1)) * (w - 4) + 2;
+  const y = (v) => h - 3 - ((v - lo) / Math.max(hi - lo, 1e-9)) * (h - 6);
+  const pts = values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  return (
+    <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ display: 'block' }} aria-hidden>
+      {base != null && <line x1="2" x2={w - 2} y1={y(base)} y2={y(base)} stroke="var(--border)" strokeDasharray="3 3" />}
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.6" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+function StatCard({ title, value, color, sub, spark }) {
+  return (
+    <div className="card" style={{ padding: '14px 18px 12px' }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text2)' }}>{title}</div>
+      <div className="mono tnum" style={{ fontSize: 26, fontWeight: 700, color: color || 'var(--text)', margin: '6px 0 2px' }}>{value}</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)' }}>{sub}</div>
+      {spark && <div style={{ marginTop: 8 }}>{spark}</div>}
+    </div>
+  );
+}
+const signed = (v) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toLocaleString()}`;
+
+// 籌碼總覽 — the reference app's 聰明錢 cards, one per group of traders: a big
+// headline number, two detail lines with 增倉 / 減倉 tags, the date, and a ring
+// showing how the group's option book splits.
+function Ring({ parts, size = 104, thick = 16, center, sub }) {
+  const tot = parts.reduce((a, p) => a + Math.max(0, p.v), 0);
+  const r = (size - thick) / 2, c = 2 * Math.PI * r;
+  let acc = 0;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flexShrink: 0 }} aria-hidden>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--chip)" strokeWidth={thick} />
+      {tot > 0 && parts.map((p, i) => {
+        const len = Math.max(0, p.v) / tot * c;
+        const el = <circle key={i} cx={size / 2} cy={size / 2} r={r} fill="none" stroke={p.color} strokeWidth={thick}
+          strokeDasharray={`${Math.max(0, len - 1.5)} ${c}`} strokeDashoffset={-acc} transform={`rotate(-90 ${size / 2} ${size / 2})`} />;
+        acc += len;
+        return el;
+      })}
+      {center && <text x="50%" y={sub ? '47%' : '53%'} textAnchor="middle" fontSize="13" fontWeight="700" fill="var(--text)" fontFamily="var(--font-mono)">{center}</text>}
+      {sub && <text x="50%" y="63%" textAnchor="middle" fontSize="9.5" fill="var(--muted)">{sub}</text>}
+    </svg>
+  );
+}
+function SmartCard({ title, big, bigColor, bigNote, lines, date, ring }) {
+  return (
+    <div className="card" style={{ padding: '18px 20px', display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 16, fontWeight: 700 }}>{title}</div>
+        <div style={{ margin: '6px 0 10px', display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+          <span className="mono tnum" style={{ fontSize: 24, fontWeight: 700, color: bigColor }}>{big}</span>
+          <span style={{ fontSize: 12.5, color: 'var(--text2)' }}>{bigNote}</span>
+        </div>
+        {lines.map((l, i) => (
+          <div key={i} style={{ display: 'grid', gridTemplateColumns: '64px 1fr auto', gap: 8, fontSize: 12.5, padding: '2px 0', alignItems: 'baseline' }}>
+            <span style={{ color: 'var(--text2)' }}>{l.k}</span>
+            <span className="mono tnum" style={{ color: 'var(--text)' }}>{l.v}</span>
+            {l.tag ? <span style={{ fontSize: 11.5, fontWeight: 600, color: l.tagColor }}>{l.tag}</span> : <span />}
+          </div>
+        ))}
+        {date && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>{date} 更新</div>}
+      </div>
+      {ring}
+    </div>
+  );
+}
+const tagOf = (chg) => (chg == null || chg === 0 ? null : chg > 0 ? { tag: `+${chg.toLocaleString()} 增倉`, tagColor: 'var(--up)' } : { tag: `−${Math.abs(chg).toLocaleString()} 減倉`, tagColor: 'var(--down)' });
+function SmartMoneyGrid({ X, M, L, P, spot, expiry }) {
+  const O = X && X.optpos;
+  const inst = O && O.inst, large = O && O.large;
+  const date = (d) => (d ? String(d).slice(5) : '');
+  const cards = [];
+  const INST = [['foreign', '外資'], ['trust', '投信'], ['dealer', '自營商']];
+  if (inst && inst.rows) {
+    INST.forEach(([k, name]) => {
+      const r = inst.rows[k];
+      if (!r) return;
+      const net = r.call.netOi - r.put.netOi; // >0: call-heavy (bullish lean)
+      const fut = k === 'foreign' && M && M.foreign ? M.foreign : null;
+      cards.push(<SmartCard key={k} title={`${name} · 臺指選擇權`}
+        big={signed(r.call.netOi)} bigColor={r.call.netOi >= 0 ? 'var(--up)' : 'var(--down)'} bigNote="買權淨未平倉（口）"
+        lines={[
+          { k: '買權淨', v: `${signed(r.call.netOi)} 口`, ...(tagOf(r.call.chgOi) || {}) },
+          { k: '賣權淨', v: `${signed(r.put.netOi)} 口`, ...(tagOf(r.put.chgOi) || {}) },
+          ...(fut ? [{ k: '期貨淨', v: `${signed(fut.net)} 口`, ...(tagOf(fut.chg) || {}) }] : []),
+        ]}
+        date={date(inst.date)}
+        ring={<Ring parts={[
+          { v: r.call.longOi, color: '#ef5350' }, { v: r.call.shortOi, color: 'rgba(239,83,80,0.38)' },
+          { v: r.put.longOi, color: '#26a69a' }, { v: r.put.shortOi, color: 'rgba(38,166,154,0.38)' },
+        ]} center={net >= 0 ? '偏多' : '偏空'} sub="買賣權部位" />} />);
+    });
+  }
+  if (large && large.filters && large.filters.all) {
+    const a = large.filters.all;
+    cards.push(<SmartCard key="large" title="大額交易人 · 前十大"
+      big={signed(a.call.top10.net)} bigColor={a.call.top10.net >= 0 ? 'var(--up)' : 'var(--down)'} bigNote="買權淨（口）"
+      lines={[
+        { k: '買權淨', v: `${signed(a.call.top10.net)} 口`, ...(tagOf(a.call.top10.chg) || {}) },
+        { k: '賣權淨', v: `${signed(a.put.top10.net)} 口`, ...(tagOf(a.put.top10.chg) || {}) },
+        { k: '佔市場', v: `買權 ${Math.abs(a.call.top10.netPct).toFixed(1)}% · 賣權 ${Math.abs(a.put.top10.netPct).toFixed(1)}%` },
+      ]}
+      date={date(large.date)}
+      ring={<Ring parts={[{ v: a.call.top10.buy, color: '#ef5350' }, { v: a.call.top10.sell, color: 'rgba(239,83,80,0.38)' }, { v: a.put.top10.buy, color: '#26a69a' }, { v: a.put.top10.sell, color: 'rgba(38,166,154,0.38)' }]}
+        center={`${Math.round(a.call.top10.sellPct)}%`} sub="買權賣方佔比" />} />);
+  }
+  if (M && M.retail && M.retail.MTX) {
+    const m = M.retail.MTX, t = M.retail.TMF;
+    cards.push(<SmartCard key="retail" title="散戶多空比"
+      big={`${m.ratio >= 0 ? '+' : ''}${m.ratio.toFixed(2)}%`} bigColor={m.ratio >= 0 ? 'var(--up)' : 'var(--down)'} bigNote={`小台 · 散戶${m.ratio >= 0 ? '偏多' : '偏空'}（反向看）`}
+      lines={[
+        { k: '小台', v: `${m.ratio.toFixed(2)}%`, ...(m.chg != null ? { tag: `${m.chg >= 0 ? '+' : '−'}${Math.abs(m.chg).toFixed(2)} 較前日`, tagColor: m.chg >= 0 ? 'var(--up)' : 'var(--down)' } : {}) },
+        ...(t ? [{ k: '微台', v: `${t.ratio.toFixed(2)}%`, ...(t.chg != null ? { tag: `${t.chg >= 0 ? '+' : '−'}${Math.abs(t.chg).toFixed(2)} 較前日`, tagColor: t.chg >= 0 ? 'var(--up)' : 'var(--down)' } : {}) }] : []),
+      ]}
+      date={date(m.date)}
+      ring={<Ring parts={[{ v: Math.max(0, 50 + m.ratio / 2), color: '#ef5350' }, { v: Math.max(0, 50 - m.ratio / 2), color: '#26a69a' }]} center={`${m.ratio.toFixed(0)}%`} sub="小台 多−空" />} />);
+  }
+  if (L && L.sigma1 != null) {
+    const fmtP = (v) => Math.round(v).toLocaleString();
+    cards.push(<SmartCard key="move" title="預期波動 · 到結算"
+      big={`±${fmtP(L.sigma1)}`} bigColor="var(--text)" bigNote={`點 · ${expiry.label} 剩 ${expiry.dte} 天`}
+      lines={[
+        { k: '1σ 區間', v: `${fmtP(spot - L.sigma1)} – ${fmtP(spot + L.sigma1)}` },
+        { k: '價平 IV', v: `${L.atmIv.toFixed(1)}%` },
+        ...(L.straddle != null ? [{ k: '價平和', v: window.fmtPx(L.straddle, P) }] : []),
+      ]}
+      ring={<Ring parts={[{ v: 68.3, color: 'var(--blue)' }, { v: 31.7, color: 'var(--chip)' }]} center="68%" sub="落在區間內" />} />);
+  }
+  if (!cards.length) return <div className="card" style={{ padding: 18, fontSize: 12, color: 'var(--muted)' }}>籌碼資料未載入（期交所每個交易日 16:30 後更新）。</div>;
+  return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))', gap: 14 }}>{cards}</div>;
+}
+
 function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expiry, levels: L, live, market: M, rangeLevels: R, dayBarsLive, gex: G, bars, barsLive, barPeriodId, setBarPeriodId, barSession, setBarSession, D, grid, top20: T, intraday: I, keyLevels: K, twse: W, premarket: PM, extra = {}, history: H = null }) {
   const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
@@ -2354,9 +2747,56 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expi
     { i: 'dividends', title: '除息點數 · 各契約（推算）',
       right: gridCap(X.dividends ? `證交所 × 期交所 ${ymd(X.dividends.asOf)}` : ''), body: <DividendsPanel Dv={X.dividends} light={light} /> },
   ];
+  // The hero row carries the ladder, the chart and the headline numbers, so
+  // their old panels (strip / ladder / kline) leave the grid below.
+  const HERO_IDS = { strip: 1, ladder: 1, kline: 1 };
+  const rest = panels.filter((p) => !HERO_IDS[p.i]);
+  const fxSeries = H && H.fx ? H.fx.slice(-20).map((r) => r[1]) : null;
+  const retail = M && M.retail && M.retail.MTX;
+  // Positioning (法人 / 大額 / 散戶) exists only for TAIFEX products; elsewhere
+  // the right column shows the option-implied move instead.
+  const hasChips = P.oiSource === 'taifex';
   return (
     <div style={GRID_BODY}>
-      <PanelGrid tab="levels" panels={panels} defaults={GRID_DEFAULTS.levels} grid={grid} />
+      <div className="lv-hero">
+        <KeyLadderCard P={P} spot={spot} L={L} K={K} cost={cost} />
+        <HeroChartCard P={P} theme={theme} I={I} K={K} bars={bars} barsLive={barsLive} live={live}
+          barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId} barSession={barSession} setBarSession={setBarSession}
+          cone={L.atmIv ? { ivPct: L.atmIv, days: expiry.dte, label: expiry.label } : null} />
+        {hasChips ? (<div className="lv-stats">
+          <StatCard title="外資期貨淨部位" value={fx ? signed(fx.net) : '—'} color={fx ? (fx.net >= 0 ? 'var(--up)' : 'var(--down)') : undefined}
+            sub={fx ? <>較前日 {signed(fx.chg)} 口{asOf(fx)}</> : noMkt}
+            spark={fxSeries && fxSeries.length > 2 ? <MiniSpark values={fxSeries} color={fx && fx.net >= 0 ? 'var(--up)' : 'var(--down)'} /> : null} />
+          <StatCard title="P/C 未平倉比" value={pc ? pc.ratio.toFixed(2) : '—'}
+            sub={pc ? <>{pc.ratio >= 1 ? '高於 1：賣權較多' : '低於 1：買權較多'}{asOf(pc)}</> : noMkt}
+            spark={pc && pc.series && pc.series.length > 2 ? <MiniSpark values={pc.series.map((p) => p.ratio)} base={1} /> : null} />
+          <StatCard title="十大交易人淨部位" value={t10 ? signed(t10.net) : '—'} color={t10 ? (t10.net >= 0 ? 'var(--up)' : 'var(--down)') : undefined}
+            sub={t10 ? <>較前日 {signed(t10.chg)} 口{asOf(t10)}</> : noMkt} />
+          <StatCard title="散戶多空比 · 小台" value={retail ? `${retail.ratio.toFixed(2)}%` : '—'} color={retail ? (retail.ratio >= 0 ? 'var(--up)' : 'var(--down)') : undefined}
+            sub={retail ? `散戶${retail.ratio >= 0 ? '偏多' : '偏空'} → 反向指標` : noMkt}
+            spark={retail && retail.series && retail.series.length > 2 ? <MiniSpark values={retail.series.map((r) => r.ratio)} base={0} color="var(--text2)" /> : null} />
+          <a href="#chips" onClick={(e) => { e.preventDefault(); const el = document.getElementById('lv-chips'); if (el) el.scrollIntoView({ behavior: 'smooth' }); }}
+            className="lv-more" style={{ fontSize: 13, color: 'var(--blue)', textAlign: 'right', textDecoration: 'none' }}>更多籌碼 ›</a>
+        </div>) : (<div className="lv-stats">
+          <StatCard title="預期波動 · 到結算" value={L.sigma1 != null ? `±${fmtP(Math.round(L.sigma1))}` : '—'}
+            sub={L.sigma1 != null ? `${fmtP(Math.round(spot - L.sigma1))} – ${fmtP(Math.round(spot + L.sigma1))} · ${expiry.label} 剩 ${expiry.dte} 天` : '沒有 IV'} />
+          <StatCard title="價平 IV" value={L.atmIv ? `${L.atmIv.toFixed(1)}%` : '—'} sub={L.atm ? `價平 ${fmtP(L.atm.strike)}` : '沒有鏈資料'} />
+          <StatCard title="價平和" value={L.straddle != null ? window.fmtPx(L.straddle, P) : '—'}
+            sub={L.straddle != null ? `市場預期到結算的波動幅度${straddleDelta != null ? ` · 較前日 ${straddleDelta > 0 ? '+' : '−'}${window.fmtPx(Math.abs(straddleDelta), P)}` : ''}` : '沒有鏈資料'} />
+        </div>)}
+      </div>
+      {hasChips && (<>
+      <div id="lv-chips" className="sec-title">籌碼總覽<small>法人、大戶、散戶各自站哪邊 · 期交所前一交易日</small>
+        <span style={{ flex: 1 }} />
+        <small style={{ display: 'inline-flex', gap: 12 }}>
+          {[['#ef5350', '買權 買方'], ['rgba(239,83,80,0.38)', '買權 賣方'], ['#26a69a', '賣權 買方'], ['rgba(38,166,154,0.38)', '賣權 賣方']].map(([c, t]) => (
+            <span key={t}><i style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 5, background: c, marginRight: 5 }} />{t}</span>))}
+        </small>
+      </div>
+      <SmartMoneyGrid X={X} M={M} L={L} P={P} spot={spot} expiry={expiry} />
+      </>)}
+      <div className="sec-title">更多分析<small>右上「調整版面」可拖曳、縮放</small></div>
+      <PanelGrid tab="levels2" panels={rest} defaults={GRID_DEFAULTS.levels2} grid={grid} />
     </div>
   );
 }
@@ -2437,68 +2877,13 @@ function WatchWorkspace({ onPick, grid }) {
 
 // Top-level Chart tab (from the design): full-width candles + MA + RSI.
 // Desktop only — mobile keeps the K線 sub-tab inside Calc.
-function ChartWorkspace({ P, bars, barsLive, live, theme, light, barPeriodId, setBarPeriodId, barSession, setBarSession, cone = null, D, grid, keyLevels = null, dayBars = null, intraday: I = null }) {
-  const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
-  // Floor-trader pivots for the next session, from the last completed day
-  // (computeKeyLevels): P, R1/R2, S1/S2 only — R3/S3 sit too far out to matter
-  // on a normal day and crowd the scale.
-  const PIVOT_LINES = { R2: LEVEL_COLORS.up, R1: LEVEL_COLORS.up, P: '#cbd5e1', S1: LEVEL_COLORS.down, S2: LEVEL_COLORS.down };
-  const pivotLevels = keyLevels ? keyLevels.levels.filter((l) => PIVOT_LINES[l.key])
-    .map((l) => ({ price: l.price, label: `${l.key} ${l.price.toLocaleString()}`, color: PIVOT_LINES[l.key] })) : [];
-  // 當日 (day-trading) view: one session's 1- or 5-minute candles from the
-  // intraday feed (Shioaji live, else TAIFEX's tick file for the latest
-  // session), with the pivots computed from the session before that one.
-  const [intra, setIntra] = uS(null);           // null | '1' | '5'
-  const [intraSess, setIntraSess] = uS('day');  // 'day' | 'night'
-  const S = I && (intraSess === 'night' ? I.night : I.day);
-  const minuteBars = uM(() => {
-    if (!S || !S.bars || !S.bars.length) return null;
-    const one = S.bars.map((b) => ({ t: `${b[0].slice(0, 2)}:${b[0].slice(2, 4)}`, o: b[1], h: b[2], l: b[3], c: b[4], v: b[5] }));
-    if (intra !== '5') return one;
-    const out = [];
-    for (const b of one) {
-      const mm = +b.t.slice(3);
-      const key = `${b.t.slice(0, 3)}${String(mm - (mm % 5)).padStart(2, '0')}`;
-      const cur = out[out.length - 1];
-      if (cur && cur.t === key) { cur.h = Math.max(cur.h, b.h); cur.l = Math.min(cur.l, b.l); cur.c = b.c; cur.v += b.v; }
-      else out.push({ ...b, t: key });
-    }
-    return out;
-  }, [S, intra]);
-  const intraKey = uM(() => (I && I.date && dayBars ? computeKeyLevels({ bars: dayBars, today: String(I.date) }) : null), [I, dayBars]);
-  const showIntra = !!(intra && minuteBars && minuteBars.length >= 2);
-  const PIVOT_COLORS = { R2: LEVEL_COLORS.up, R1: LEVEL_COLORS.up, P: '#cbd5e1', S1: LEVEL_COLORS.down, S2: LEVEL_COLORS.down };
-  const pivotsOf = (K) => (K ? K.levels.filter((l) => PIVOT_COLORS[l.key])
-    .map((l) => ({ price: l.price, label: `${l.key} ${l.price.toLocaleString()}`, color: PIVOT_COLORS[l.key] })) : []);
-  const intraDate = I && I.date ? `${String(I.date).slice(4, 6)}/${String(I.date).slice(6, 8)}` : '';
-  const panels = [{
-    i: 'kline',
-    title: showIntra
-      ? <>K線 · {P.code} · 當日 {intra}分<span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4 }}>· {intraDate} {intraSess === 'night' ? '夜盤' : '日盤'}</span></>
-      : <>K線 · {P.code} · {per.label}K<span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4 }}>· {barsLive ? `近月 · ${liveLabel(live, P)}` : '模擬'}</span></>,
-    right: <div style={{ display: 'flex', gap: 8 }}>
-      {I && I.day && <Seg items={[{ id: '1', label: '1分' }, { id: '5', label: '5分' }]} value={intra} onChange={setIntra} />}
-      {showIntra
-        ? (I.night && I.night.bars && I.night.bars.length ? <Seg items={[{ id: 'day', label: '日盤' }, { id: 'night', label: '夜盤' }]} value={intraSess} onChange={setIntraSess} /> : null)
-        : <KSessionToggle value={barSession} onChange={setBarSession} />}
-      <Seg items={K_PERIODS} value={showIntra ? null : barPeriodId} onChange={(id) => { setIntra(null); setBarPeriodId(id); }} />
-    </div>,
-    body: showIntra
-      ? <PriceChart intraday levels={pivotsOf(intraKey)} pctRef={intraKey ? intraKey.prev.c : null}
-          bars={minuteBars} theme={theme} code={P.code}
-          periodLabel={`當日 ${intra}分K · ${intraDate} ${intraSess === 'night' ? '夜盤' : '日盤'}`}
-          sourceLabel={I.source === 'sinopac-ticks' ? '● 永豐 逐筆 — 當日分K' : `● 期交所逐筆檔 — ${intraDate} 分K（最近一個有資料的交易日）`} />
-      : <PriceChart cone={cone} levels={pivotLevels}
-          bars={bars} theme={theme} code={P.code}
-          periodLabel={`${per.label}K` + (barSession === 'full' ? ' · 全日盤' : ' · 日盤')}
-          sourceLabel={barsLive
-            ? `● ${liveLabel(live, P)} — 近月期貨日K`
-            : '○ 模擬 K 線 — 隨機漫步；接上本機代理（server/）才有真實行情'}
-        />,
-  }];
+function ChartWorkspace({ P, bars, barsLive, live, theme, barPeriodId, setBarPeriodId, barSession, setBarSession, cone = null, keyLevels = null, intraday: I = null }) {
+  // The 關卡 chart card at full size (with RSI): 當日 1–60 分 · 日盤 / 全日盤,
+  // or 日 / 週 / 月 K, today's pivots on minute and day candles.
   return (
     <div style={GRID_BODY}>
-      <PanelGrid tab="chart" panels={panels} defaults={GRID_DEFAULTS.chart} grid={grid} />
+      <HeroChartCard tall P={P} theme={theme} I={I} K={keyLevels} bars={bars} barsLive={barsLive} live={live}
+        barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId} barSession={barSession} setBarSession={setBarSession} cone={cone} />
     </div>
   );
 }
@@ -2768,7 +3153,7 @@ function CompareWorkspace({ D, P, spot, iv, dte, theme = 'dark' }) {
   const biasColor = { bullish: '#ef5350', bearish: '#26a69a', neutral: '#a78bfa', volatile: '#f0c068' };
 
   return (
-    <div style={{ position: 'absolute', top: 90, left: 12, right: 12, bottom: 12, zIndex: 5, display: 'flex', flexDirection: 'column', gap: D.gap }}>
+    <div style={{ position: 'absolute', top: BODY_TOP, left: RAIL_W + 18, right: 18, bottom: 14, zIndex: 5, display: 'flex', flexDirection: 'column', gap: D.gap }}>
       {/* Strategy picker bar */}
       <Glass2 tone="panel" padding="12px 16px">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
