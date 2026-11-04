@@ -23,6 +23,8 @@ import os
 import statistics
 import sys
 import time
+import socket
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta
@@ -47,6 +49,23 @@ WINDOW_DAYS = 7          # calendar days back — enough for 2 trading days acro
 CACHE_TTL_S = 15 * 60.0
 TIMEOUT_S = 25
 
+
+def _urlopen(req, timeout=TIMEOUT_S, attempts=3):
+    """urllib.request.urlopen with retries. TAIFEX answers GitHub's runners
+    slowly or not at all for a minute at a time (the daily job failed 7 times
+    in October on one read timeout), so a timeout, reset or 5xx is retried
+    after 5 s and then 20 s. A 4xx is the answer, not a hiccup: raised at once."""
+    for i in range(attempts):
+        try:
+            return urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError as e:
+            if e.code < 500 or i == attempts - 1:
+                raise
+        except (TimeoutError, socket.timeout, ConnectionError, urllib.error.URLError):
+            if i == attempts - 1:
+                raise
+        time.sleep(5 if i == 0 else 20)
+
 _cache: dict = {}        # "table" -> (expires_at, table)
 _lock = asyncio.Lock()
 
@@ -66,7 +85,7 @@ def _fetch_csv(start: date, end: date, url: str = CSV_URL, commodity: str = COMM
         "queryEndDate": end.strftime("%Y/%m/%d"),
     }).encode()
     req = urllib.request.Request(url, data=form, headers={"User-Agent": "options-lab/1"})
-    with urllib.request.urlopen(req, timeout=TIMEOUT_S) as r:
+    with _urlopen(req, timeout=TIMEOUT_S) as r:
         return _decode(r.read())
 
 
@@ -237,7 +256,7 @@ FOREIGN = "外資"
 
 def _post_csv(url: str, form: dict) -> list:
     req = urllib.request.Request(url, data=urllib.parse.urlencode(form).encode(), headers={"User-Agent": "options-lab/1"})
-    with urllib.request.urlopen(req, timeout=TIMEOUT_S) as r:
+    with _urlopen(req, timeout=TIMEOUT_S) as r:
         text = _decode(r.read())
     if text.lstrip().startswith("<"):
         raise ValueError(f"{url.rsplit('/', 1)[-1]} answered with a page, not a table")
@@ -250,7 +269,7 @@ def _post_csv(url: str, form: dict) -> list:
 
 def _fetch_pc_ratio() -> list:
     """Oldest first: [{date, putOi, callOi, ratio, volRatio}], ratio as a decimal."""
-    with urllib.request.urlopen(urllib.request.Request(OPENAPI + "PutCallRatio", headers={"User-Agent": "options-lab/1"}), timeout=TIMEOUT_S) as r:
+    with _urlopen(urllib.request.Request(OPENAPI + "PutCallRatio", headers={"User-Agent": "options-lab/1"}), timeout=TIMEOUT_S) as r:
         rows = json.loads(_decode(r.read()))
     out = []
     for r in rows:
@@ -725,7 +744,7 @@ MARGIN_ROWS = {"臺指選擇權風險保證金(A)值": "A", "臺指選擇權風�
 def _fetch_margin() -> dict:
     import re
     req = urllib.request.Request(MARGIN_URL, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=40) as r:
+    with _urlopen(req, timeout=40) as r:
         html = r.read().decode("utf-8", "replace")
     if "結算保證金" not in html or "原始保證金" not in html:
         raise ValueError("margin table not found")
@@ -768,7 +787,7 @@ def _fetch_fsp() -> list:
     """[{date: 'YYYY/MM/DD', month: '202610F5', fsp}] newest first, TXO only."""
     import re
     req = urllib.request.Request(FSP_URL, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=40) as r:
+    with _urlopen(req, timeout=40) as r:
         html = r.read().decode("utf-8", "replace")
     out = []
     # the page writes its rows in upper case (<TR> / <TD>)
@@ -881,7 +900,7 @@ def _fetch_weights() -> dict:
     and *_b); cells are read in document order and grouped per column."""
     import re
     req = urllib.request.Request(WEIGHTS_URL, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=40) as r:
+    with _urlopen(req, timeout=40) as r:
         html = r.read().decode("utf-8", "replace")
     m = re.search(r"資料日期[：:]\s*(\d{4}/\d{1,2}/\d{1,2})", html)
     cells = re.findall(r"<td[^>]*headers=\"?(rank|name|propertion|proportion)_([ab])\"?[^>]*>\s*([^<]*?)\s*</td>", html, flags=re.I | re.S)
@@ -919,7 +938,7 @@ def _fetch_twse_daily(days_back: int = 7) -> dict:
         # wait and retry the same date before giving up on it.
         for attempt in range(3):
             try:
-                with urllib.request.urlopen(req, timeout=40) as r:
+                with _urlopen(req, timeout=40) as r:
                     j = json.loads(r.read().decode("utf-8", "replace"))
                 break
             except Exception as e:  # network / JSON / 307
@@ -1005,7 +1024,7 @@ def _twse_json(url: str, params: dict, tries: int = 3):
     last_err = None
     for attempt in range(tries):
         try:
-            with urllib.request.urlopen(req, timeout=40) as r:
+            with _urlopen(req, timeout=40) as r:
                 return json.loads(r.read().decode("utf-8", "replace"))
         except Exception as e:  # 307 / network / JSON
             last_err = e
@@ -1078,7 +1097,7 @@ def _fetch_tick_zip(day: date) -> bytes | None:
     answers a redirect to an HTML page instead of the archive)."""
     url = TICK_ZIP_URL.format(y=day.year, m=f"{day.month:02d}", d=f"{day.day:02d}")
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=120) as r:
+    with _urlopen(req, timeout=120) as r:
         raw = r.read()
     return raw if raw[:2] == b"PK" else None
 
@@ -1237,7 +1256,7 @@ def _fetch_index() -> dict:
     body = json.dumps({"MarketType": "0", "SymbolType": "F", "KindID": "1", "CID": "TXF",
                        "ExpireMonth": "", "RowSize": "全部", "PageNo": "", "SortColumn": "", "AscDesc": "A"}).encode()
     req = urllib.request.Request(MIS_URL, data=body, headers={"User-Agent": "options-lab/1", "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=TIMEOUT_S) as r:
+    with _urlopen(req, timeout=TIMEOUT_S) as r:
         rows = (json.loads(_decode(r.read())).get("RtData") or {}).get("QuoteList") or []
     idx = next(r for r in rows if r.get("SymbolID") == "TXF-S")
     fut = next((r for r in rows if str(r.get("SymbolID", "")).endswith("-F")), None)
@@ -1325,7 +1344,7 @@ def _expiry_label(month: str, expiry: str) -> tuple:
 def _fetch_proxy_json(base: str, path: str):
     """One GET against a running server/main.py — for the blocks only its IB session can fill."""
     req = urllib.request.Request(base.rstrip("/") + path, headers={"Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=30) as r:
+    with _urlopen(req, timeout=30) as r:
         return json.loads(r.read().decode("utf-8"))
 
 
