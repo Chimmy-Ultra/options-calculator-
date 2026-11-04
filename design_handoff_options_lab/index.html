@@ -58,6 +58,8 @@
 <!-- Optional: TAIFEX previous-session snapshot (server/taifex.py --write). Missing file = harmless 404, app stays mock without a proxy. -->
 <script src="taifex-eod.js"></script>
 <script src="taifex-history.js"></script>
+<!-- Multi-year daily history for the 回測 workspace (server/backtest_data.py); missing = the workspace falls back to the snapshot. -->
+<script src="backtest-data.js"></script>
 <script src="ib-eod.js"></script>
 <script src="data-live.js"></script>
 <script type="text/babel" src="tweaks-panel.jsx"></script>
@@ -67,6 +69,7 @@
 <script type="text/babel" src="help.jsx"></script>
 <script type="text/babel" src="positioning.jsx"></script>
 <script type="text/babel" src="labs.jsx"></script>
+<script type="text/babel" src="backtest.jsx"></script>
 <script type="text/babel" src="obsidian3.jsx"></script>
 
 <script type="text/babel">
