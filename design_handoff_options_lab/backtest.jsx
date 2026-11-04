@@ -140,8 +140,11 @@ function btCond(calc, cond, i) {
   return false;
 }
 
-function btRun(D, st, slip = 1) {
-  const calc = btMakeCalc(D);
+// opt (used by the health check): calc = a btMakeCalc to reuse, range =
+// [i0, i1] to test over, randomEntry = { p, rng } replaces the entry rules
+// with a coin flip each flat day.
+function btRun(D, st, slip = 1, opt = {}) {
+  const calc = opt.calc || btMakeCalc(D);
   const { n, date, o, h, l, c } = calc;
   const ct = BT_CONTRACTS[st.contract] || BT_CONTRACTS.MTX, q = Math.max(1, st.qty || 1), dir = st.side === 'short' ? -1 : 1;
   const fee = (px) => (ct.commission + px * ct.mult * 0.00002 + slip * ct.mult) * q;
@@ -157,6 +160,8 @@ function btRun(D, st, slip = 1) {
   used.forEach((sr) => { const a = calc.get(sr); const k = a.findIndex((v) => v != null); if (k > i0) i0 = k; });
   if (st.from) { const k = date.findIndex((d) => d >= st.from); if (k > i0) i0 = k; }
   if (st.to) { for (let k = n - 1; k >= 0; k--) if (date[k] <= st.to) { i1 = k; break; } }
+  if (opt.range) [i0, i1] = opt.range;
+  const rnd = opt.randomEntry;
   const trades = [], equity = new Array(n).fill(null);
   let pos = null, realized = 0, pendingEntry = false, pendingExit = false;
   for (let i = i0; i <= i1; i++) {
@@ -172,7 +177,7 @@ function btRun(D, st, slip = 1) {
       else if (hold && i - pos.i + 1 >= hold) closeAt(i, c[i], `持有 ${hold} 天`);
       else if (exAny.length && exAny.some((x) => btCond(calc, x, i))) { if (i < i1) pendingExit = true; else closeAt(i, c[i], '出場條件'); }
     }
-    if (!pos && !pendingEntry && i < i1 && ent.length && ent.every((x) => btCond(calc, x, i))) pendingEntry = true;
+    if (!pos && !pendingEntry && i < i1 && (rnd ? rnd.rng() < rnd.p : ent.length && ent.every((x) => btCond(calc, x, i)))) pendingEntry = true;
     equity[i] = realized + (pos ? (c[i] - pos.px) * dir * ct.mult * q : 0);
   }
   if (pos) closeAt(i1, c[i1], '資料結束');
@@ -203,6 +208,105 @@ function btRun(D, st, slip = 1) {
     mdd, worstStreak: worst, exposure: (i1 - i0 + 1) ? inMkt / (i1 - i0 + 1) : 0, bh,
     from: date[i0], to: date[i1], days: i1 - i0 + 1,
   };
+}
+
+// ── 策略健檢: does the result survive the usual traps? Each check re-runs
+// the engine over the same window (opt.range) on the same series cache.
+function btRng(seed) {
+  let a = seed >>> 0;
+  return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+const BT_RANDOM_RUNS = 200;
+function btTweaks(st) {
+  // Each numeric parameter moved ±20%, one at a time.
+  const out = [], clone = () => JSON.parse(JSON.stringify(st));
+  [['entry', 'all', '進場'], ['exit', 'any', '出場']].forEach(([a, b, lab]) => ((st[a] && st[a][b]) || []).forEach((c, k) => {
+    if (typeof c.right === 'number' && c.right !== 0 && c.left.id !== 'weekday') {
+      [0.8, 1.2].forEach((f) => { const s2 = clone(); s2[a][b][k].right = +(c.right * f).toPrecision(4); out.push({ label: `${lab}門檻 ${btN(c.right, 2).replace(/\.00$/, '')}→${btN(s2[a][b][k].right, 2).replace(/\.00$/, '')}`, st: s2 }); });
+    }
+    ['left', 'right'].forEach((side) => {
+      const x = c[side];
+      if (!x || typeof x !== 'object' || !btDef(x.id).n) return;
+      const n0 = x.n || btDef(x.id).n;
+      [0.8, 1.2].forEach((f) => {
+        const n2 = Math.max(2, Math.round(n0 * f));
+        if (n2 === n0) return;
+        const s2 = clone(); s2[a][b][k][side].n = n2;
+        out.push({ label: `${btSeriesText(x)}→${n2} 日`, st: s2 });
+      });
+    });
+  }));
+  [['stopLoss', '停損', '點'], ['takeProfit', '停利', '點'], ['holdDays', '持有', '天']].forEach(([k, lab, u]) => {
+    const v = st.exit && st.exit[k];
+    if (!(v > 0)) return;
+    [0.8, 1.2].forEach((f) => {
+      const v2 = Math.max(1, Math.round(v * f));
+      if (v2 === v) return;
+      const s2 = clone(); s2.exit[k] = v2;
+      out.push({ label: `${lab} ${v}→${v2} ${u}`, st: s2 });
+    });
+  });
+  return out;
+}
+function btHealth(D, st, slip, R) {
+  if (!R || !R.n) return null;
+  const calc = btMakeCalc(D), range = [R.i0, R.i1];
+  const run = (s2, sl = slip, extra = {}) => btRun(D, s2, sl, { calc, range, ...extra });
+  const checks = [];
+  const add = (id, name, status, value, text) => checks.push({ id, name, status, value, text });
+  const profit = R.total > 0;
+  add('n', '交易次數', R.n >= 30 ? 'good' : R.n >= 10 ? 'warn' : 'bad', `${R.n} 筆`,
+    R.n >= 30 ? '樣本夠多，統計上比較可信' : '交易太少，結果很可能只是運氣；放寬條件或拉長期間');
+  const mid = R.date[Math.floor((R.i0 + R.i1) / 2)];
+  const h1 = R.trades.filter((t) => t.in < mid).reduce((a, t) => a + t.pnl, 0), h2 = R.trades.filter((t) => t.in >= mid).reduce((a, t) => a + t.pnl, 0);
+  add('half', '前後半段', h1 > 0 && h2 > 0 ? 'good' : h1 <= 0 && h2 <= 0 ? 'bad' : 'warn', `前 ${btNT(h1)} · 後 ${btNT(h2)}`,
+    h1 > 0 && h2 > 0 ? `以 ${mid} 切兩半，兩段都賺` : h1 <= 0 && h2 <= 0 ? '兩段都沒賺' : `以 ${mid} 切兩半，只有一段賺 —— 可能只適合某種行情`);
+  const years = [];
+  let prevEq = 0;
+  for (let i = R.i0; i <= R.i1; i++) {
+    const y = R.date[i].slice(0, 4), last = i === R.i1 || R.date[i + 1].slice(0, 4) !== y;
+    if (last) { const e = R.equity[i] || 0; years.push({ y, pnl: e - prevEq }); prevEq = e; }
+  }
+  const active = years.filter((x) => Math.abs(x.pnl) > 1), posY = active.filter((x) => x.pnl > 0).length;
+  const yr = active.length ? posY / active.length : 0;
+  add('years', '逐年表現', yr >= 2 / 3 ? 'good' : yr >= 0.5 ? 'warn' : 'bad', `${posY}/${active.length} 年賺錢`,
+    yr >= 2 / 3 ? '大部分年份都賺' : '賺錢的年份不夠多，績效集中在某幾年');
+  const tw = btTweaks(st).map((t) => ({ ...t, total: run(t.st).total }));
+  if (!tw.length) add('param', '參數敏感度', 'na', '—', '這個策略沒有可以微調的數字參數');
+  else if (!profit) add('param', '參數敏感度', 'na', '—', '原策略虧損，這項不用看');
+  else {
+    const ok = tw.filter((t) => t.total > 0).length, worst = tw.reduce((a, t) => (t.total < a.total ? t : a));
+    const f = ok / tw.length;
+    add('param', '參數敏感度', f >= 0.8 ? 'good' : f >= 0.5 ? 'warn' : 'bad', `${ok}/${tw.length} 組仍賺錢`,
+      `每個參數各調 ±20%；最差是「${worst.label}」${btNT(worst.total)}${f < 0.8 ? ' —— 參數稍微一動就變差，可能是調出來的' : ''}`);
+  }
+  const c3 = run(st, slip + 2);
+  add('cost', '成本加重', !profit ? 'na' : c3.total > 0 ? 'good' : 'warn', btNT(c3.total),
+    !profit ? '原策略虧損，這項不用看' : c3.total > 0 ? '每邊滑價再多 2 點仍然賺錢' : '每邊滑價多 2 點就虧 —— 實單很難賺到');
+  if (!profit) add('conc', '獲利集中度', 'na', '—', '原策略虧損，這項不用看');
+  else if (R.n <= 3) add('conc', '獲利集中度', 'warn', `${R.n} 筆`, '筆數太少，看不出集中度');
+  else {
+    const top = R.trades.slice().sort((a, b) => b.pnl - a.pnl).slice(0, 3).reduce((a, t) => a + t.pnl, 0);
+    add('conc', '獲利集中度', R.total - top > 0 ? 'good' : 'warn', `拿掉前 3 筆 ${btNT(R.total - top)}`,
+      R.total - top > 0 ? '拿掉最賺的 3 筆仍然賺錢' : '拿掉最賺的 3 筆就變虧 —— 獲利靠少數幾筆');
+  }
+  let rand = null;
+  if ((st.entry && st.entry.all || []).length) {
+    const flat = Math.max(1, R.days - R.trades.reduce((a, t) => a + t.days, 0));
+    const rng = btRng(20261105), p = Math.min(0.9, R.n / flat), totals = [];
+    for (let k = 0; k < BT_RANDOM_RUNS; k++) totals.push(run(st, slip, { randomEntry: { p, rng } }).total);
+    const beat = totals.filter((x) => x < R.total).length / totals.length;
+    rand = { totals, beat };
+    add('rand', '和隨機進場比', beat >= 0.9 ? 'good' : beat >= 0.7 ? 'warn' : 'bad', `贏過 ${Math.round(beat * 100)}%`,
+      `同方向、同出場規則，隨機挑進場日（交易次數相近）跑 ${BT_RANDOM_RUNS} 次${beat < 0.9 ? ' —— 進場條件的價值不明顯' : '，進場條件確實有加分'}`);
+  }
+  const ratio = R.mdd < 0 ? R.total / -R.mdd : (profit ? Infinity : 0);
+  add('dd', '報酬回撤比', ratio >= 3 ? 'good' : ratio >= 1 ? 'warn' : 'bad', !profit ? '虧損' : Number.isFinite(ratio) ? `${ratio.toFixed(1)} 倍` : '沒有回撤',
+    !profit ? '整段期間是虧的' : ratio >= 3 ? '總獲利是最大回撤的 3 倍以上' : '總獲利 ÷ 最大回撤偏低：要扛很深的回撤才拿得到這些獲利');
+  const scored = checks.filter((c) => c.status !== 'na');
+  const score = scored.reduce((a, c) => a + (c.status === 'good' ? 2 : c.status === 'warn' ? 1 : 0), 0) / (2 * scored.length || 1);
+  const grade = !profit || score < 0.45 ? ['D', '不建議'] : score >= 0.85 ? ['A', '穩健'] : score >= 0.65 ? ['B', '尚可'] : ['C', '有疑慮'];
+  return { checks, years, rand, score, grade };
 }
 
 // ── presets (examples to start from)
@@ -357,9 +461,8 @@ const BT_AI_SERIES_DOC = {
   retail: '小台散戶多空比（%；正數散戶偏多、負數偏空）',
   weekday: '星期幾（1 = 週一 … 5 = 週五）',
 };
-const BT_AI_SYSTEM = [
-  '你把台灣使用者用中文描述的台指期交易策略，轉成回測引擎看得懂的 JSON。只輸出符合 schema 的 JSON。',
-  '',
+// Engine rules and series, shared by both prompts below.
+const BT_AI_ENGINE = [
   '資料：台指期近月日盤日 K（TX）。所有條件在每個交易日收盤時判斷。',
   '',
   '引擎規則：',
@@ -380,12 +483,32 @@ const BT_AI_SYSTEM = [
   '- 停損停利給百分比：用使用者訊息裡的最近收盤價換成點數（四捨五入到 10 點）。給金額：小台 ÷ 50、大台 ÷ 200 換成點數。',
   '- 「黃金交叉」= 短均線 crossAbove 長均線；MACD 翻正 ≈ ema(12) crossAbove ema(26)。',
   '- 使用者說「很高、偏多、大增」但沒給數字時，參考訊息裡的資料範圍選一個合理門檻。',
+].join('\n');
+const BT_AI_SYSTEM = [
+  '你把台灣使用者用中文描述的台指期交易策略，轉成回測引擎看得懂的 JSON。只輸出符合 schema 的 JSON。',
+  '',
+  BT_AI_ENGINE,
   '',
   'notes：用繁體中文短句列出你做的每個假設或換算（例如「「散戶很偏多」設為 > 30%」）；沒有就空陣列。',
   'unsupported：描述裡引擎做不到、被你省略或近似的部分（例如「或」條件、分 K、KD、布林通道、選擇權、其他商品、加碼），一句一項；沒有就空陣列。',
   '如果整段描述都不是可以回測的台指期策略（例如在問問題、選擇權組合、個股），ok 填 false，把原因寫在 notes，其他欄位照 schema 隨便填合法值。否則 ok 填 true。',
   '如果使用者是在修改「目前的策略」（例如「停損改 200」「改成大台」），從目前的策略開始，只改他說的地方。',
   'name：10 個字以內的繁體中文策略名稱。',
+].join('\n');
+const BT_AI_REVIEW_SYSTEM = [
+  '你是嚴格但務實的台指期量化策略顧問。使用者會給你一個策略、它在歷史資料上的回測結果和健檢結果，你用繁體中文（台灣用語）回覆，只輸出符合 schema 的 JSON。',
+  '',
+  'summary：2–4 句白話，說這個策略在賭什麼、哪裡有效、最大的問題。',
+  'issues：最多 4 點，每點一句，具體指出問題並引用數字。',
+  'variants：最多 3 個改良版，strategy 用同一個格式。原則：',
+  '- 目標是更穩健（通過更多健檢、回撤更小、前後半段都賺、贏過隨機進場），不是把歷史績效調到最高。',
+  '- 每個改動要有交易邏輯上的理由，不要把門檻微調到剛好符合過去；門檻用整數或常見值。',
+  '- 至少一個版本比原版更簡單或條件更少。版本之間要有明顯差異（例如加趨勢濾網、改出場方式、換方向、換進場訊號）。',
+  '- 只能用下面引擎支援的序列和規則；保留原策略的 from / to、contract 和 qty。',
+  '- title：8 個字以內；why：一兩句說改了什麼、想改善哪一項健檢；strategy.name 和 title 一樣。',
+  '- 你看不到改良版的結果，網站會自動幫每個版本回測和健檢，所以不要預測績效數字。',
+  '',
+  BT_AI_ENGINE,
 ].join('\n');
 const btAiNullable = (t) => ({ anyOf: [{ type: t }, { type: 'null' }] });
 const BT_AI_SERIES_SCHEMA = {
@@ -398,44 +521,75 @@ const BT_AI_COND_SCHEMA = {
   properties: { left: BT_AI_SERIES_SCHEMA, op: { type: 'string', enum: BT_OPS.map((o) => o.id) }, right: { anyOf: [{ type: 'number' }, BT_AI_SERIES_SCHEMA] } },
   required: ['left', 'op', 'right'], additionalProperties: false,
 };
+const BT_AI_STRATEGY_PROPS = {
+  name: { type: 'string' },
+  side: { type: 'string', enum: ['long', 'short'] },
+  contract: { type: 'string', enum: Object.keys(BT_CONTRACTS) },
+  qty: { type: 'integer' },
+  entry: { type: 'object', properties: { all: { type: 'array', items: BT_AI_COND_SCHEMA } }, required: ['all'], additionalProperties: false },
+  exit: {
+    type: 'object',
+    properties: { holdDays: btAiNullable('integer'), stopLoss: btAiNullable('number'), takeProfit: btAiNullable('number'), any: { type: 'array', items: BT_AI_COND_SCHEMA } },
+    required: ['holdDays', 'stopLoss', 'takeProfit', 'any'], additionalProperties: false,
+  },
+  from: btAiNullable('string'),
+  to: btAiNullable('string'),
+};
 const BT_AI_SCHEMA = {
   type: 'object',
+  properties: { ok: { type: 'boolean' }, ...BT_AI_STRATEGY_PROPS, notes: { type: 'array', items: { type: 'string' } }, unsupported: { type: 'array', items: { type: 'string' } } },
+  required: ['ok', ...Object.keys(BT_AI_STRATEGY_PROPS), 'notes', 'unsupported'],
+  additionalProperties: false,
+};
+const BT_AI_REVIEW_SCHEMA = {
+  type: 'object',
   properties: {
-    ok: { type: 'boolean' },
-    name: { type: 'string' },
-    side: { type: 'string', enum: ['long', 'short'] },
-    contract: { type: 'string', enum: Object.keys(BT_CONTRACTS) },
-    qty: { type: 'integer' },
-    entry: { type: 'object', properties: { all: { type: 'array', items: BT_AI_COND_SCHEMA } }, required: ['all'], additionalProperties: false },
-    exit: {
+    summary: { type: 'string' },
+    issues: { type: 'array', items: { type: 'string' } },
+    variants: { type: 'array', items: {
       type: 'object',
-      properties: { holdDays: btAiNullable('integer'), stopLoss: btAiNullable('number'), takeProfit: btAiNullable('number'), any: { type: 'array', items: BT_AI_COND_SCHEMA } },
-      required: ['holdDays', 'stopLoss', 'takeProfit', 'any'], additionalProperties: false,
-    },
-    from: btAiNullable('string'),
-    to: btAiNullable('string'),
-    notes: { type: 'array', items: { type: 'string' } },
-    unsupported: { type: 'array', items: { type: 'string' } },
+      properties: { title: { type: 'string' }, why: { type: 'string' }, strategy: { type: 'object', properties: BT_AI_STRATEGY_PROPS, required: Object.keys(BT_AI_STRATEGY_PROPS), additionalProperties: false } },
+      required: ['title', 'why', 'strategy'], additionalProperties: false,
+    } },
   },
-  required: ['ok', 'name', 'side', 'contract', 'qty', 'entry', 'exit', 'from', 'to', 'notes', 'unsupported'],
+  required: ['summary', 'issues', 'variants'],
   additionalProperties: false,
 };
 
 // What the model sees besides the fixed instructions: the data it can test
 // against (so thresholds land inside real ranges) and the strategy on screen.
-function btAiUserMsg(text, cur, D) {
+const btAiStrip = ({ name, side, contract, qty, entry, exit, from, to }) => ({ name, side, contract, qty, entry, exit, from: from || null, to: to || null });
+function btAiDataLines(D) {
   const rng = (rows) => {
     const v = (rows || []).map((r) => r[1]).filter((x) => x != null);
     return v.length ? `${rows[0][0]} 起，最小 ${Math.min(...v)}、最大 ${Math.max(...v)}、最新 ${v[v.length - 1]}` : '沒有資料';
   };
   const last = D.bars[D.bars.length - 1];
-  const strip = ({ name, side, contract, qty, entry, exit, from, to }) => ({ name, side, contract, qty, entry, exit, from: from || null, to: to || null });
   return [
     `資料：日 K ${D.bars[0][0]} – ${last[0]}，最近收盤 ${last[4]} 點。`,
     `pc：${rng(D.pc)}。fx：${rng(D.fx)}。retail：${rng(D.retail)}。`,
-    `目前畫面上的策略：${JSON.stringify(strip(cur))}`,
+  ];
+}
+function btAiUserMsg(text, cur, D) {
+  return [
+    ...btAiDataLines(D),
+    `目前畫面上的策略：${JSON.stringify(btAiStrip(cur))}`,
     '',
     `使用者的描述：${text}`,
+  ].join('\n');
+}
+function btAiReviewMsg(st, R, H, D) {
+  const ct = BT_CONTRACTS[st.contract] || BT_CONTRACTS.MTX;
+  const mark = { good: '通過', warn: '注意', bad: '不及格', na: '不適用' };
+  return [
+    ...btAiDataLines(D),
+    `策略：${JSON.stringify(btAiStrip(st))}`,
+    `白話：${btStrategyText(st)}`,
+    `回測期間 ${R.from} – ${R.to}，${R.days} 個交易日，每口${ct.label}每點 NT$${ct.mult}，已扣手續費、期交稅、滑價。`,
+    `結果：總損益 ${btNT(R.total)}；交易 ${R.n} 筆；勝率 ${Math.round(R.winRate * 100)}%；平均賺 ${btNT(R.avgWin)}、平均賠 ${btNT(R.avgLoss)}；獲利因子 ${Number.isFinite(R.pf) ? R.pf.toFixed(2) : '∞'}；最大回撤 ${btNT(R.mdd)}；最長連賠 ${R.worstStreak} 筆；在場時間 ${Math.round(R.exposure * 100)}%；同期間同方向一直抱著 ${btNT(R.bh)}。`,
+    `逐年損益：${H.years.map((y) => `${y.y} ${btNT(y.pnl)}`).join('、')}`,
+    `健檢等級 ${H.grade[0]}（${H.grade[1]}）：`,
+    ...H.checks.map((c) => `- ${c.name}：${mark[c.status]} · ${c.value} · ${c.text}`),
   ].join('\n');
 }
 
@@ -473,7 +627,7 @@ function btAiNormalize(o) {
 }
 
 let btSdk = null;
-async function btAiParse(key, text, cur, D) {
+async function btAiCall(key, system, schema, content, maxTokens) {
   if (!btSdk) {
     if (!window.loadAnthropic) throw new Error('AI 元件載入器不在（請重新整理頁面）');
     try { btSdk = await window.loadAnthropic(); } catch (e) { throw new Error('AI 元件載入失敗：可能是網路擋住了 jsdelivr / esm.sh，換個網路再試'); }
@@ -484,11 +638,11 @@ async function btAiParse(key, text, cur, D) {
   try {
     res = await client.messages.create({
       model: BT_AI_MODEL,
-      max_tokens: 8000,
+      max_tokens: maxTokens,
       cache_control: { type: 'ephemeral' },
-      system: BT_AI_SYSTEM,
-      output_config: { format: { type: 'json_schema', schema: BT_AI_SCHEMA } },
-      messages: [{ role: 'user', content: btAiUserMsg(text, cur, D) }],
+      system,
+      output_config: { format: { type: 'json_schema', schema } },
+      messages: [{ role: 'user', content }],
     });
   } catch (e) {
     if (e instanceof SDK.AuthenticationError) throw new Error('金鑰不對或已停用。到 Claude Console 的 API Keys 重新建立一把再貼上。');
@@ -502,11 +656,23 @@ async function btAiParse(key, text, cur, D) {
   const u = res.usage || {};
   const cost = ((u.input_tokens || 0) * BT_AI_PRICE.in + (u.output_tokens || 0) * BT_AI_PRICE.out
     + (u.cache_creation_input_tokens || 0) * BT_AI_PRICE.cacheW + (u.cache_read_input_tokens || 0) * BT_AI_PRICE.cacheR) / 1e6;
-  if (res.stop_reason === 'refusal') throw new Error('AI 拒絕處理這段描述，換個說法再試。');
-  if (res.stop_reason === 'max_tokens') throw new Error('描述太長，AI 沒寫完。縮短一點再試。');
+  if (res.stop_reason === 'refusal') throw new Error('AI 拒絕處理這次的內容，換個說法再試。');
+  if (res.stop_reason === 'max_tokens') throw new Error('AI 的回答太長沒寫完，再試一次。');
   const block = res.content.find((b) => b.type === 'text');
   if (!block) throw new Error('AI 沒有回傳結果，再試一次。');
-  return { ...btAiNormalize(JSON.parse(block.text)), cost };
+  return { json: JSON.parse(block.text), cost };
+}
+async function btAiParse(key, text, cur, D) {
+  const { json, cost } = await btAiCall(key, BT_AI_SYSTEM, BT_AI_SCHEMA, btAiUserMsg(text, cur, D), 8000);
+  return { ...btAiNormalize(json), cost };
+}
+async function btAiReview(key, st, R, H, D) {
+  const { json, cost } = await btAiCall(key, BT_AI_REVIEW_SYSTEM, BT_AI_REVIEW_SCHEMA, btAiReviewMsg(st, R, H, D), 16000);
+  const variants = (json.variants || []).slice(0, 3).map((v) => {
+    const x = btAiNormalize({ ...v.strategy, ok: true });
+    return { title: String(v.title || '').slice(0, 16), why: v.why || '', st: { ...x.st, name: String(v.title || x.st.name).slice(0, 20) } };
+  }).filter((v) => v.st.entry.all.length);
+  return { summary: json.summary || '', issues: (json.issues || []).slice(0, 4), variants, cost };
 }
 
 const BT_AI_EXAMPLES = [
@@ -515,10 +681,8 @@ const BT_AI_EXAMPLES = [
   'RSI 跌破 25 就買進，RSI 回到 50 以上出場，停損 2%',
 ];
 
-function BtAsk({ st, D, onApply }) {
+function BtAsk({ st, D, onApply, aiKey: key, setAiKey: setKey, keyOpen, setKeyOpen }) {
   const [text, setText] = btS('');
-  const [key, setKey] = btS(btAiLoadKey);
-  const [keyOpen, setKeyOpen] = btS(false);
   const [draft, setDraft] = btS('');
   const [busy, setBusy] = btS(false);
   const [err, setErr] = btS('');
@@ -543,7 +707,7 @@ function BtAsk({ st, D, onApply }) {
   };
   const link = { background: 'none', border: 'none', padding: 0, color: 'var(--blue)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12 };
   return (
-    <div className="card" style={{ padding: '16px 18px', marginBottom: 14 }}>
+    <div id="bt-ask" className="card" style={{ padding: '16px 18px', marginBottom: 14 }}>
       <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 6 }}>✍️ 用中文描述你的策略<span style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginLeft: 8 }}>AI 會轉成下面的條件並直接回測</span></div>
       <div style={{ display: 'flex', gap: 10, alignItems: 'stretch' }}>
         <textarea rows={2} value={text} onChange={(e) => setText(e.target.value)}
@@ -591,12 +755,167 @@ function BtAsk({ st, D, onApply }) {
   );
 }
 
+// ── 策略健檢 card
+const BT_STATUS = {
+  good: { c: 'var(--blue)', s: '✓', t: '通過' },
+  warn: { c: BT_GOLD, s: '!', t: '注意' },
+  bad: { c: BT_UP, s: '✕', t: '不及格' },
+  na: { c: 'var(--muted)', s: '–', t: '不適用' },
+};
+const BT_GRADE_C = { A: 'var(--blue)', B: 'var(--blue)', C: BT_GOLD, D: BT_UP };
+function BtGrade({ H, size = 28 }) {
+  const c = BT_GRADE_C[H.grade[0]];
+  return <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 5, whiteSpace: 'nowrap' }}><b style={{ fontSize: size, fontWeight: 900, color: c, lineHeight: 1 }}>{H.grade[0]}</b><span style={{ fontSize: size > 20 ? 13 : 11.5, fontWeight: 700, color: c }}>{H.grade[1]}</span></span>;
+}
+// Where the strategy lands among the random-entry runs.
+function BtRandHist({ H, R, light }) {
+  const [ref, w] = btUseWidth(600);
+  const v = H.rand.totals, lo = Math.min(R.total, ...v), hi = Math.max(R.total, ...v), nb = 32;
+  const bins = new Array(nb).fill(0), bi = (x) => Math.min(nb - 1, Math.floor((x - lo) / ((hi - lo) || 1) * nb));
+  v.forEach((x) => { bins[bi(x)] += 1; });
+  const top = Math.max(...bins), Hh = 54, bw = w / nb, X = (x) => (x - lo) / ((hi - lo) || 1) * w;
+  const txt = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
+  const zx = lo < 0 && hi > 0 ? X(0) : null;
+  return (
+    <div ref={ref} style={{ marginTop: 12 }}>
+      <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 4 }}>隨機進場 {v.length} 次的總損益分佈 · <span style={{ color: 'var(--blue)', fontWeight: 700 }}>藍線是你的策略</span></div>
+      <svg width={w} height={Hh + 16} style={{ display: 'block', fontFamily: 'var(--font-mono)' }}>
+        {bins.map((n, k) => <rect key={k} x={k * bw + 1} y={Hh - (n / top) * Hh} width={Math.max(1, bw - 2)} height={(n / top) * Hh} fill={txt} opacity="0.45" />)}
+        {zx != null && <line x1={zx} x2={zx} y1={0} y2={Hh} stroke={txt} strokeDasharray="2 3" />}
+        <line x1={X(R.total)} x2={X(R.total)} y1={0} y2={Hh} stroke="var(--blue)" strokeWidth="2.5" />
+        <text x={2} y={Hh + 13} fontSize="10.5" fill={txt}>{btNT(lo)}</text>
+        {zx != null && <text x={zx} y={Hh + 13} fontSize="10.5" fill={txt} textAnchor="middle">0</text>}
+        <text x={w - 2} y={Hh + 13} fontSize="10.5" fill={txt} textAnchor="end">{btNT(hi)}</text>
+      </svg>
+    </div>
+  );
+}
+function BtHealthCard({ H, busy, light, R }) {
+  if (!H) return busy ? <div className="card" style={{ padding: '16px 18px', fontSize: 13, color: 'var(--muted)' }}>🩺 策略健檢中…</div> : null;
+  const cnt = (k) => H.checks.filter((c) => c.status === k).length;
+  return (
+    <div className="card" style={{ padding: '16px 18px', opacity: busy ? 0.6 : 1, transition: 'opacity .2s' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 15, fontWeight: 800 }}>🩺 策略健檢</div>
+        <span style={{ fontSize: 12, color: 'var(--muted)' }}>{H.checks.length} 項：通過 {cnt('good')} · 注意 {cnt('warn')} · 不及格 {cnt('bad')}{cnt('na') ? ` · 不適用 ${cnt('na')}` : ''}{busy ? ' · 更新中…' : ''}</span>
+        <span style={{ marginLeft: 'auto' }}><BtGrade H={H} /></span>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '22px 84px minmax(110px, max-content) minmax(0, 1fr)', columnGap: 10, rowGap: 0, alignItems: 'center', fontSize: 12.5 }}>
+        {H.checks.map((c) => {
+          const m = BT_STATUS[c.status];
+          const cell = { padding: '7px 0', borderBottom: '1px solid var(--border)' };
+          return [
+            <span key={`${c.id}i`} style={{ ...cell, display: 'flex' }}><b title={m.t} style={{ width: 18, height: 18, borderRadius: 9, background: m.c, color: '#fff', fontSize: 11, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{m.s}</b></span>,
+            <span key={`${c.id}n`} style={{ ...cell, fontWeight: 700 }}>{c.name}</span>,
+            <span key={`${c.id}v`} className="mono tnum" style={{ ...cell, whiteSpace: 'nowrap', color: m.c, fontWeight: 700 }}>{c.value}</span>,
+            <span key={`${c.id}t`} style={{ ...cell, color: 'var(--text2)' }}>{c.text}</span>,
+          ];
+        })}
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 12, alignItems: 'center', fontSize: 12 }}>
+        <span style={{ color: 'var(--text2)', marginRight: 2 }}>逐年損益</span>
+        {H.years.map((y) => <span key={y.y} className="mono tnum" style={{ padding: '3px 8px', borderRadius: 8, background: 'var(--panel2)', color: y.pnl > 0 ? BT_UP : y.pnl < 0 ? BT_DOWN : 'var(--muted)' }}>{y.y} {btNT(y.pnl)}</span>)}
+      </div>
+      {H.rand && <BtRandHist H={H} R={R} light={light} />}
+      <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 8, lineHeight: 1.6 }}>不偷看未來：收盤判斷、隔天開盤成交。健檢用的是同一段歷史，全部通過也不保證未來會賺。</div>
+    </div>
+  );
+}
+
+// ── AI 檢討與改良: Claude reads the result and the health check, proposes up
+// to three variants; each variant is backtested and checked here, so the
+// numbers on screen are the engine's, not the model's.
+function BtReview({ st, R, H, D, slip, aiKey, askKey, onApply }) {
+  const [busy, setBusy] = btS(false);
+  const [err, setErr] = btS('');
+  const [rv, setRv] = btS(null);
+  const run = async () => {
+    if (!aiKey) { askKey(); return; }
+    if (!H || busy) return;
+    setBusy(true); setErr('');
+    try {
+      const r = await btAiReview(aiKey, st, R, H, D);
+      const variants = r.variants.map((v) => { const R2 = btRun(D, v.st, slip); return { ...v, R: R2, H: R2.n ? btHealth(D, v.st, slip, R2) : null }; });
+      setRv({ ...r, variants, base: { st, R, H } });
+    } catch (e) { setErr(e.message || String(e)); }
+    setBusy(false);
+  };
+  const cur = JSON.stringify(btAiStrip(st));
+  const same = (x) => JSON.stringify(btAiStrip(x)) === cur;
+  const col = (v) => (v > 0 ? BT_UP : v < 0 ? BT_DOWN : 'var(--text)');
+  const link = { background: 'none', border: 'none', padding: 0, color: 'var(--blue)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12 };
+  const off = busy || !H;
+  return (
+    <div className="card" style={{ padding: '16px 18px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 15, fontWeight: 800 }}>🤖 AI 檢討與改良</div>
+        <span style={{ fontSize: 12, color: 'var(--muted)', flex: 1, minWidth: 200 }}>AI 讀完回測和健檢，指出問題並提出最多 3 個改良版；每個版本網站都會自動回測和健檢</span>
+        <button onClick={run} disabled={off}
+          style={{ border: 'none', borderRadius: 10, padding: '9px 16px', fontWeight: 800, fontSize: 13.5, fontFamily: 'inherit', cursor: off ? 'default' : 'pointer', background: off ? 'var(--chip)' : 'var(--blue)', color: off ? 'var(--muted)' : '#fff' }}>
+          {busy ? 'AI 思考中…（約半分鐘）' : rv ? '重新檢討目前的策略' : '請 AI 檢討並提出改良版'}
+        </button>
+      </div>
+      {!aiKey && <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 6 }}>需要 Claude API 金鑰 · <button style={link} onClick={askKey}>到最上面設定</button></div>}
+      {err && <div style={{ fontSize: 12.5, marginTop: 8, color: BT_UP }}>⚠️ {err}</div>}
+      {rv && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 13.5, lineHeight: 1.7 }}>{rv.summary}</div>
+          {rv.issues.length > 0 && <ul style={{ margin: '6px 0 0', paddingLeft: 20, fontSize: 12.5, lineHeight: 1.7, color: 'var(--text2)' }}>{rv.issues.map((x, k) => <li key={k}>{x}</li>)}</ul>}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 10, marginTop: 12 }}>
+            {rv.variants.map((v, k) => {
+              const on = same(v.st), d = v.R.total - rv.base.R.total;
+              const row = (lab, val, color) => <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '3px 0', borderBottom: '1px solid var(--border)' }}><span style={{ color: 'var(--text2)' }}>{lab}</span><span className="mono tnum" style={{ fontWeight: 700, color: color || 'var(--text)' }}>{val}</span></div>;
+              return (
+                <div key={k} style={{ padding: '12px 14px', borderRadius: 12, background: 'var(--panel2)', border: on ? '2px solid var(--blue)' : '2px solid transparent', display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12.5 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><b style={{ fontSize: 14 }}>{v.title}</b><span style={{ marginLeft: 'auto' }}>{v.H ? <BtGrade H={v.H} size={18} /> : null}</span></div>
+                  <div style={{ color: 'var(--text2)', lineHeight: 1.55 }}>{v.why}</div>
+                  <div style={{ color: 'var(--muted)', fontSize: 11.5, lineHeight: 1.5 }}>{btStrategyText(v.st)}</div>
+                  {v.R.n ? <div>
+                    {row('總損益', <>{btNT(v.R.total)} <span style={{ fontSize: 11, color: col(d) }}>（{d >= 0 ? '多' : '少'} {btNT(Math.abs(d)).replace(/^[+−]/, '')}）</span></>, col(v.R.total))}
+                    {row('交易次數', `${v.R.n} 筆`)}
+                    {row('勝率', `${Math.round(v.R.winRate * 100)}%`)}
+                    {row('獲利因子', Number.isFinite(v.R.pf) ? v.R.pf.toFixed(2) : '∞')}
+                    {row('最大回撤', btNT(v.R.mdd), BT_DOWN)}
+                  </div> : <div style={{ color: 'var(--muted)' }}>這個版本在回測期間一次都沒進場。</div>}
+                  <button onClick={() => onApply(v.st)} disabled={on}
+                    style={{ ...btInput, marginTop: 'auto', cursor: on ? 'default' : 'pointer', fontWeight: 700, textAlign: 'center', background: on ? 'var(--chip)' : 'var(--panel)', color: on ? 'var(--muted)' : 'var(--blue)' }}>
+                    {on ? '使用中' : '套用這個版本'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 10, lineHeight: 1.6 }}>
+            本次約 US${rv.cost.toFixed(3)} · 原版「{rv.base.st.name}」{btNT(rv.base.R.total)}、健檢 {rv.base.H.grade.join(' ')}
+            {!same(rv.base.st) && <> · <button style={link} onClick={() => onApply(rv.base.st)}>回到原版</button></>}
+            <br />改良版是看同一段歷史想出來的，挑版本時優先看健檢等級和前後半段，而不是總損益最高的那個。
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BacktestWorkspace({ P, light }) {
   const D = btM(() => btData(), []);
   const [st, setSt] = btS(() => JSON.parse(JSON.stringify(BT_PRESETS[0])));
   const [slip, setSlip] = btS(1);
   const [saved, setSaved] = btS(btLoadSaved);
   const R = btM(() => (D ? btRun(D, st, slip) : null), [D, st, slip]);
+  const [aiKey, setAiKey] = btS(btAiLoadKey);
+  const [keyOpen, setKeyOpen] = btS(false);
+  // The health check re-runs the engine a few hundred times — wait until the
+  // form stops changing, keep the last result on screen meanwhile.
+  const [H, setH] = btS(null);
+  const [hBusy, setHBusy] = btS(false);
+  btE(() => {
+    if (!D || !R) return undefined;
+    setHBusy(true);
+    const t = setTimeout(() => { setH(btHealth(D, st, slip, R)); setHBusy(false); }, 350);
+    return () => clearTimeout(t);
+  }, [D, R]);
+  const askKey = () => { setKeyOpen(true); const el = document.getElementById('bt-ask'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+  const apply = (x) => setSt(JSON.parse(JSON.stringify(x)));
   const set = (patch) => setSt((x) => ({ ...x, ...patch }));
   const setExit = (patch) => setSt((x) => ({ ...x, exit: { ...(x.exit || {}), ...patch } }));
   if (P.oiSource !== 'taifex') return <div className="card" style={{ padding: 20 }}>策略回測目前只支援台指期（台指選）。請在左上角切換商品。</div>;
@@ -611,7 +930,7 @@ function BacktestWorkspace({ P, light }) {
   const ct = BT_CONTRACTS[st.contract] || BT_CONTRACTS.MTX;
   return (
     <div style={{ maxWidth: 1400 }}>
-      <BtAsk st={st} D={D} onApply={(x) => setSt(JSON.parse(JSON.stringify(x)))} />
+      <BtAsk st={st} D={D} onApply={apply} aiKey={aiKey} setAiKey={setAiKey} keyOpen={keyOpen} setKeyOpen={setKeyOpen} />
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(420px, 520px) minmax(0, 1fr)', gap: 14, alignItems: 'start' }}>
         <div className="card" style={{ padding: '16px 18px' }}>
           <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 8 }}>⚙️ 策略設定</div>
@@ -666,6 +985,8 @@ function BacktestWorkspace({ P, light }) {
             <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 8 }}>📈 權益曲線</div>
             {R.n ? <BtEquityChart R={R} light={light} /> : <div style={{ fontSize: 13, color: 'var(--muted)' }}>這段期間條件一次都沒成立，沒有交易。試著放寬條件。</div>}
           </div>
+          {R.n > 0 && <BtHealthCard H={H} busy={hBusy} light={light} R={R} />}
+          {R.n > 0 && <BtReview st={st} R={R} H={hBusy ? null : H} D={D} slip={slip} aiKey={aiKey} askKey={askKey} onApply={apply} />}
           {R.n > 0 && (
             <div className="card" style={{ padding: '16px 18px' }}>
               <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 8 }}>🧾 交易明細<span style={{ fontSize: 12, fontWeight: 500, color: 'var(--muted)', marginLeft: 8 }}>最近 {Math.min(R.n, 40)} 筆</span></div>
@@ -692,4 +1013,4 @@ function BacktestWorkspace({ P, light }) {
   );
 }
 
-Object.assign(window, { BT_SERIES, BT_OPS, BT_PRESETS, btData, btRun, btStrategyText, BacktestWorkspace });
+Object.assign(window, { BT_SERIES, BT_OPS, BT_PRESETS, btData, btRun, btHealth, btStrategyText, BacktestWorkspace });
