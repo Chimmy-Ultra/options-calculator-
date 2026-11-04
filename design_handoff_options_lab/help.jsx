@@ -1,4 +1,4 @@
-// help.jsx — layered in-app help (⑧), all English, desktop only.
+// help.jsx — layered in-app help (⑧), Traditional Chinese, desktop only.
 //  ⑧a HelpTip  : a hover tooltip on individual metrics (the layer that matters most).
 //  ⑧b HelpDrawer: a per-workspace glossary / tutorial behind the top-bar "?" chip.
 // Copy lives in HELP_COPY so the tooltip and the drawer stay consistent.
@@ -6,106 +6,107 @@
 // scope, so we call React.useState / React.useRef inline to avoid clashing with
 // the aliases declared in the other .jsx files.
 
-// Plain-English copy for every metric. Concrete numbers beat definitions.
+// Copy for every metric, in Traditional Chinese (the owner's language,
+// 2026-11). Concrete numbers beat definitions.
 const HELP_COPY = {
-  delta:  { term: 'Delta (Δ)',  short: 'How much the position gains or loses per 1-point move in the underlying.', example: 'Δ +0.50 → ≈ +0.5 pt per +1 pt of the underlying' },
-  gamma:  { term: 'Gamma (Γ)',  short: 'How fast Delta itself changes as the underlying moves. High gamma = Delta shifts quickly.', example: 'Γ 0.010 → Delta moves 0.01 per 1-pt move' },
-  theta:  { term: 'Theta (Θ)',  short: 'Time decay: value lost per day if nothing else changes. Negative for buyers, positive for sellers.', example: 'Θ −1.2 → loses ≈ 1.2 pts of value each day' },
-  vega:   { term: 'Vega (V)',   short: 'Sensitivity to implied volatility: value change per 1 percentage-point change in IV.', example: 'V +2.0 → +2 pts if IV rises from 24% to 25%' },
-  rho:    { term: 'Rho (ρ)',    short: 'Sensitivity to interest rates: value change per 1% change in the risk-free rate.', example: 'ρ +0.3 → +0.3 pts if rates rise 1%' },
-  pop:    { term: 'Probability of profit', short: 'The model’s estimate of the chance the position finishes at or above break-even at expiry.', example: '77% → profitable in ~77% of simulated outcomes' },
-  maxpain:{ term: 'Max pain',   short: 'The settlement price at which the most options expire worthless — where option buyers, in aggregate, lose the most.' },
-  oi:     { term: 'Open interest', short: 'Contracts currently outstanding at that strike. Higher = more liquidity and standing interest.' },
-  vol:    { term: 'Volume',     short: 'Contracts traded so far in the session at that strike.' },
-  iv:     { term: 'Implied volatility', short: 'The volatility the market’s price implies for the underlying. Higher IV = pricier options.' },
-  hv:     { term: 'IV vs historical volatility', short: 'HV is how much the underlying actually moved — the annualized volatility of the last 20 daily returns. IV above HV means options price in more movement than has been happening (premium rich); IV below HV means premium is cheap.', example: 'IV 24% vs HV 18% → ×1.33, premium rich' },
-  dte:    { term: 'Days to expiry', short: 'Calendar days until the option expires. Less time left = faster time decay (theta).' },
-  breakeven: { term: 'Break-even', short: 'The underlying price(s) where the position’s P&L crosses zero at expiry.' },
-  maxprofit: { term: 'Max profit', short: 'Best P&L the position can reach at the front expiry, net of estimated fees.' },
-  maxloss:{ term: 'Max loss',   short: 'Worst P&L the position can reach at the front expiry, net of estimated fees.' },
-  theoprice: { term: 'Theoretical price', short: 'The model’s fair value for this contract given spot, strike, IV, days to expiry and rate.' },
-  pnlnow: { term: 'P&L now',    short: 'Your position’s current profit or loss at the selected time slice, net of estimated fees. Value shown as a magnitude — the color codes the sign.' },
-  pnlwhatif: { term: 'P&L what-if', short: 'Position P&L re-priced at the What-if spot / IV, net of estimated fees.' },
-  payoff: { term: 'Payoff',     short: 'P&L across a range of underlying prices. The shaded band is the ±1σ / ±2σ expected move implied by IV.' },
-  greeksprofile: { term: 'Greeks profile', short: 'How Δ Γ Θ V change as the underlying moves — read your risk away from the current spot.' },
-  pnldist:{ term: 'P&L distribution', short: 'Probability-weighted outcomes at expiry: red bars = profit, teal = loss.' },
-  pricer: { term: 'Option pricer', short: 'Fair value + Greeks for one strike. IV is pulled from the chain smile; spot and days come from the market — no manual entry.' },
-  ivsurface: { term: 'IV surface', short: 'Implied volatility across every strike and expiry. Skew / smile shows where the market prices more risk.' },
-  straddle: { term: 'ATM straddle (價平和)', short: 'ATM call premium + ATM put premium for the selected expiry. Adding the two cancels direction, so what is left is the move the market is pricing in until expiry, in index points. ATM ± this value is the expected range.', example: 'ATM 46,150 · call 131 + put 158 → 289 pts → band 45,861–46,439' },
-  resistance: { term: 'Resistance (壓力)', short: 'The strike with the largest call open interest. Read from the sellers’ side: call writers do not expect the index to close above it. The change vs the previous session shows whether the wall is still being built.' },
-  support: { term: 'Support (支撐)', short: 'The strike with the largest put open interest — put writers do not expect the index to close below it.' },
-  pcratio: { term: 'Put/Call OI ratio', short: 'Put open interest ÷ call open interest. The strip shows TAIFEX’s market-wide number for all TXO expiries with its 23-session trend; the OI table’s footer shows the same ratio for the selected expiry only. Above 1 = more put positions outstanding; below 1 = call-heavy.' },
-  oichg: { term: 'OI change', short: 'Open interest today minus the previous session. Red = positions added, teal = closed out. A growing wall matters more than a static one.' },
-  foreign: { term: '外資期貨淨部位 (foreign net futures position)', short: 'Foreign investors’ net open interest in TAIEX futures, summed across the large, mini and micro contracts in large-contract equivalents (TX + MTX/4 + TMF/20, the exchange’s own conversion). Negative = net short. Published by TAIFEX after the close.' },
-  gex: { term: 'Gamma exposure (GEX)', short: 'Dealer gamma per strike, the SqueezeMetrics / SpotGamma read: γ × open interest × contract multiplier × spot² × 1%, calls counted positive and puts negative on the convention that market makers are long the calls customers sold and short the puts customers bought. Positive total GEX → dealers hedge against the move (volatility damped); negative → their hedging chases it. Call Wall / Put Wall = the strike with the largest call / put gamma·OI; the zero-gamma level is where total GEX, re-priced across spots, crosses zero. One expiry at a time, previous-session OI.', example: 'ATM γ 0.0004 × OI 3,000 × 50 × 46,000² × 1% ≈ NT$12.7 億 per 1% move' },
-  maxpainlevel: { term: '最大痛苦點 (max pain)', short: 'The settlement price at which option buyers, in aggregate, collect the least: Σ call OI × max(0, S − K) + Σ put OI × max(0, K − S), minimised over the listed strikes.' },
-  expmove: { term: '預期波動 (expected move)', short: 'The ±1σ move the market prices in until the selected expiry: spot × ATM IV × √(days / 365), so about 68% of outcomes land inside the band. The ATM IV is the average of the ATM call and put IV from the chain. The straddle × 0.85 rule of thumb (tastytrade) is shown beside it for comparison.', example: '46,185 × 24.3% × √(3/365) ≈ ±1,017' },
-  pnlheat: { term: '損益表 (P&L by price × date)', short: 'The position’s profit or loss for a grid of underlying prices (rows, about 1% apart) and dates from today to the front expiry (columns), valued with the same model as the payoff chart at the workspace IV held constant. Red = profit, teal = loss; darker = larger. Gross of fees.' },
-  volcone: { term: '波動率錐 (volatility cone)', short: 'For 5 / 10 / 20 / 60-day windows, where realized volatility has ranged over the available daily history: min / max (dashed), 25–75th percentile band, median, and today’s value (gold dots). The dashed purple line is the current ATM implied volatility — above the band means options price in more movement than the index has usually delivered over that horizon.' },
-  keylevels: { term: '關鍵價位 (key levels with hit rates)', short: 'This site\'s own level set, each shown with how often the exchange\'s history actually reached it. 樞軸: the floor-trader pivots from the previous session\'s high / low / close (P = (H+L+C)/3, R1 = 2P−L, S1 = 2P−H, R2/S2 = P ± range, R3/S3 one range further — Person 2004). 前日高 / 低 / 收. 前日量價中心, 價值區 and 前日均價 come from the previous session\'s ticks (Market Profile: the most-traded price and the band holding 70% of the lots; VWAP). The hit rate is the share of past sessions whose high (for levels above) or low (below) reached the level recomputed from each session\'s predecessor — computed here from the loaded daily bars, not quoted from anyone.', example: '壓力一 47,123 · 54% → in 54% of the last 250 sessions the day\'s high reached that session\'s 壓力一' },
-  costline: { term: '成本線 / 成本價', short: '自由人\'s 成本線: (session high + session low) ÷ 2, rounded half up. It steps only when the session prints a new high or low, so it draws as a staircase; price above it means shorts are under water, below it longs are. This is his stated formula (his 主力成本線 post) and it reproduces three dated screenshots to the point. Before the open the previous session\'s high / low stand in.', example: '高 22,211 · 低 22,048 → (22,211 + 22,048) ÷ 2 = 22,129.5 → 22,130' },
-  intraday: { term: '當日走勢 / 多空差額', short: 'One-minute closes with the 成本線 staircase and the open line; below, 多空差額 = the running sum of each minute\'s 外盤 − 內盤 lots (his per-minute table adds up exactly this way), with the minute\'s net as bars. The 1/5/15/30/60 分 toggle re-aggregates the same ticks; the K-line tab\'s 日 / 週 / 月 comes from the daily bars. With a Shioaji session the exchange\'s own tick type decides 外盤 / 內盤; from TAIFEX\'s daily tick file (no bid / ask) the tick rule approximates it — an uptick counts as 外盤, a downtick as 內盤, unchanged inherits — and the header says so.' },
-  top20: { term: '權值股 TOP20', short: 'The twenty largest TAIEX constituents by index weight — TAIFEX publishes the constituent weight table once a month (資料日期 shown) — with the previous session’s close-to-close move from TWSE’s daily closing table. Read it the 多空指南針 way: how many of the heavyweights rose, and how much index weight is behind the move (台積電 alone is over 40%).' },
-  premarket: { term: '盤前脈絡 (the overseas read before the open)', short: 'What a Taiwan day trader checks before 08:45: the S&P 500 and Nasdaq-100 front-month futures, the Philadelphia Semiconductor index, VIX, TSMC\'s ADR (TSM) against 2330\'s last close, and USD/TWD — here the SGX USD/TWD future, quoted TWD per USD. Quotes come from the proxy\'s Interactive Brokers session, change against the prior close as IB reports it; without a market-data subscription IB serves them delayed or frozen, and the header says where and when they were taken. ADR 換算 = TSM × USD/TWD ÷ 5 (one ADR is five ordinary shares); 溢價 is that against 2330\'s last close — the overnight market\'s opinion of where 台積電 opens.', example: 'TSM 432.96 × 31.63 ÷ 5 = 2,739 vs 2330 收 2,410 → 溢價 +13.6%' },
-  twseflows: { term: '台股籌碼日報 (TWSE institutional flows and margin)', short: 'Two after-close tables from the stock exchange, previous session: 三大法人 net buy / sell by category — 外資及陸資, 投信, 自營商 (自行 / 避險) — in NT$, and the margin balances: 融資 (financed longs) and 融券 (borrowed shorts) in 張 with the change against the day before, plus the 融資 amount. A common read: heavy 外資 net selling while 融資 climbs means retail leverage is absorbing what foreigners sell.' },
-  theo: { term: '理論價 (theoretical price)', short: 'The product\'s own model — Black-76 on the underlying future for every product (TXO prices off the TX future) — priced at one reference volatility for the whole chain, next to the market (bid/ask mid, else last). 價平 IV: the reference is this expiry\'s ATM implied volatility, so the difference at each strike is its skew premium. 20日 HV: the reference is the underlying\'s 20-day realized volatility, so the difference is what the market charges over what the underlying has actually moved. + (gold) = market above the model, − (blue) = below.', example: 'ES 7,650 call · 價平 IV 15.2% → 理論價 71.5 · 市價 74.0 → +2.5' },
-  kzoom: { term: 'K 線縮放 (zoom and pan)', short: 'The wheel zooms the K-line about the cursor and dragging pans; the legend shows how many of the loaded bars are on screen and 重設 goes back to all of them. Moving averages and RSI are still computed over the whole series, so the lines stay correct at the edges of the window instead of starting late. The probability cone only draws when the view is at the newest bar. Switching product, period or session resets the view.' },
-  rangelevels: { term: '關卡價 (range targets)', short: 'Intraday targets in the 多空指南針 idiom: 一壘 / 二壘 / 三壘 / 全壘 / 場外 above today’s low and below today’s high. The distances are statistics of one calendar month of day-session ranges (high − low), every session from the same day last month through yesterday: 一壘 = the smallest range and 三壘 = the mean — his own names (最小振幅 / 平均振幅), both exact on every dated 自由人 screenshot; 二壘 = 30th percentile (his figure: 二壘 is reached on ~70% of days); 全壘 = mean + 1σ; 場外 = the largest range. 二壘 / 全壘 / 場外 are this site’s definition, not his formula. Before the session opens the previous session’s high / low stand in as the base.', example: 'month’s smallest range 170 · today’s high 22,211 → 一壘↓ 22,041' },
-  top10: { term: '十大交易人淨部位 (top-10 traders)', short: 'Net position (buy − sell) of the ten largest traders in the front-month TAIEX futures, from TAIFEX’s large-trader report. The institutional subset (特定法人) is in the data (/api/market → top10.specificNet).' },
+  delta:  { term: 'Delta (Δ)', short: '標的每漲 1 點，部位大約賺賠幾點。', example: 'Δ +0.50 → 標的 +1 點，部位約 +0.5 點' },
+  gamma:  { term: 'Gamma (Γ)', short: 'Delta 本身變化的速度。Gamma 高 = 價格一動，Delta 就變很快。', example: 'Γ 0.010 → 標的每動 1 點，Delta 變 0.01' },
+  theta:  { term: 'Theta (Θ)', short: '時間價值：其他都不變時，每過一天部位少（或多）多少。買方為負、賣方為正。', example: 'Θ −1.2 → 每天約少 1.2 點價值' },
+  vega:   { term: 'Vega (V)', short: '隱含波動率每變 1 個百分點，部位價值變多少。', example: 'V +2.0 → IV 從 24% 升到 25%，部位 +2 點' },
+  rho:    { term: 'Rho (ρ)', short: '利率每變 1%，部位價值變多少（影響很小）。', example: 'ρ +0.3 → 利率升 1%，部位 +0.3 點' },
+  pop:    { term: '獲利機率', short: '模型估計到期時部位落在損益兩平以上的機率。', example: '77% → 約 77% 的情境會賺錢' },
+  maxpain:{ term: '最大痛苦點', short: '結算在這個價格時，選擇權買方整體賠最多（最多合約歸零）。' },
+  oi:     { term: '未平倉量', short: '這個履約價目前還沒平倉的口數。越多 = 越多人在這裡押注。' },
+  vol:    { term: '成交量', short: '這個履約價今天已經成交的口數。' },
+  iv:     { term: '隱含波動率 (IV)', short: '從權利金反推出來、市場預期的波動程度。IV 越高，選擇權越貴。' },
+  hv:     { term: 'IV 對 歷史波動率', short: 'HV = 標的過去 20 天實際波動（年化）。IV 高於 HV：選擇權比實際波動貴（適合賣方）；低於 HV：便宜（適合買方）。', example: 'IV 24% · HV 18% → ×1.33，權利金偏貴' },
+  dte:    { term: '剩餘天數', short: '距離到期還有幾天。越接近到期，時間價值流失越快。' },
+  breakeven: { term: '損益兩平', short: '到期時部位剛好不賺不賠的標的價格。' },
+  maxprofit: { term: '最大獲利', short: '部位在最近到期日能達到的最好結果（已扣估計手續費）。' },
+  maxloss:{ term: '最大虧損', short: '部位在最近到期日最壞的結果（已扣估計手續費）。' },
+  theoprice: { term: '理論價', short: '依現價、履約價、IV、剩餘天數算出來的合理價格。' },
+  pnlnow: { term: '目前損益', short: '依選定時間點重新估值的部位損益，已扣估計手續費。' },
+  pnlwhatif: { term: '模擬損益', short: '用右下角「模擬情境」的價格和 IV 重新估值的損益。' },
+  payoff: { term: '到期損益圖', short: '不同標的價格下的損益。紫色區域是 IV 推算的 ±1σ / ±2σ 預期波動範圍。' },
+  greeksprofile: { term: '希臘值變化', short: '標的價格移動時，Δ Γ Θ V 怎麼跟著變 —— 看離現價遠的地方風險有多大。' },
+  pnldist:{ term: '損益分布', short: '依機率加權的到期結果：紅色 = 獲利、綠色 = 虧損。' },
+  pricer: { term: '理論價試算', short: '單一履約價的合理價格和希臘值。IV 取自報價表，現價和天數取自市場。' },
+  ivsurface: { term: 'IV 曲面', short: '每個履約價、每個到期日的隱含波動率。偏斜（skew）顯示市場在哪一側定價更多風險。' },
+  straddle: { term: '價平和', short: '價平買權 + 價平賣權的權利金。兩者相加抵銷方向，剩下的就是市場預期到結算前會動幾點；價平 ± 價平和 = 預期區間。', example: '價平 46,150 · 買權 131 + 賣權 158 = 289 點 → 45,861–46,439' },
+  resistance: { term: '壓力（Call 未平倉最大）', short: '買權未平倉最多的履約價。賣出買權的人不認為會漲過這裡；和前一天比的增減，看這道牆還在不在加高。' },
+  support: { term: '支撐（Put 未平倉最大）', short: '賣權未平倉最多的履約價。賣出賣權的人不認為會跌破這裡。' },
+  pcratio: { term: 'P/C 未平倉比', short: '賣權未平倉 ÷ 買權未平倉（期交所全市場、所有到期日）。大於 1 = 賣權較多；小於 1 = 買權較多。' },
+  oichg: { term: '未平倉增減', short: '今天的未平倉減前一交易日。紅 = 新增部位、綠 = 平倉。正在變厚的牆比不動的牆重要。' },
+  foreign: { term: '外資期貨淨部位', short: '外資在台指期（大台 + 小台÷4 + 微台÷20，換算成大台口數）的多單減空單。負數 = 淨空單。期交所收盤後公布。' },
+  gex: { term: 'Gamma 曝險 (GEX)', short: '造市商在每個履約價的 Gamma：γ × 未平倉 × 乘數 × 現價² × 1%，買權算正、賣權算負。總 GEX 為正：造市商避險會壓抑波動；為負：避險會追價、放大波動。零 Gamma = 總 GEX 由正轉負的價位。', example: '價平 γ 0.0004 × 3,000 口 × 50 × 46,000² × 1% ≈ 每 1% 波動 12.7 億' },
+  maxpainlevel: { term: '最大痛苦點', short: '讓選擇權買方整體拿回最少錢的結算價：Σ 買權未平倉 × max(0, S−K) + Σ 賣權未平倉 × max(0, K−S) 最小的那個履約價。' },
+  expmove: { term: '預期波動', short: '市場預期到結算前的 ±1σ 波動：現價 × 價平 IV × √(天數 / 365)，大約 68% 的結果落在區間內。', example: '46,185 × 24.3% × √(3/365) ≈ ±1,017' },
+  pnlheat: { term: '損益表（價格 × 日期）', short: '每一列是一個標的價格（約間隔 1%），每一欄是一個日期（今天到最近到期日），格子是那天那個價格的部位損益。紅 = 賺、綠 = 賠，顏色越深金額越大。未扣手續費。' },
+  volcone: { term: '波動率錐', short: '5 / 10 / 20 / 60 天的歷史實際波動範圍：最小 / 最大（虛線）、25–75% 區間、中位數，以及今天的值（金點）。紫色虛線是目前價平 IV —— 高於區間代表選擇權比平常貴。' },
+  keylevels: { term: '關鍵價位（歷史觸及率）', short: '本站自己的價位組，每個附上歷史上真的被碰到的比例。樞軸用前一交易日高低收：P = (高+低+收)/3、R1 = 2P−低、S1 = 2P−高、R2/S2 = P ± 振幅。觸及率 = 過去每個交易日，隔天的高（上方價位）或低（下方價位）有碰到的比例。', example: '壓力一 47,123 · 54% → 過去 250 天裡，有 54% 的日子最高價碰到當天的壓力一' },
+  costline: { term: '成本線', short: '（當日最高 + 當日最低）÷ 2，四捨五入。只有創新高或新低時才會移動，所以畫出來像樓梯。價格在上方 = 空方被套；在下方 = 多方被套。開盤前用前一交易日的高低。', example: '高 22,211 · 低 22,048 → 22,130' },
+  intraday: { term: '當日走勢 / 多空差額', short: '每分鐘收盤價加上成本線；下方的多空差額 = 每分鐘外盤口數 − 內盤口數的累計。接永豐即時時用交易所的內外盤標記；用期交所逐筆檔時以價格漲跌近似（上漲算外盤、下跌算內盤）。' },
+  top20: { term: '權值股 TOP20', short: '加權指數權重最大的 20 檔股票（期交所每月公布權重），以及前一交易日的漲跌。看有幾檔大型股在漲、背後有多少權重（台積電一檔就超過 40%）。' },
+  premarket: { term: '盤前脈絡', short: '08:45 開盤前要看的海外行情：美股期指、費半、VIX、台積電 ADR 換算價與溢價、美元兌台幣。ADR 換算 = TSM × 匯率 ÷ 5。需要本機 IB 連線。', example: 'TSM 432.96 × 31.63 ÷ 5 = 2,739，對 2330 收盤 2,410 → 溢價 +13.6%' },
+  twseflows: { term: '台股籌碼日報', short: '證交所收盤後的兩張表：三大法人買賣超（外資、投信、自營商，元），以及融資融券餘額與增減。常見解讀：外資大賣而融資增加 = 散戶槓桿在接外資的賣壓。' },
+  theo: { term: '理論價', short: '用 Black-76（以期貨為標的）在同一個波動率下算出的價格，旁邊是市價。選「價平 IV」時差額代表偏斜溢價；選「20日 HV」時差額代表市場比實際波動多收了多少。+ = 市價高於模型、− = 低於模型。' },
+  kzoom: { term: 'K 線縮放', short: '滾輪以游標為中心縮放、拖曳平移；「重設」回到預設範圍。均線和 RSI 一律用整段資料計算，畫面邊緣也正確。' },
+  rangelevels: { term: '關卡價（一壘到場外）', short: '當日目標價：以近一個月日盤振幅計算，從今日低點往上、今日高點往下。一壘 = 最小振幅、二壘 = 30 百分位、三壘 = 平均振幅、全壘 = 平均 + 1σ、場外 = 最大振幅。開盤前用前一交易日的高低。', example: '月最小振幅 170 · 今日高 22,211 → 下方一壘 22,041' },
+  top10: { term: '十大交易人淨部位', short: '台指期近月前十大交易人的多單減空單（期交所大額交易人報表）。' },
 };
 
 // Drawer sections. `tabs` lists the workspaces a section is relevant to; on open
 // the drawer scrolls to the first section matching the current workspace.
 const HELP_SECTIONS = [
-  { id: 'levels', tabs: ['levels'], title: 'Levels — the day-trading read', paras: [
-    'One price ladder, spot in the middle. Above it: the resistance wall (strike with the largest call OI) and ATM + straddle; below it: ATM − straddle and the support wall (largest put OI). Each row shows its distance from spot.',
-    'ATM straddle (價平和) = ATM call + ATM put for the selected expiry. It is the move the market prices in until expiry; ATM ± straddle is the expected range. It decays every session — a straddle that is not shrinking (or is growing) means expected volatility is rising. When previous-session settlement prices are available, the tile shows the change against them.',
-    'Open interest is published by TAIFEX once a day after the close, so the walls are the previous session’s numbers — the way day traders use them. The change column (+/−) shows whether a wall is being built or unwound. Without the proxy, the walls come from mock data and are labeled MOCK.',
-    'The same levels are drawn on the K-line as dashed lines with price tags on the right axis. Switch expiry in the strip to read weekly vs monthly walls.',
-    'Also on the ladder: 最大痛苦點 (max pain — the settlement price that pays option buyers the least), the Call / Put Gamma walls and the zero-gamma level from the Gamma exposure panel, and a 預期波動 tile with the ±1σ move implied by the ATM IV until expiry.',
-    'Gamma 曝險 (bottom right): dealer gamma exposure per strike in the SpotGamma idiom — γ × OI × multiplier × spot² × 1%, calls positive and puts negative. Above the zero-gamma level dealers’ hedging damps moves; below it their hedging chases them. Previous-session OI, one expiry at a time.',
-    '關卡價 (below the ladder): five range targets each way, in the 多空指南針 baseball idiom. Distances come from one calendar month of day-session ranges — 一壘 is the smallest and 三壘 the mean (the two rules verified exactly against dated screenshots), 二壘 the 30th percentile, 全壘 mean + 1σ, 場外 the largest. Above = today’s low + distance, below = today’s high − distance; the 距一壘 tile shows the nearer unreached 一壘. Only the two 一壘 lines go on the K-line.',
+  { id: 'levels', tabs: ['levels'], title: '關卡頁 · 當沖怎麼看', paras: [
+    '左邊「今日關鍵價位」把今天要注意的價位由高到低排好，現價夾在中間，每個價位右邊是離現價幾點（紅 = 上方壓力、綠 = 下方支撐）。',
+    '包含：壓力 / 支撐（買權 / 賣權未平倉最大的履約價）、最大痛苦點、成本線，以及樞軸 P、R1、R2、S1、S2（用前一交易日的高、低、收算出）。',
+    '中間的走勢圖可切「當日」1 / 5 / 15 / 30 / 60 分 K（日盤或全日盤），或日 K、週 K、月 K；P、R1、R2、S1、S2 直接畫在當日和日 K 上。',
+    '右邊四張卡：外資期貨淨部位、P/C 未平倉比、十大交易人、散戶多空比。往下捲是「籌碼總覽」：外資、投信、自營商、大額交易人、散戶各自偏多還是偏空；圓環顏色：深紅 = 買權買方、淺紅 = 買權賣方、深綠 = 賣權買方、淺綠 = 賣權賣方。',
+    '籌碼和未平倉都是期交所收盤後公布的「前一交易日」資料，每個交易日約 16:30 更新。',
+    '最下面「更多分析」是其他圖表（各履約價未平倉、Gamma 曝險、關卡價、歷史觸及率…），按右上「調整版面」可以拖曳、縮放。',
   ] },
-  { id: 'chain', tabs: ['chain'], title: 'Option chain', paras: [
-    'Calls are on the left (red), puts on the right (teal) — Taiwan T-quote colors, used app-wide.',
-    'Columns: OI = open interest, VOL = volume, Δ = delta, IV = implied volatility, BID/ASK = live quotes.',
-    'The blue line and pill mark the current underlying (spot); ATM is the nearest strike.',
-    'Click any quote to add it as a leg, then choose BUY or SELL. Your open legs show BUY / SELL badges on their strikes.',
+  { id: 'chart', tabs: ['chart'], title: 'K 線頁', paras: [
+    '和關卡頁同一張圖的放大版，多了 RSI。「當日」= 最近一個交易日的分 K（接永豐即時時是今天的），全日盤 = 前一晚 15:00 夜盤開始一直到日盤收盤。',
+    '日 K 上會畫機率錐：從最新收盤往右，±1σ / ±2σ 是 IV 推算的到期前波動範圍。',
   ] },
-  { id: 'surface', tabs: ['lab'], title: 'Lab — 3D P&L surface', paras: [
-    'The surface is your position’s P&L. Horizontal axis = underlying price; depth axis = days passing (front edge = today, back edge = expiry); height and color = profit (gold) or loss (blue).',
-    'Hover to read exact numbers. Drag to orbit, scroll to zoom. It stays where you leave it.',
+  { id: 'chain', tabs: ['chain'], title: '報價表', paras: [
+    '左邊買權（紅）、右邊賣權（綠），中間是履約價。欄位：未平倉、量、Δ、IV、買價 / 賣價、理論價和差額。',
+    '點任一個報價就能加入部位，再選買或賣。',
   ] },
-  { id: 'payoff', tabs: ['calc', 'chain'], title: 'Payoff chart', paras: [
-    'The solid line is P&L across underlying prices at the front expiry (the earliest-expiring leg). Drag the time slice to compare today vs expiry.',
-    'Purple markers are break-evens. The shaded cone is the ±1σ / ±2σ expected move implied by current IV.',
+  { id: 'surface', tabs: ['lab'], title: '實驗室 · 3D 損益曲面', paras: [
+    '橫軸 = 標的價格、縱深 = 時間（前緣今天、後緣到期）、高度和顏色 = 損益（金 = 賺、藍 = 賠）。',
+    '游標移上去看數字；拖曳旋轉、滾輪縮放。',
   ] },
-  { id: 'greeks', tabs: ['calc', 'chain'], title: 'The Greeks', paras: [
-    'Δ Delta — value change per 1-pt move in the underlying.',
-    'Γ Gamma — how fast Delta itself changes.',
-    'Θ Theta — value lost per day (time decay).',
-    'V Vega — value change per 1% change in implied volatility.',
-    'ρ Rho — value change per 1% change in interest rates.',
+  { id: 'payoff', tabs: ['calc', 'chain'], title: '到期損益圖', paras: [
+    '實線是最近到期日時，不同標的價格下的損益。拖曳下方時間軸可以比較今天和到期。',
+    '紫色標記是損益兩平點；陰影是 IV 推算的 ±1σ / ±2σ 預期波動。',
   ] },
-  { id: 'dist', tabs: ['calc', 'chain'], title: 'P&L distribution & POP', paras: [
-    'The histogram weights each outcome by its probability at expiry (lognormal). Red bars = profit, teal = loss.',
-    'POP (probability of profit) is the total chance of finishing at or above break-even.',
+  { id: 'greeks', tabs: ['calc', 'chain'], title: '希臘值', paras: [
+    'Δ Delta：標的每動 1 點，部位變多少。',
+    'Γ Gamma：Delta 變化的速度。',
+    'Θ Theta：每天流失的時間價值。',
+    'V Vega：IV 每變 1%，部位變多少。',
+    'ρ Rho：利率每變 1%，部位變多少。',
   ] },
-  { id: 'futures', tabs: ['calc', 'chain'], title: 'Futures legs', paras: [
-    '＋ 期貨 adds a future at the current underlying price; the price column is its entry price and the type button switches contract (TXO: 大台 ×200, 小台 ×50, 微台 ×10 NT$ per point). A future has delta 1 per point value and no gamma, theta or vega, so it combines with options into covered calls, protective puts and collars.',
-    'Fees for a future use the same commission plus Taiwan’s 0.002% futures tax on contract value. A position that keeps gaining (or losing) as the underlying rises shows 無上限 for its max profit (or loss).',
+  { id: 'dist', tabs: ['calc', 'chain'], title: '損益分布與獲利機率', paras: [
+    '依到期時的機率（對數常態）加權每個結果。紅 = 獲利、綠 = 虧損。',
+    '獲利機率 = 到期時落在損益兩平以上的總機率。',
   ] },
-  { id: 'whatif', tabs: ['calc', 'chain', 'chart', 'lab'], title: 'What-if rail', paras: [
-    'The collapsible rail at the bottom-right re-prices everything at a hypothetical spot and IV without touching your real position — a quick stress test. Click it to expand.',
+  { id: 'futures', tabs: ['calc', 'chain'], title: '期貨部位', paras: [
+    '「＋ 期貨」以現價加入一口期貨；價格欄是進場價，類型按鈕可切換契約（台指：大台 每點 200 元、小台 50 元、微台 10 元）。期貨 Delta 固定、沒有 Gamma / Theta / Vega，可以和選擇權組成掩護性買權、保護性賣權、領口。',
+    '期貨手續費一樣算佣金，加上期交稅（契約價值 0.002%）。標的一直漲（或跌）就一直賺（或賠）的部位，最大獲利（或虧損）顯示「無上限」。',
   ] },
-  { id: 'fees', tabs: ['calc', 'chain'], title: 'Fees', paras: [
-    'The P&L cards are shown net of an estimated round-trip commission + tax. The numbers are broker-dependent and can be tuned per product.',
+  { id: 'whatif', tabs: ['calc', 'chain', 'chart', 'lab', 'levels'], title: '模擬情境', paras: [
+    '右下角的「模擬情境」可以把現價和 IV 改成假設值，全站跟著重算，不會動到你的真實部位 —— 快速壓力測試。點一下展開。',
   ] },
-  { id: 'iv', tabs: ['lab'], title: 'Lab — IV surface', paras: [
-    'Implied volatility across strike (X axis) and expiry (depth), built from the chain’s per-strike IVs. Grain options skew to calls (upside / drought risk); index options like TXO skew to puts (downside hedging).',
-    'Drag to orbit and scroll to zoom, or switch to the HEATMAP view for a flat grid.',
-    'IV vs HV compares implied volatility with how much the underlying actually moved over the last 20 days. Above ×1 the market prices more movement than realized (premium rich — favors sellers); below ×1, premium is cheap (favors buyers).',
-    'Term structure lists the at-the-money IV per expiry; Skew · 25Δ is the IV gap between the 25-delta put and call — positive means downside protection costs more.',
+  { id: 'fees', tabs: ['calc', 'chain'], title: '手續費', paras: [
+    '損益卡片已扣估計的來回佣金和交易稅。實際依券商而定，各商品可分別設定。',
+  ] },
+  { id: 'iv', tabs: ['lab'], title: '實驗室 · IV 曲面', paras: [
+    '每個履約價（橫軸）和到期日（縱深）的隱含波動率。穀物選擇權偏向買權（怕乾旱上漲）；台指這類指數選擇權偏向賣權（避險買下跌保護）。',
+    'IV 對 HV：高於 ×1 代表選擇權比實際波動貴（利於賣方）；低於 ×1 代表便宜（利於買方）。',
+    '期限結構列出每個到期日的價平 IV；Skew · 25Δ 是 25 Delta 賣權和買權的 IV 差，正值代表下跌保護比較貴。',
   ] },
 ];
 
@@ -166,33 +167,31 @@ function HelpDrawer({ open, onClose, workspace }) {
   const dark = !document.body.classList.contains('light');
   return (
     <div style={{
-      position: 'fixed', right: 24, top: 110, bottom: 20, width: 'min(320px, calc(100vw - 48px))', zIndex: 55,
+      position: 'fixed', right: 18, top: 90, bottom: 18, width: 'min(360px, calc(100vw - 48px))', zIndex: 55,
       borderRadius: 16, overflow: 'hidden', display: 'flex', flexDirection: 'column',
-      background: dark ? 'linear-gradient(155deg, rgba(80,90,115,0.55), rgba(30,36,50,0.55))' : 'rgba(255,255,255,0.85)',
-      border: `1px solid ${dark ? 'rgba(255,255,255,0.14)' : 'rgba(25,40,70,0.14)'}`,
-      boxShadow: '0 28px 64px -24px rgba(0,0,0,0.7)', color: dark ? '#e8eaef' : '#1c2433',
-      backdropFilter: 'blur(36px) saturate(160%)', WebkitBackdropFilter: 'blur(36px) saturate(160%)',
+      background: 'var(--panel)', border: '1px solid var(--border)',
+      boxShadow: '0 24px 60px -20px rgba(0,0,0,0.45)', color: 'var(--text)',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderBottom: `1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(25,40,70,0.08)'}` }}>
-        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', opacity: 0.7 }}>How to read this</span>
-        <button onClick={onClose} title="close (Esc)" style={{ width: 24, height: 24, borderRadius: 12, border: `1px solid ${dark ? 'rgba(255,255,255,0.14)' : 'rgba(25,40,70,0.14)'}`, background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 13, lineHeight: 1, fontFamily: 'inherit' }}>×</button>
+        <span style={{ fontSize: 13, fontWeight: 700, opacity: 0.8 }}>怎麼看這些數字</span>
+        <button onClick={onClose} title="關閉（Esc）" style={{ width: 24, height: 24, borderRadius: 12, border: `1px solid ${dark ? 'rgba(255,255,255,0.14)' : 'rgba(25,40,70,0.14)'}`, background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 13, lineHeight: 1, fontFamily: 'inherit' }}>×</button>
       </div>
       <div ref={bodyRef} style={{ overflowY: 'auto', padding: '4px 16px 18px' }}>
         {HELP_SECTIONS.map((s) => {
           const active = s.tabs.includes(workspace);
           return (
             <div key={s.id} id={`help-${s.id}`} style={{ padding: '14px 0', borderBottom: `1px solid ${dark ? 'rgba(255,255,255,0.06)' : 'rgba(25,40,70,0.06)'}` }}>
-              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                 {s.title}
-                {active && <span style={{ fontSize: 8, fontWeight: 700, padding: '2px 5px', borderRadius: 4, background: 'oklch(0.66 0.16 250)', color: '#fff', letterSpacing: 0.4 }}>THIS TAB</span>}
+                {active && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 6, background: 'var(--blue)', color: '#fff' }}>本頁</span>}
               </div>
               {s.paras.map((para, i) => (
-                <div key={i} style={{ fontSize: 11.5, lineHeight: 1.6, opacity: 0.82, marginBottom: 6 }}>{para}</div>
+                <div key={i} style={{ fontSize: 12.5, lineHeight: 1.7, opacity: 0.85, marginBottom: 7 }}>{para}</div>
               ))}
             </div>
           );
         })}
-        <div style={{ fontSize: 10, opacity: 0.45, paddingTop: 12 }}>Tip: hover any dotted-underlined label for a quick definition.</div>
+        <div style={{ fontSize: 10, opacity: 0.45, paddingTop: 12 }}>小技巧：游標移到有虛線底線的標題上，會跳出簡短說明。</div>
       </div>
     </div>
   );
