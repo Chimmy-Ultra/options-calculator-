@@ -149,7 +149,13 @@ function btRun(D, st, slip = 1) {
   const sl = st.exit && st.exit.stopLoss > 0 ? st.exit.stopLoss : null, tp = st.exit && st.exit.takeProfit > 0 ? st.exit.takeProfit : null;
   const hold = st.exit && st.exit.holdDays > 0 ? Math.round(st.exit.holdDays) : null;
   let i0 = 0, i1 = n - 1;
-  if (st.from) { const k = date.findIndex((d) => d >= st.from); if (k >= 0) i0 = k; }
+  // Start where every series the rules read has data (外資 / 散戶 history
+  // begins in 2023, a 60-day average needs 60 days), so the comparison with
+  // holding covers the same span the strategy could trade.
+  const used = [];
+  ent.concat(exAny).forEach((x) => { used.push(x.left); if (typeof x.right !== 'number') used.push(x.right); });
+  used.forEach((sr) => { const a = calc.get(sr); const k = a.findIndex((v) => v != null); if (k > i0) i0 = k; });
+  if (st.from) { const k = date.findIndex((d) => d >= st.from); if (k > i0) i0 = k; }
   if (st.to) { for (let k = n - 1; k >= 0; k--) if (date[k] <= st.to) { i1 = k; break; } }
   const trades = [], equity = new Array(n).fill(null);
   let pos = null, realized = 0, pendingEntry = false, pendingExit = false;
@@ -403,7 +409,7 @@ function BacktestWorkspace({ P, light }) {
             <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 4 }}>策略內容</div>
             <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.6 }}>{btStrategyText(st)}</div>
             <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
-              資料 {R.from} – {R.to}（{btN(R.days)} 個交易日）{D.src === 'short' ? ' · 目前只有約 8 個月日 K，歷史資料補齊後會自動延伸到 2020 年' : ''} · 每口{ct.label}每點 NT${ct.mult} · 已扣手續費、期交稅、滑價
+              回測期間 {R.from} – {R.to}（{btN(R.days)} 個交易日，從條件用到的資料都有的那天開始）{D.src === 'short' ? ' · 目前只有約 8 個月日 K' : ''} · 每口{ct.label}每點 NT${ct.mult} · 已扣手續費、期交稅、滑價
             </div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
