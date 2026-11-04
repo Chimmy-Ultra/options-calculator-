@@ -118,11 +118,9 @@ if future:
         line("7 期權快照", WARN, f"失敗：{type(e).__name__}: {str(e)[:90]}")
 
 print("─" * 52)
-print(f"\n{OK} 檢查完成。接著就能啟動 proxy：")
-print("    uvicorn main:app --host 127.0.0.1 --port 8720")
-print("  再另開一個終端機跑前端：")
-print("    cd ../design_handoff_options_lab && python3 -m http.server 8080")
-print("  瀏覽器開 http://localhost:8080，TXO 頂欄會顯示 ● SinoPac\n")
+print(f"\n{OK} 檢查完成。")
+print("  Mac：按兩下 repo 根目錄的 start-live.command，會自動啟動並打開 http://127.0.0.1:8720/")
+print("  手動：uvicorn main:app --host 127.0.0.1 --port 8720，再開 http://127.0.0.1:8720/（前端同一個 port）\n")
 try:
     api.logout()
 except Exception:

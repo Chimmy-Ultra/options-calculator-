@@ -715,3 +715,12 @@ async def positions(pid: str):
     result = {"positions": out}
     _cache_put(cache_key, result, POSITIONS_CACHE_TTL_S)
     return result
+
+
+# Serve the frontend from the same port, so one command gives the whole app at
+# http://127.0.0.1:8720/ with live data (the deployed https page cannot reach a
+# proxy on localhost). Mounted last: every /api route above wins over it.
+_FRONTEND = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "design_handoff_options_lab")
+if os.path.isdir(_FRONTEND):
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/", StaticFiles(directory=_FRONTEND, html=True), name="frontend")
