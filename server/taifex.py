@@ -348,15 +348,17 @@ def _pc_ratio() -> list:
     return [by_date[d] for d in sorted(by_date)]
 
 
-def _fetch_institutional(days: int = 12) -> dict:
-    """{date: {contract name: {身份別: net OI}}} for TX / MTX / TMF.
+def _fetch_institutional(days: int = 12, cids: tuple = INST_IDS) -> dict:
+    """{date: {contract name: {身份別: {long, short, net}}}} for TX / MTX / TMF:
+    each category's 多方 / 空方未平倉口數 and their 淨額 (_inst_net reduces it
+    to the net alone).
 
     This download rejects an end date that is not a trading day (weekends,
     holidays answer with an error page), so the end date steps back until the
     exchange accepts it. All three contracts must load, or the TX-equivalent
-    sum would be wrong."""
+    sum would be wrong. It serves at least four months in one request."""
     out: dict = {}
-    for cid in INST_IDS:
+    for cid in cids:
         rows, err = None, None
         for back in range(7):
             end = date.today() - timedelta(days=back)
@@ -369,11 +371,16 @@ def _fetch_institutional(days: int = 12) -> dict:
         if rows is None:
             raise err or ValueError("institutional download failed")
         for r in rows:
-            net = _num(r.get("多空未平倉口數淨額"))
-            if net is None:
+            net, lg, sh = (_num(r.get(c)) for c in ("多空未平倉口數淨額", "多方未平倉口數", "空方未平倉口數"))
+            if None in (net, lg, sh):
                 continue
-            out.setdefault(r["日期"], {}).setdefault(r["商品名稱"], {})[r["身份別"]] = int(net)
+            out.setdefault(r["日期"], {}).setdefault(r["商品名稱"], {})[r["身份別"]] = {"long": int(lg), "short": int(sh), "net": int(net)}
     return out
+
+
+def _inst_net(inst: dict) -> dict:
+    """{date: {contract name: {身份別: net OI}}} from _fetch_institutional."""
+    return {d: {n: {k: v["net"] for k, v in by.items()} for n, by in names.items()} for d, names in inst.items()}
 
 
 def _fetch_large_traders(days: int = 12) -> dict:
@@ -559,9 +566,19 @@ def _tx_equiv(by_contract: dict, who) -> float:
 
 def _fetch_fut_rows(commodity: str, days: int = 8) -> list:
     """Futures daily rows for one commodity over the last `days` calendar days:
-    [{date, month, session: day|night, o, h, l, c, v, settle, oi}] (outrights only)."""
+    [{date, month, session: day|night, o, h, l, c, v, settle, oi}] (outrights only).
+    The download refuses a range much over a month, so longer spans go in
+    30-day chunks."""
     today = date.today()
-    text = _fetch_csv(today - timedelta(days=days), today, url=FUT_CSV_URL, commodity=commodity)
+    start, out = today - timedelta(days=days), []
+    while start <= today:
+        end = min(start + timedelta(days=29), today)
+        out += _parse_fut_rows(_fetch_csv(start, end, url=FUT_CSV_URL, commodity=commodity), commodity)
+        start = end + timedelta(days=1)
+    return out
+
+
+def _parse_fut_rows(text: str, commodity: str) -> list:
     rows = list(csv.reader(io.StringIO(text)))
     if len(rows) < 2 or len(rows[0]) < 2 or rows[0][1].strip() != "契約":
         raise ValueError(f"futures download for {commodity} answered without a table")
@@ -587,6 +604,8 @@ def _retail_block(inst: dict, fut: dict) -> dict | None:
     market less the three institutional categories. Since retail long = OI −
     institutional long and retail short = OI − institutional short, the
     numerator is −(institutional net), so the ratio is −Σ三大法人淨未平倉 ÷ OI.
+    retailLong / retailShort are those two counts in contracts (Yuanta's
+    台指籌碼快訊 散戶多單 / 散戶空單).
     OI = the exchange's 未沖銷契約數 summed over every listed month (weeklies
     included) on the day-session rows."""
     out = {}
@@ -601,9 +620,12 @@ def _retail_block(inst: dict, fut: dict) -> dict | None:
             continue
         series = []
         for d in days:
-            inst_net = sum((inst[d].get(name) or {}).values())
-            series.append({"date": d, "oi": oi_by_day[d], "instNet": inst_net, "retailNet": -inst_net,
-                           "ratio": round(-inst_net / oi_by_day[d] * 100, 2) if oi_by_day[d] else None})
+            by = (inst[d].get(name) or {}).values()
+            inst_net, oi = sum(v["net"] for v in by), oi_by_day[d]
+            r_long, r_short = oi - sum(v["long"] for v in by), oi - sum(v["short"] for v in by)
+            series.append({"date": d, "oi": oi, "instNet": inst_net, "retailNet": -inst_net,
+                           "retailLong": r_long, "retailShort": r_short,
+                           "ratio": round(-inst_net / oi * 100, 2) if oi else None})
         cur = series[-1]
         prev = series[-2] if len(series) > 1 else None
         out[code] = {**cur, "label": label, "name": name, "prevDate": prev["date"] if prev else None,
@@ -704,7 +726,7 @@ async def market():
                                                      part(lambda: _fetch_fut_rows("MTX")), part(lambda: _fetch_fut_rows("TMF")))
     if not (pc or inst or large):
         return None
-    data = _market_blocks(pc, inst, large)
+    data = _market_blocks(pc, _inst_net(inst) if inst else None, large)
     if inst and (mtx or tmf):
         retail = _retail_block(inst, {"MTX": mtx, "TMF": tmf})
         if retail:
@@ -1672,6 +1694,23 @@ def history_oi_from_table(h: dict, tbl: dict, snap: dict) -> dict:
     return h
 
 
+def history_retail(h: dict, retail: dict | None) -> dict:
+    """Merge a retail block's series into h["retail"]: {code: [[date, ratio,
+    retailLong, retailShort, oi], ...]} oldest first, later runs replacing a
+    session by its date."""
+    cur = h.get("retail") or {}
+    for code, _, _ in RETAIL_CONTRACTS:
+        by = {r[0]: r for r in cur.get(code, [])}
+        for x in ((retail or {}).get(code) or {}).get("series") or []:
+            if "retailLong" in x:
+                by[x["date"]] = [x["date"], x["ratio"], x["retailLong"], x["retailShort"], x["oi"]]
+        if by:
+            cur[code] = [by[d] for d in sorted(by)]
+    if cur:
+        h["retail"] = cur
+    return h
+
+
 def history_merge(h: dict | None, snap: dict) -> dict:
     """Fold one snapshot into the history. Later snapshots of the same session
     replace earlier ones; nothing older is rewritten except by its own date."""
@@ -1698,6 +1737,7 @@ def history_merge(h: dict | None, snap: dict) -> dict:
         if f.get("prevDate") and f.get("prevNet") is not None and f["prevDate"] not in fx:
             fx[f["prevDate"]] = [f["prevDate"], f["prevNet"]]
     h["fx"] = [fx[d] for d in sorted(fx)]
+    history_retail(h, mk.get("retail"))
     oi = dict(h.get("oi", {}))
     oi[snap["date"]] = history_oi(snap)
     h["oi"] = {d: oi[d] for d in sorted(oi)[-HISTORY_OI_SESSIONS:]}
