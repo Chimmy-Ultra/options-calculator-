@@ -982,7 +982,9 @@ function Obsidian3() {
     if (liveBars && liveBars.length) return null; // connected but no daily 日盤 series yet — never mix in mock
     return window.genBars ? window.genBars({ spot: P.defaultSpot, n: 60, volScale: 1, product: P }) : null;
   }, [liveDayBars, liveBars, productId]);
-  const keyLevels = uM(() => computeKeyLevels({ bars: dayBars, today: taipeiDate(), profile: intradayData && intradayData.day ? intradayData.day.profile : null }), [dayBars, intradayData]);
+  // TXO: once the day session has closed, today's bar is final, so the
+  // pivots roll over to the next session (today = null keeps the last bar).
+  const keyLevels = uM(() => computeKeyLevels({ bars: dayBars, today: (P.oiSource === 'taifex' && taipeiNextSession()) ? null : taipeiDate(), profile: intradayData && intradayData.day ? intradayData.day.profile : null }), [dayBars, intradayData, productId]);
   const rangeLevels = uM(() => {
     const q = quoteNow || (live && live.quote);
     const today = (q && q.high > 0 && q.low > 0) ? { date: taipeiDate(), high: q.high, low: q.low } : { date: taipeiDate() };
@@ -1890,6 +1892,14 @@ function KeyLevelsPanel({ K, P, spot, light = false }) {
 function taipeiDate() {
   return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10).replace(/-/g, '');
 }
+// Whether the levels on screen are for the next session rather than today's:
+// after TAIFEX's day session closes (13:45 Taipei) the day bar is final and a
+// trader is planning the night session and tomorrow; on a weekend, Monday.
+function taipeiNextSession() {
+  const d = new Date(Date.now() + 8 * 3600 * 1000);
+  const wd = d.getUTCDay(), m = d.getUTCHours() * 60 + d.getUTCMinutes();
+  return wd === 0 || wd === 6 || m >= 13 * 60 + 45;
+}
 
 // The two lists side by side, 場外 at the far ends and 一壘 nearest the base
 // row in the middle — read it like a ladder. The next unreached level on
@@ -2314,13 +2324,17 @@ function heroLevels({ P, spot, L, K, cost }) {
 }
 
 function KeyLadderCard({ P, spot, L, K, cost }) {
+  const next = P.oiSource === 'taifex' && taipeiNextSession();
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
   const rows = heroLevels({ P, spot, L, K, cost });
   const above = rows.filter((r) => !r.spot && r.price > spot).pop();
   const below = rows.filter((r) => !r.spot && r.price < spot)[0];
   return (
     <div className="card" style={{ padding: '18px 18px 10px', minWidth: 0 }}>
-      <div style={{ fontSize: 17, fontWeight: 700 }}>今日關鍵價位</div>
+      <div style={{ fontSize: 17, fontWeight: 700, display: 'flex', alignItems: 'baseline', gap: 8 }}>
+        {next ? '下一交易日關鍵價位' : '今日關鍵價位'}
+        {K && <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--muted)' }}>依 {K.prevDate.slice(4, 6)}/{K.prevDate.slice(6)} 高低收</span>}
+      </div>
       <div style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 10px' }}>
         {above ? <>最近壓力 {above.name} <span style={{ color: 'var(--up)' }}>+{fmtP(above.price - spot)}</span></> : '上方沒有價位'}
         {' · '}
@@ -2420,7 +2434,7 @@ function HeroChartCard({ P, theme, I, K, bars, barsLive, live, barPeriodId, setB
         {[['壓力 R1 R2', 'var(--up)'], ['軸心 P', 'var(--muted)'], ['支撐 S1 S2', 'var(--down)']].map(([t, c]) => (
           <span key={t}><i style={{ display: 'inline-block', width: 14, height: 0, borderTop: `2px dashed ${c}`, verticalAlign: 'middle', marginRight: 5 }} />{t}</span>
         ))}
-        <span style={{ color: 'var(--muted)' }}>{lines.length ? '今日價位 · 由前一交易日高低收算出' : '週K / 月K 不畫單日價位'}</span>
+        <span style={{ color: 'var(--muted)' }}>{lines.length ? (K ? `${P.oiSource === 'taifex' && taipeiNextSession() ? '下一交易日' : '今日'}價位 · 由 ${K.prevDate.slice(4, 6)}/${K.prevDate.slice(6)} 高低收算出` : '') : '週K / 月K 不畫單日價位'}</span>
       </div>
     </div>
   );
