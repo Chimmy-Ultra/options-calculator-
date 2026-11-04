@@ -1070,7 +1070,7 @@ function Obsidian3() {
       )}
       {workspace === 'chart' && (
         <ChartWorkspace
-          P={P} bars={bars} barsLive={!!liveBars} live={live} theme={theme} light={light}
+          P={P} bars={bars} barsLive={!!liveBars} live={live} theme={theme} light={light} keyLevels={keyLevels}
           barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId}
           barSession={barSession} setBarSession={setBarSession}
           cone={levels.atmIv ? { ivPct: levels.atmIv, days: expiry.dte, label: expiry.label } : null}
@@ -2425,13 +2425,19 @@ function WatchWorkspace({ onPick, grid }) {
 
 // Top-level Chart tab (from the design): full-width candles + MA + RSI.
 // Desktop only — mobile keeps the K線 sub-tab inside Calc.
-function ChartWorkspace({ P, bars, barsLive, live, theme, light, barPeriodId, setBarPeriodId, barSession, setBarSession, cone = null, D, grid }) {
+function ChartWorkspace({ P, bars, barsLive, live, theme, light, barPeriodId, setBarPeriodId, barSession, setBarSession, cone = null, D, grid, keyLevels = null }) {
   const per = K_PERIODS.find((p) => p.id === barPeriodId) || K_PERIODS[0];
+  // Floor-trader pivots for the next session, from the last completed day
+  // (computeKeyLevels): P, R1/R2, S1/S2 only — R3/S3 sit too far out to matter
+  // on a normal day and crowd the scale.
+  const PIVOT_LINES = { R2: LEVEL_COLORS.up, R1: LEVEL_COLORS.up, P: '#cbd5e1', S1: LEVEL_COLORS.down, S2: LEVEL_COLORS.down };
+  const pivotLevels = keyLevels ? keyLevels.levels.filter((l) => PIVOT_LINES[l.key])
+    .map((l) => ({ price: l.price, label: `${l.key} ${l.price.toLocaleString()}`, color: PIVOT_LINES[l.key] })) : [];
   const panels = [{
     i: 'kline',
     title: <>K線 · {P.code} · {per.label}K<span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4 }}>· {barsLive ? `近月 · ${liveLabel(live, P)}` : '模擬'}</span></>,
     right: <div style={{ display: 'flex', gap: 8 }}><KSessionToggle value={barSession} onChange={setBarSession} /><KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} /></div>,
-    body: <PriceChart cone={cone}
+    body: <PriceChart cone={cone} levels={pivotLevels}
           bars={bars} theme={theme} code={P.code}
           periodLabel={`${per.label}K` + (barSession === 'full' ? ' · 全日盤' : ' · 日盤')}
           sourceLabel={barsLive
