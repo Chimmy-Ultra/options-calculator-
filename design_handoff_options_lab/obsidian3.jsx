@@ -535,16 +535,13 @@ const GRID_DEFAULTS = {
     { i: 'intraday',   x: 0, y: 34, w: 7, h: 12 },
     { i: 'gex',        x: 0, y: 46, w: 7, h: 11 },
     { i: 'pctrend',    x: 0, y: 57, w: 7, h: 14 },
-    { i: 'optinst',    x: 0, y: 71, w: 7, h: 16 },
-    { i: 'settlehist', x: 0, y: 87, w: 7, h: 12 },
-    { i: 'top20',      x: 0, y: 99, w: 7, h: 8 },
-    { i: 'keylevels',  x: 7, y: 0,  w: 5, h: 16 },
-    { i: 'range',      x: 7, y: 16, w: 5, h: 10 },
-    { i: 'optlarge',   x: 7, y: 26, w: 5, h: 14 },
-    { i: 'sessions',   x: 7, y: 40, w: 5, h: 8 },
-    { i: 'twse',       x: 7, y: 48, w: 5, h: 11 },
-    { i: 'premarket',  x: 7, y: 59, w: 5, h: 8 },
-    { i: 'dividends',  x: 7, y: 67, w: 5, h: 11 },
+    { i: 'settlehist', x: 0, y: 71, w: 7, h: 12 },
+    { i: 'top20',      x: 0, y: 83, w: 7, h: 8 },
+    { i: 'optlarge',   x: 7, y: 0,  w: 5, h: 14 },
+    { i: 'sessions',   x: 7, y: 14, w: 5, h: 8 },
+    { i: 'twse',       x: 7, y: 22, w: 5, h: 11 },
+    { i: 'premarket',  x: 7, y: 33, w: 5, h: 8 },
+    { i: 'dividends',  x: 7, y: 41, w: 5, h: 11 },
   ],
   chart: [{ i: 'kline', x: 0, y: 0, w: 12, h: 19 }],
   watch: [{ i: 'watch', x: 0, y: 0, w: 6, h: 21 }],
@@ -1855,45 +1852,6 @@ function computeKeyLevels({ bars, today, profile }) {
   return { levels, n, prevDate: String(prev.t).slice(0, 8), prev: { h: prev.h, l: prev.l, c: prev.c } };
 }
 
-// The list in price order with spot in the middle, a hit-rate bar per row.
-function KeyLevelsPanel({ K, P, spot, light = false }) {
-  const dim = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
-  if (!K) return <div className="mono" style={{ fontSize: 11, color: dim }}>日K不足，無法計算。</div>;
-  const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
-  const rows = [...K.levels, { key: 'SPOT', name: P.underlyingLabel || `現價 ${P.code}`, price: spot, hit: null, group: 'spot' }].sort((a, b) => b.price - a.price);
-  const col = (r) => r.group === 'spot' ? LEVEL_COLORS.spot : r.group === 'profile' ? LEVEL_COLORS.band : r.price > spot ? LEVEL_COLORS.up : r.price < spot ? LEVEL_COLORS.down : 'var(--text)';
-  return (
-    <div>
-      <div className="mono tnum" style={{ fontSize: 9.5, color: dim, marginBottom: 6 }}>
-        前日 {K.prevDate.slice(4, 6)}/{K.prevDate.slice(6)} 高 {fmtP(K.prev.h)} 低 {fmtP(K.prev.l)} 收 {fmtP(K.prev.c)} · 觸及率＝過去 {K.n} 個交易日中，隔日高／低碰到該價位的比例
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {rows.map((r) => {
-          const d = r.price - spot;
-          const isSpot = r.group === 'spot';
-          return (
-            <div key={r.key} style={{ display: 'grid', gridTemplateColumns: '92px 1fr auto 74px', gap: 8, alignItems: 'center', padding: '3px 8px',
-              background: isSpot ? 'rgba(240,192,104,0.08)' : 'transparent', border: `1px solid ${isSpot ? 'rgba(240,192,104,0.45)' : 'transparent'}` }}>
-              <span style={{ fontSize: 11, fontWeight: isSpot ? 700 : 600, color: col(r), whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</span>
-              <span className="tnum" style={{ fontSize: 14, fontWeight: 700, fontFamily: 'var(--font-mono)', color: col(r) }}>{fmtP(r.price)}</span>
-              <span className="tnum" style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: dim, whiteSpace: 'nowrap' }}>{isSpot ? '—' : `${d >= 0 ? '+' : '−'}${fmtP(Math.abs(d))}`}</span>
-              <span className="tnum" style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: dim, display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'flex-end' }}>
-                {r.hit != null ? (<>
-                  <span style={{ width: 36, height: 5, background: 'var(--border)', position: 'relative' }}><span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${Math.round(r.hit * 100)}%`, background: col(r) }} /></span>
-                  {Math.round(r.hit * 100)}%
-                </>) : (r.group === 'profile' ? '成交量分布' : '')}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-      <div className="mono" style={{ marginTop: 8, fontSize: 9.5, color: dim, lineHeight: 1.5 }}>
-        樞軸＝場內交易員慣用公式（Person 2004）：軸心 (高+低+收)÷3、壓力一 2×軸心−低、支撐一 2×軸心−高、壓力／支撐二 軸心±(高−低)、三 高+2(軸心−低)／低−2(高−軸心)。量價中心／價值區＝前一日成交量分布（Market Profile，Steidlmayer 1986）：最大量價位與涵蓋七成成交量的價帶；前日均價＝成交量加權均價。觸及率是本站用期交所日K實算，不是他人宣稱。
-      </div>
-    </div>
-  );
-}
-
 // Today's date in Taiwan (YYYYMMDD) — bars are stamped in exchange time.
 function taipeiDate() {
   return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10).replace(/-/g, '');
@@ -1906,56 +1864,6 @@ function taipeiNextSession() {
   const wd = d.getUTCDay(), m = d.getUTCHours() * 60 + d.getUTCMinutes();
   return wd === 0 || wd === 6 || m >= 13 * 60 + 45;
 }
-
-// The two lists side by side, 場外 at the far ends and 一壘 nearest the base
-// row in the middle — read it like a ladder. The next unreached level on
-// each side is highlighted; reached ones dim.
-function RangeLevelsPanel({ P, spot, R, light, sourceLabel }) {
-  const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
-  const dim = light ? 'rgba(20,30,50,0.55)' : 'rgba(255,255,255,0.55)';
-  const line = light ? 'rgba(25,40,70,0.18)' : 'rgba(255,255,255,0.12)';
-  if (!R) return <div className="mono" style={{ fontSize: 11, color: dim, padding: '6px 0' }}>需要一個月以上的日K才能計算。</div>;
-  // Reached = inside the session's range so far, not merely on the far side of
-  // the current price: once the day's range passes 一壘's distance both 一壘
-  // lie between the high and the low, and past twice that distance they swap
-  // order. spot only widens it under the What-if rail.
-  const hi = Math.max(R.base.high, spot), lo = Math.min(R.base.low, spot);
-  const nextUp = R.up.find((l) => l.price > hi);
-  const nextDown = R.down.find((l) => l.price < lo);
-  const Row = ({ l, side, hot }) => {
-    const reached = side === 'up' ? hi >= l.price : lo <= l.price;
-    const col = side === 'up' ? LEVEL_COLORS.up : LEVEL_COLORS.down;
-    const d = l.price - spot;
-    return (
-      <div title={`振幅 ${fmtP(l.dist)} 點`} style={{ display: 'grid', gridTemplateColumns: '34px 1fr auto', gap: 6, alignItems: 'baseline', padding: '4px 8px', borderRadius: 0, opacity: reached ? 0.45 : 1, whiteSpace: 'nowrap',
-        background: hot ? (side === 'up' ? 'rgba(239,83,80,0.10)' : 'rgba(38,166,154,0.10)') : 'transparent', border: `1px solid ${hot ? col : 'transparent'}` }}>
-        <span style={{ fontSize: 11.5, fontWeight: 700, color: col }}>{l.name}</span>
-        <span className="tnum" style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--font-mono)', color: reached ? dim : 'inherit' }}>{fmtP(l.price)}</span>
-        <span className="tnum" style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: dim }}>{`${d >= 0 ? '+' : '−'}${fmtP(Math.abs(d))}`}</span>
-      </div>
-    );
-  };
-  return (
-    <div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <div>
-          <div style={{ fontSize: 10.5, fontWeight: 700, color: LEVEL_COLORS.up, margin: '0 8px 4px', whiteSpace: 'nowrap' }}>上方關卡價<div className="tnum" style={{ color: dim, fontWeight: 500, fontSize: 9.5 }}>{R.base.running ? '今' : '前'}低 {fmtP(R.base.low)} ＋ 振幅</div></div>
-          {[...R.up].reverse().map((l) => <Row key={l.name} l={l} side="up" hot={nextUp && nextUp.name === l.name} />)}
-        </div>
-        <div>
-          <div style={{ fontSize: 10.5, fontWeight: 700, color: LEVEL_COLORS.down, margin: '0 8px 4px', whiteSpace: 'nowrap' }}>下方關卡價<div className="tnum" style={{ color: dim, fontWeight: 500, fontSize: 9.5 }}>{R.base.running ? '今' : '前'}高 {fmtP(R.base.high)} － 振幅</div></div>
-          {R.down.map((l) => <Row key={l.name} l={l} side="down" hot={nextDown && nextDown.name === l.name} />)}
-        </div>
-      </div>
-      <div className="mono tnum" style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${line}`, fontSize: 9.5, color: dim, display: 'flex', flexWrap: 'wrap', gap: '2px 12px' }}>
-        <span>近一個月（{R.n} 日）日盤振幅：最小 {fmtP(R.min)} · 三成分位 {fmtP(R.up[1].dist)} · 平均 {fmtP(Math.round(R.mean))} · 平均＋1σ {fmtP(R.up[3].dist)} · 最大 {fmtP(R.max)}</span>
-        <span>{R.from.slice(4, 6)}/{R.from.slice(6)}–{R.to.slice(4, 6)}/{R.to.slice(6)} · {sourceLabel}</span>
-        <span>一壘、三壘＝驗證自由人公式；二壘、全壘、場外為本站統計定義</span>
-      </div>
-    </div>
-  );
-}
-
 
 // Signed change, Taiwan colors (up = red, down = teal). fmt formats the magnitude.
 function Chg({ v, fmt = (x) => x.toLocaleString(), suffix = '' }) {
@@ -2143,9 +2051,9 @@ function IntradayPanel({ I, P, light = false }) {
         {Math.abs(fy(fMin) - fy(last[8])) > 12 && <text x={plotW + 6} y={fy(fMin) + 3} fontSize="9" fill={txt}>{fMin.toLocaleString()}</text>}
         {tag(fy(last[8]), `${last[8] > 0 ? '+' : ''}${last[8].toLocaleString()}`, cumCol)}
       </svg>
-      <div className="mono" style={{ marginTop: 6, fontSize: 9.5, color: dim }}>
+      <window.HowNote>
         成本線＝（當節最高＋最低）÷2，自由人公式，逢新高新低才移動 · 多空差額＝每分鐘（外盤量－內盤量）累計{I.flow === 'tick-type' ? '，內外盤依交易所成交別' : '，此處以 tick rule（上漲成交＝外盤、下跌＝內盤）近似，非交易所內外盤'}
-      </div>
+      </window.HowNote>
     </div>
   );
 }
@@ -2314,27 +2222,34 @@ function pivotLines(K) {
 }
 
 // Every level of today, high to low, with the price itself in its place.
-function heroLevels({ P, spot, L, K, cost }) {
+function heroLevels({ P, spot, L, K, cost, R }) {
   const out = [];
-  const add = (key, name, note, price) => { if (Number.isFinite(price)) out.push({ key, name, note, price }); };
+  const add = (key, name, note, price, minor) => { if (Number.isFinite(price)) out.push({ key, name, note, price, minor }); };
   if (L.resistance) add('wallC', '壓力', 'Call 未平倉最大', L.resistance.strike);
   if (L.support) add('wallP', '支撐', 'Put 未平倉最大', L.support.strike);
   if (L.maxPain) add('mp', '最大痛苦點', '結算時買方最虧', L.maxPain.strike);
   if (cost != null) add('cost', '成本線', '前日高低中點', cost);
   if (K) {
     const names = { R2: '壓力二', R1: '壓力一', P: '軸心', S1: '支撐一', S2: '支撐二' };
-    K.levels.filter((l) => names[l.key]).forEach((l) => add(l.key, l.key, names[l.key], l.price));
+    K.levels.filter((l) => names[l.key]).forEach((l) => add(l.key, l.key, `${names[l.key]}${l.hit != null ? ` · 觸及 ${Math.round(l.hit * 100)}%` : ''}`, l.price));
+  }
+  // 自由人's range levels (一壘 = the month's smallest range, 三壘 = its mean) from the previous high / low.
+  if (R) {
+    [[0, '一壘', '最小振幅'], [2, '三壘', '平均振幅']].forEach(([k, n, note]) => {
+      add(`u${k}`, `上${n}`, `前低＋${note}`, R.up[k].price, true);
+      add(`d${k}`, `下${n}`, `前高－${note}`, R.down[k].price, true);
+    });
   }
   out.push({ key: 'spot', name: '現價', note: P.underlyingLabel || `${P.nameZh || P.name} 近月`, price: spot, spot: true });
   return out.sort((a, b) => b.price - a.price || (a.spot ? 1 : -1));
 }
 
-function KeyLadderCard({ P, spot, L, K, cost }) {
+function KeyLadderCard({ P, spot, L, K, cost, R }) {
   const next = P.oiSource === 'taifex' && taipeiNextSession();
   const fmtP = (v) => v.toLocaleString(undefined, { maximumFractionDigits: P.eighth ? 3 : P.strikeStep < 10 ? 2 : 0 });
-  const rows = heroLevels({ P, spot, L, K, cost });
-  const above = rows.filter((r) => !r.spot && r.price > spot).pop();
-  const below = rows.filter((r) => !r.spot && r.price < spot)[0];
+  const rows = heroLevels({ P, spot, L, K, cost, R });
+  const above = rows.filter((r) => !r.spot && !r.minor && r.price > spot).pop();
+  const below = rows.filter((r) => !r.spot && !r.minor && r.price < spot)[0];
   return (
     <div className="card" style={{ padding: '18px 18px 10px', minWidth: 0 }}>
       <div style={{ fontSize: 17, fontWeight: 700, display: 'flex', alignItems: 'baseline', gap: 8 }}>
@@ -2352,14 +2267,14 @@ function KeyLadderCard({ P, spot, L, K, cost }) {
         return (
           <div key={r.key} style={{
             display: 'grid', gridTemplateColumns: '1fr auto 70px', alignItems: 'center', gap: 10,
-            padding: r.spot ? '10px 8px' : '8px 8px', margin: r.spot ? '4px 0' : 0, borderRadius: r.spot ? 10 : 0,
+            padding: r.spot ? '10px 8px' : r.minor ? '4px 8px' : '8px 8px', margin: r.spot ? '4px 0' : 0, borderRadius: r.spot ? 10 : 0, opacity: r.minor ? 0.8 : 1,
             background: r.spot ? 'var(--chip)' : 'transparent', borderBottom: r.spot ? 'none' : '1px solid var(--border)',
           }}>
             <div style={{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              <b style={{ fontSize: 13.5, fontWeight: 700, marginRight: 7 }}>{r.name}</b>
+              <b style={{ fontSize: r.minor ? 12.5 : 13.5, fontWeight: r.minor ? 600 : 700, marginRight: 7, color: r.minor ? 'var(--text2)' : undefined }}>{r.name}</b>
               <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{r.note}</span>
             </div>
-            <span className="mono tnum" style={{ fontSize: r.spot ? 19 : 17, fontWeight: 650, color: col }}>{fmtP(r.price)}</span>
+            <span className="mono tnum" style={{ fontSize: r.spot ? 19 : r.minor ? 14.5 : 17, fontWeight: r.minor ? 550 : 650, color: col }}>{fmtP(r.price)}</span>
             <span className="mono tnum" style={{
               justifySelf: 'end', width: 66, textAlign: 'center', padding: '4px 0', borderRadius: 6, fontSize: 12, fontWeight: 700,
               background: r.spot ? 'var(--text)' : d > 0 ? 'var(--up)' : 'var(--down)', color: r.spot ? 'var(--bg)' : '#fff',
@@ -2528,13 +2443,11 @@ function SmartMoneyGrid({ X, M, L, P, spot, expiry, G }) {
       const r = inst.rows[k];
       if (!r) return;
       const net = r.call.netOi - r.put.netOi; // >0: call-heavy (bullish lean)
-      const fut = k === 'foreign' && M && M.foreign ? M.foreign : null;
       cards.push(<SmartCard key={k} title={`${name} · 臺指選擇權`}
         big={signed(r.call.netOi)} bigColor={r.call.netOi >= 0 ? 'var(--up)' : 'var(--down)'} bigNote="買權淨未平倉（口）"
         lines={[
           { k: '買權淨', v: `${signed(r.call.netOi)} 口`, ...(tagOf(r.call.chgOi) || {}) },
           { k: '賣權淨', v: `${signed(r.put.netOi)} 口`, ...(tagOf(r.put.chgOi) || {}) },
-          ...(fut ? [{ k: '期貨淨', v: `${signed(fut.net)} 口`, ...(tagOf(fut.chg) || {}) }] : []),
         ]}
         date={date(inst.date)}
         ring={<Ring parts={[
@@ -2555,17 +2468,6 @@ function SmartMoneyGrid({ X, M, L, P, spot, expiry, G }) {
       date={date(large.date)}
       ring={<Ring parts={[{ v: a.call.top10.buy, color: '#ef5350' }, { v: a.call.top10.sell, color: 'rgba(239,83,80,0.38)' }, { v: a.put.top10.buy, color: '#26a69a' }, { v: a.put.top10.sell, color: 'rgba(38,166,154,0.38)' }]}
         center={`${Math.round(a.call.top10.sellPct)}%`} sub="買權賣方佔比" />} />);
-  }
-  if (M && M.retail && M.retail.MTX) {
-    const m = M.retail.MTX, t = M.retail.TMF;
-    cards.push(<SmartCard key="retail" title="散戶多空比"
-      big={`${m.ratio >= 0 ? '+' : ''}${m.ratio.toFixed(2)}%`} bigColor={m.ratio >= 0 ? 'var(--up)' : 'var(--down)'} bigNote={`小台 · 散戶${m.ratio >= 0 ? '偏多' : '偏空'}（反向看）`}
-      lines={[
-        { k: '小台', v: `${m.ratio.toFixed(2)}%`, ...(m.chg != null ? { tag: `${m.chg >= 0 ? '+' : '−'}${Math.abs(m.chg).toFixed(2)} 較前日`, tagColor: m.chg >= 0 ? 'var(--up)' : 'var(--down)' } : {}) },
-        ...(t ? [{ k: '微台', v: `${t.ratio.toFixed(2)}%`, ...(t.chg != null ? { tag: `${t.chg >= 0 ? '+' : '−'}${Math.abs(t.chg).toFixed(2)} 較前日`, tagColor: t.chg >= 0 ? 'var(--up)' : 'var(--down)' } : {}) }] : []),
-      ]}
-      date={date(m.date)}
-      ring={<Ring parts={[{ v: Math.max(0, 50 + m.ratio / 2), color: '#ef5350' }, { v: Math.max(0, 50 - m.ratio / 2), color: '#26a69a' }]} center={`${m.ratio.toFixed(0)}%`} sub="小台 多−空" />} />);
   }
   // Dealer gamma regime for the expiry on screen (computeGex): above the
   // zero-gamma level dealers' hedging leans against the move, below it chases.
@@ -2624,7 +2526,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expi
   if (L.resistance) chartLevels.push({ price: L.resistance.strike, label: '壓力 Call OI最大', color: LEVEL_COLORS.up });
   if (L.support) chartLevels.push({ price: L.support.strike, label: '支撐 Put OI最大', color: LEVEL_COLORS.down });
   // The nearer unreached 一壘 for the strip tile — his header's 「距一壘 … 差 N 點」.
-  // Unreached = outside the session's range so far (see RangeLevelsPanel).
+  // Unreached = outside the session's range so far.
   const near1B = (() => {
     if (!R) return null;
     const hi = Math.max(R.base.high, spot), lo = Math.min(R.base.low, spot);
@@ -2730,10 +2632,6 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expi
           <span>權利金：{isLive ? `● ${liveLabel(live, P)}` : '○ 模擬'}</span>
         </div>
       </>) },
-    { i: 'range', title: '關卡價 · 振幅', hk: 'rangelevels', right: gridCap('近一個月振幅'),
-      body: <RangeLevelsPanel P={P} spot={spot} R={R} light={light} sourceLabel={rangeSource} /> },
-    { i: 'keylevels', title: '關鍵價位 · 歷史觸及率', hk: 'keylevels', right: gridCap(K ? `樣本 ${K.n} 日 · ${rangeSource}` : ''),
-      body: <KeyLevelsPanel K={K} P={P} spot={spot} light={light} /> },
     { i: 'kline', title: <>台指期 {barSession === 'full' ? '全日盤' : '日盤'} {per.label}K · 關卡價位<span style={{ color: 'var(--text2)', fontWeight: 500, marginLeft: 4 }}>· {barsLive ? liveLabel(live, P) : '模擬'}</span></>,
       right: <div style={{ display: 'flex', gap: 8 }}><KSessionToggle value={barSession} onChange={setBarSession} /><KPeriodToggle value={barPeriodId} onChange={setBarPeriodId} /></div>,
       body: <PriceChart bars={bars} theme={theme} code={P.code} periodLabel={`${per.label}K`} levels={chartLevels}
@@ -2766,14 +2664,12 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expi
       right: <span className="mono tnum" style={{ fontSize: 9.5, opacity: 0.7 }}>{G ? <>總 GEX <b style={{ color: G.total >= 0 ? LEVEL_COLORS.up : LEVEL_COLORS.down }}>{fmtBig(G.total, P)}</b>/1%{G.flip != null ? ` · 零 Gamma ${fmtP(Math.round(G.flip))}` : ''} · </> : ''}{oiLabel}</span>,
       body: (<>
         {G ? <GexProfile P={P} spot={spot} G={G} theme={theme} light={light} maxRows={15} /> : <div className="mono" style={{ fontSize: 11, color: dim }}>沒有 OI 或 IV，無法計算。</div>}
-        <div className="mono" style={{ marginTop: 8, fontSize: 9.5, color: dim }}>
+        <window.HowNote>
           GEX = γ × OI × {P.mult} × S² × 1%，Call 為正、Put 為負（SqueezeMetrics 的造市者存貨慣例：Call 多 Gamma／Put 空 Gamma）。零 Gamma 以上造市者順勢對沖壓抑波動，以下追價放大波動。OI 為前一交易日。
-        </div>
+        </window.HowNote>
       </>) },
     { i: 'pctrend', title: 'P/C 比趨勢 · 未平倉／成交量', hk: 'pcratio',
       right: gridCap(pc ? `期交所 ${pc.date} · 前一交易日` : ''), body: <PcTrendPanel M={M} H={H} light={light} /> },
-    { i: 'optinst', title: '三大法人 · 臺指選擇權買賣權',
-      right: gridCap(X.optpos && X.optpos.inst ? `期交所 ${X.optpos.inst.date} · 前一交易日` : ''), body: <OptInstPanel O={X.optpos} light={light} /> },
     { i: 'optlarge', title: '大額交易人 · 臺指選擇權 · 台指期',
       right: gridCap(X.optpos && X.optpos.large ? `期交所 ${X.optpos.large.date} · 前一交易日` : ''), body: <OptLargePanel O={X.optpos} M={M} light={light} /> },
     { i: 'settlehist', title: '結算歷史 · 最後結算價 · 歸零比例',
@@ -2804,7 +2700,7 @@ function LevelsWorkspace({ P, theme = 'dark', light = false, spot, spotChg, expi
   return (
     <div style={GRID_BODY}>
       <div className="lv-hero">
-        <KeyLadderCard P={P} spot={spot} L={L} K={K} cost={cost} />
+        <KeyLadderCard P={P} spot={spot} L={L} K={K} cost={cost} R={R} />
         <HeroChartCard P={P} theme={theme} I={I} K={K} bars={bars} barsLive={barsLive} live={live}
           barPeriodId={barPeriodId} setBarPeriodId={setBarPeriodId} barSession={barSession} setBarSession={setBarSession}
           cone={L.atmIv ? { ivPct: L.atmIv, days: expiry.dte, label: expiry.label } : null} />
