@@ -213,10 +213,10 @@ function ImpliedDistCard({ E, spot, marks = [], light }) {
           </div>
         </div>
       </div>
-      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, lineHeight: 1.6 }}>
+      <window.HowNote>
         彩色山形 = 選擇權報價隱含的結算價分布（Breeden–Litzenberger：買權價格對履約價的二次微分），底下的粗線是 68% 區間；灰色虛線 = 只用價平 IV 的常態假設。
         彩色曲線左邊比虛線厚，代表市場替「大跌」付了比較多的保險費。這是風險中立機率，不是預測。資料：期交所 {E.date} 各履約價結算價反推的 IV。
-      </div>
+      </window.HowNote>
     </div>
   );
 }
@@ -341,9 +341,9 @@ function BacktestCard({ H, bars, light }) {
           <div style={{ marginTop: 6 }}>隔天 t = {cur.r.r1.t != null ? cur.r.r1.t.toFixed(2) : '—'} · 5 天 t = {cur.r.r5.t != null ? cur.r.r5.t.toFixed(2) : '—'}</div>
         </div>
       </div>
-      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10, lineHeight: 1.6 }}>
+      <window.HowNote>
         方法：指標是當天收盤後公布的數字，報酬是台指期近月日盤收盤到下一個（或第 5 個）交易日收盤。t 為 Welch 檢定；5 天報酬彼此重疊，t 已除以 √5 校正。幾個月的資料只能看出很大的效果，「看不出差別」不代表指標沒用，只代表目前證據不夠。
-      </div>
+      </window.HowNote>
     </div>
   );
 }
@@ -579,12 +579,12 @@ function GexVolCard({ light }) {
           ...G.p.map((v, k) => <span key={`${lab}${k}`} className="mono tnum" style={{ padding: '5px 0', borderBottom: '1px solid var(--border)' }}>{pts(v)} 點內</span>),
         ])}
       </div>
-      <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 12, lineHeight: 1.7 }}>
+      <window.HowNote>
         注意：GEX 用的是美股慣例（假設造市商買 Call、賣 Put）。台指選很多散戶在當賣方，造市商站哪一邊不一定一樣
         {dl ? `；期交所 ${E.optPositions.inst.date} 自營商買權淨 ${dl.call.netOi >= 0 ? '+' : ''}${dl.call.netOi.toLocaleString()} 口、賣權淨 ${dl.put.netOi >= 0 ? '+' : ''}${dl.put.netOi.toLocaleString()} 口（自營商也包含自營部位，不全是造市）` : ''}。
         檢定方法：隔天振幅對「今天振幅、近 5 日平均、近 20 日平均、隔天是否結算日、負 Gamma」做迴歸（HAR 模型），t 值用 Newey–West 修正波動群聚；逐年是否同方向比單一 t 值可靠。
         總 GEX 主要由隔天到期的那一批決定，負 Gamma 的 {V.neg.n} 天裡有 {V.negExp} 天是結算前一天。
-      </div>
+      </window.HowNote>
     </div>
   );
 }

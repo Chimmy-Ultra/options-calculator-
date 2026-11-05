@@ -60,11 +60,11 @@ const HELP_COPY = {
 const HELP_SECTIONS = [
   { id: 'levels', tabs: ['levels'], title: '關卡頁 · 當沖怎麼看', paras: [
     '左邊「今日關鍵價位」把今天要注意的價位由高到低排好，現價夾在中間，每個價位右邊是離現價幾點（紅 = 上方壓力、綠 = 下方支撐）。',
-    '包含：壓力 / 支撐（買權 / 賣權未平倉最大的履約價）、最大痛苦點、成本線，以及樞軸 P、R1、R2、S1、S2（用前一交易日的高、低、收算出）。',
+    '包含：壓力 / 支撐（買權 / 賣權未平倉最大的履約價）、最大痛苦點、成本線，樞軸 P、R1、R2、S1、S2（用前一交易日的高、低、收算出，「觸及 %」= 過去隔天真的碰到這個價位的比例），以及自由人的一壘、三壘（字比較淡；上一壘 = 前低＋最小振幅、下一壘 = 前高－最小振幅，三壘用平均振幅）。',
     '中間的走勢圖可切「當日」1 / 5 / 15 / 30 / 60 分 K（日盤或全日盤），或日 K、週 K、月 K；P、R1、R2、S1、S2 直接畫在當日和日 K 上。',
-    '右邊四張卡：外資期貨淨部位、P/C 未平倉比、十大交易人、散戶多空比。往下捲是「籌碼總覽」：外資、投信、自營商、大額交易人、散戶各自偏多還是偏空；圓環顏色：深紅 = 買權買方、淺紅 = 買權賣方、深綠 = 賣權買方、淺綠 = 賣權賣方。',
+    '右邊四張卡：外資期貨淨部位、P/C 未平倉比、十大交易人、散戶多空比。往下捲是「籌碼總覽」：外資、投信、自營商、大額交易人的選擇權部位，Gamma 環境和預期波動；圓環顏色：深紅 = 買權買方、淺紅 = 買權賣方、深綠 = 賣權買方、淺綠 = 賣權賣方。',
     '籌碼和未平倉都是期交所收盤後公布的「前一交易日」資料，每個交易日約 16:30 更新。',
-    '最下面「更多分析」是其他圖表（各履約價未平倉、Gamma 曝險、關卡價、歷史觸及率…），按右上「調整版面」可以拖曳、縮放。',
+    '最下面「更多分析」是其他圖表（散戶多空比走勢、各履約價未平倉、Gamma 曝險…），按右上「調整版面」可以拖曳、縮放。公式和資料來源收在每張卡下面的「ⓘ 怎麼算的」。',
   ] },
   { id: 'labs', tabs: ['levels'], title: '✨ 實驗室精選', paras: [
     '市場隱含機率地圖：把每個到期日所有履約價的權利金，換算成「市場認為結算價會落在哪」的分布（Breeden–Litzenberger：買權價格對履約價的二次微分）。山越高的地方越可能；底下粗線是 68% 區間；灰色虛線是只用價平 IV 的常態假設，彩色曲線左尾比它厚，代表市場替大跌付了比較多保險費。游標移到任何價位，右邊表格就列出每個到期日結算在那個價位以上／以下的機率。這是風險中立機率，不是預測。',
@@ -211,4 +211,15 @@ function HelpDrawer({ open, onClose, workspace }) {
   );
 }
 
-Object.assign(window, { HELP_COPY, HELP_SECTIONS, HelpTip, HelpDrawer });
+// 「怎麼算的」: a panel's formula / source note, folded away until asked for.
+function HowNote({ children, label = '怎麼算的' }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button onClick={() => setOpen((v) => !v)} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11.5, color: 'var(--muted)' }}>ⓘ {label} {open ? '▴' : '▾'}</button>
+      {open && <div style={{ fontSize: 11.5, color: 'var(--text2)', marginTop: 4, lineHeight: 1.6 }}>{children}</div>}
+    </div>
+  );
+}
+
+Object.assign(window, { HELP_COPY, HELP_SECTIONS, HelpTip, HelpDrawer, HowNote });

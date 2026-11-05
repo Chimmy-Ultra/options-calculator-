@@ -20,8 +20,8 @@ const psCell = { fontFamily: 'var(--font-mono)', textAlign: 'right', whiteSpace:
 function PsLead({ children }) {
   return <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.4, marginBottom: 8 }}>{children}</div>;
 }
-function PsNote({ children, light }) {
-  return <div className="mono" style={{ fontSize: 9.5, color: psDim(light), marginTop: 8, lineHeight: 1.5 }}>{children}</div>;
+function PsNote({ children }) {
+  return <window.HowNote>{children}</window.HowNote>;
 }
 function PsEmpty({ children, light }) {
   return <div className="mono" style={{ fontSize: 11, color: psDim(light) }}>{children}</div>;
@@ -64,52 +64,10 @@ function PsTable({ head, rows, light, cols }) {
 const psNetWord = (v) => (v > 0 ? '淨多' : v < 0 ? '淨空' : '持平');
 const psMove = (v, unit) => (v == null ? '' : v === 0 ? '與前一交易日持平' : `比前一交易日往${v > 0 ? '多' : '空'}方移 ${psAbs(v)} ${unit}`);
 
-// ── 1. 三大法人 TXO 買賣權 ─────────────────────────────────────────────────
-const PS_WHO = { foreign: '外資', trust: '投信', dealer: '自營商' };
-function OptInstPanel({ O, light }) {
-  const [who, setWho] = psS('foreign');
-  const I = O && O.inst;
-  if (!I || !I.rows) return <PsEmpty light={light}>期交所選擇權三大法人資料未載入。</PsEmpty>;
-  const r = I.rows[who] || I.rows.foreign;
-  const c = r && r.call, p = r && r.put;
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
-        <PsSeg items={Object.keys(PS_WHO).map((k) => ({ id: k, label: PS_WHO[k] }))} value={who} onChange={setWho} />
-      </div>
-      {c && p && <PsLead>
-        {PS_WHO[who]}買權<span style={{ color: psCol(c.netOi) }}>{psNetWord(c.netOi)} {psAbs(c.netOi)} 口</span>（{psMove(c.chgOi, '口')}），
-        賣權<span style={{ color: psCol(p.netOi) }}>{psNetWord(p.netOi)} {psAbs(p.netOi)} 口</span>（{psMove(p.chgOi, '口')}）
-      </PsLead>}
-      <div style={{ display: 'grid', gridTemplateColumns: '64px 1fr 1fr', gap: 6, alignItems: 'end', fontSize: 9.5, color: psDim(light), borderBottom: '1px solid var(--border)', paddingBottom: 2 }}>
-        <span>身份別</span><span style={{ textAlign: 'right' }}>買權淨未平倉（億 / 口）</span><span style={{ textAlign: 'right' }}>賣權淨未平倉（億 / 口）</span>
-      </div>
-      {Object.keys(PS_WHO).map((k) => {
-        const x = I.rows[k];
-        if (!x) return null;
-        const cell = (s) => (s ? <PsTwo color={psCol(s.netAmt)} big={`${psSigned(psYi(s.netAmt), 2)}億`}
-          small={<>{psSigned(s.netOi)} 口 · 較前日 <span style={{ color: psCol(s.chgOi) }}>{psSigned(s.chgOi)}</span></>} /> : '—');
-        return (
-          <div key={k} style={{ display: 'grid', gridTemplateColumns: '64px 1fr 1fr', gap: 6, alignItems: 'center', padding: '4px 0', borderBottom: '1px solid var(--border)', fontWeight: k === who ? 700 : 500 }}>
-            <span style={{ fontSize: 11.5 }}>{PS_WHO[k]}</span>{cell(x.call)}{cell(x.put)}
-          </div>
-        );
-      })}
-      <div className="mono" style={{ fontSize: 9.5, color: psDim(light), margin: '8px 0 3px' }}>{PS_WHO[who]} · 近 {I.series.length} 個交易日</div>
-      <PsTable light={light} cols="44px 1fr 1fr 1fr 1fr" head={['日期', '買權淨口', '買權淨億', '賣權淨口', '賣權淨億']}
-        rows={I.series.slice().reverse().map((d) => {
-          const v = d[who] || [];
-          return [psMd(d.date), <span style={{ color: psCol(v[0]) }}>{psSigned(v[0])}</span>, psSigned(psYi(v[2]), 2),
-            <span style={{ color: psCol(v[1]) }}>{psSigned(v[1])}</span>, psSigned(psYi(v[3]), 2)];
-        })} />
-      <PsNote light={light}>淨未平倉 = 買方未平倉 − 賣方未平倉（期交所「選擇權買賣權分計」）。契約金額為權利金市值，千元 ÷ 10 萬 = 億。買權淨多不等於看多、賣權淨多也不等於看空，要看是買方還是賣方部位。</PsNote>
-    </div>
-  );
-}
-
 // ── 2. 選擇權大額交易人 + 台指期前五大 / 特定法人 ──────────────────────────
 const PS_LARGE_FILTERS = [{ id: 'all', label: '全部月份' }, { id: 'weekly', label: '週選' }, { id: 'front', label: '近月' }];
 const PS_LARGE_ROWS = [['top5', '前五大'], ['top10', '前十大'], ['specific', '前十大中特定法人']];
+
 function OptLargePanel({ O, M, light }) {
   const [f, setF] = psS('all');
   const L = O && O.large;
@@ -627,4 +585,4 @@ function MarginPanel({ legs, rows, dte, M, P, idx, idxLabel, spot, iv, light }) 
   );
 }
 
-Object.assign(window, { OptInstPanel, OptLargePanel, PcTrendPanel, RetailPanel, RetailChartsPanel, SessionsPanel, DividendsPanel, SettleHistPanel, IvHistPanel, ProbPanel, MarginPanel, computeMargin });
+Object.assign(window, { OptLargePanel, PcTrendPanel, RetailPanel, RetailChartsPanel, SessionsPanel, DividendsPanel, SettleHistPanel, IvHistPanel, ProbPanel, MarginPanel, computeMargin });
